@@ -1,0 +1,995 @@
+# Package & Service Interface Design
+
+## Overview
+
+This document defines how the sandbox manager should expose a simple API for declaring packages (runtimes, CLIs, libraries) and services (databases, caches, message brokers) in a config file. The design draws from Devbox, devenv, devcontainer.json, and Docker Compose patterns.
+
+---
+
+## 1. Design Principles
+
+1. **Declarative, not imperative** -- users describe *what* they need, not *how* to install it.
+2. **Simple defaults, powerful overrides** -- a one-line include for common stacks; full control for advanced users.
+3. **Self-documenting** -- the config generates `AGENTS.md`/`CLAUDE.md` with connection strings, ports, and credentials.
+4. **Portable** -- same config works locally (Docker), in the cloud (Fly.io, Modal), and in CI.
+5. **Lockable** -- a lock file pins exact versions for reproducibility.
+6. **Composable** -- monorepo support via `include`/`import` directives.
+
+---
+
+## 2. Config Schema (sandbox.yaml)
+
+```yaml
+# sandbox.yaml
+version: 1
+
+# ----- Project Metadata -----
+name: my-project
+description: A Node.js + PostgreSQL API
+
+# ----- Base Image -----
+# Optional: use a prebuilt image instead of building from packages
+# image: ghcr.io/myorg/dev-env:latest
+
+# ----- Runtimes / Languages -----
+languages:
+  node:
+    version: "20"
+    package_manager: pnpm
+  python:
+    version: "3.12"
+    package_manager: poetry
+
+# ----- System Packages -----
+packages:
+  apt:
+    - curl
+    - git
+    - jq
+    - postgresql-client
+    - redis-tools
+  nix:
+    - ripgrep
+    - fd
+  pip:
+    - pytest
+    - black
+  npm:
+    - typescript
+    - vite
+
+# ----- Tools & CLIs -----
+tools:
+  gh: latest          # GitHub CLI
+  aws-cli: "2"        # AWS CLI v2
+  terraform: "1.7"
+
+# ----- Services (infrastructure dependencies) -----
+services:
+  postgres:
+    image: postgres:16-alpine
+    version: "16"
+    port: 5432
+    databases:
+      - name: myapp
+    users:
+      - name: app
+        password: devpassword
+    extensions:
+      - postgis
+      - pgvector
+    init_sql: |
+      CREATE TABLE IF NOT EXISTS migrations (id SERIAL PRIMARY KEY);
+    exposed: true        # expose to host (default: true for local dev)
+
+  redis:
+    image: redis:7-alpine
+    version: "7"
+    port: 6379
+    password: null       # no auth for dev
+    exposed: true
+
+  mongodb:
+    image: mongo:7
+    version: "7"
+    port: 27017
+    root_user: admin
+    root_password: devpassword
+    databases:
+      - name: myapp
+    exposed: true
+
+# ----- Environment Variables (auto-generated) -----
+env:
+  NODE_ENV: development
+  LOG_LEVEL: debug
+
+# ----- Lifecycle Hooks -----
+hooks:
+  post-start:
+    - command: ./scripts/run-migrations.sh
+    - command: npx prisma db push
+    - inline: |
+        echo "Dev environment ready!"
+        echo "API: http://localhost:3000"
+        echo "DB: postgresql://app:devpassword@localhost:5432/myapp"
+
+# ----- Script Aliases -----
+scripts:
+  dev: "npm run dev"
+  test: "npm test"
+  lint: "npm run lint"
+  db:reset: "npm run db:reset"
+  build: "npm run build"
+
+# ----- Plugin Overrides -----
+plugins:
+  - source: sandbox-manager/build-cache
+    config:
+      registry: ghcr.io/myorg/cache
+```
+
+---
+
+## 3. Packages: The Simple String+Version Format
+
+The simplest way to declare a package is by name with optional version:
+
+```yaml
+packages:
+  apt:
+    - curl
+    - git@2.40     # version pinning
+```
+
+Each package manager namespace resolves to a different installation mechanism:
+
+| Namespace | Mechanism | Example |
+|-----------|-----------|---------|
+| `apt:` | System package (Debian/Ubuntu) | `build-essential` |
+| `npm:` | Node.js package | `typescript@5.4` |
+| `pip:` | Python package | `pytest@8.0` |
+| `nix:` | Nix package (any) | `ripgrep@latest` |
+| `cargo:` | Rust crate | `bat` |
+| `go:` | Go module | `golang.org/x/tools` |
+| `gem:` | Ruby gem | `rails@7.1` |
+
+### Package Object Form (for advanced options)
+
+```yaml
+packages:
+  apt:
+    - name: python3
+      version: "3.12"
+      arch: [amd64, arm64]
+  npm:
+    - name: typescript
+      version: "5.4"
+      global: true
+  pip:
+    - name: torch
+      version: "2.2"
+      index_url: https://download.pytorch.org/whl/cu121
+```
+
+---
+
+## 4. Languages: High-Level Runtime Abstractions
+
+Languages are a higher-level abstraction over packages. They handle:
+- Installing the correct runtime version
+- Setting up the package manager
+- Configuring environment variables
+- Installing common tooling (linters, formatters, debuggers)
+
+### Node.js
+
+```yaml
+languages:
+  node:
+    version: "20"              # or "lts", "18", "22"
+    package_manager: pnpm      # npm, yarn, pnpm (default: npm)
+    install_deps: true         # run `pnpm install` on start
+    global_packages:
+      - typescript
+      - vite
+```
+
+Generates:
+```dockerfile
+FROM node:20-slim
+RUN corepack enable && corepack prepare pnpm@latest --activate
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install
+```
+
+### Python
+
+```yaml
+languages:
+  python:
+    version: "3.12"
+    package_manager: poetry    # pip, poetry, uv, pipenv
+    install_deps: true         # run `poetry install` on start
+    dev_dependencies:
+      - pytest
+      - black
+      - mypy
+```
+
+Generates:
+```dockerfile
+FROM python:3.12-slim
+RUN pip install poetry
+COPY pyproject.toml poetry.lock ./
+RUN poetry install
+```
+
+### Poetry-Specific Details
+
+Poetry is a Python packaging and dependency manager. In the sandbox:
+
+```yaml
+languages:
+  python:
+    version: "3.12"
+    package_manager: poetry
+    poetry:
+      install: true                       # `poetry install` on build
+      create_venv: true                   # create .venv in project
+      config:
+        virtualenvs.in-project: true
+        virtualenvs.create: true
+    env:
+      POETRY_VIRTUALENVS_IN_PROJECT: true
+```
+
+**Source**: Devbox Python/Poetry template (https://www.jetify.com/devbox/templates/python-poetry)
+
+### Go
+
+```yaml
+languages:
+  go:
+    version: "1.22"
+    cgo_enabled: false
+    build_cache: true          # enable Go build cache mount
+```
+
+### Rust
+
+```yaml
+languages:
+  rust:
+    version: "1.77"
+    components: [clippy, rustfmt]
+    targets: [wasm32-unknown-unknown]
+```
+
+### Java
+
+```yaml
+languages:
+  java:
+    version: "21"              # JDK version
+    build_tool: gradle         # maven, gradle
+    gradle_version: "8.6"
+```
+
+---
+
+## 5. Services: Infrastructure Dependencies
+
+Services are pre-configured Docker containers that the sandbox manager starts alongside the dev container. They are the most complex part of the schema because each service type has unique configuration options.
+
+### PostgreSQL
+
+```yaml
+services:
+  postgres:
+    image: postgres:16-alpine       # defaults to postgres:{version}-alpine
+    version: "16"
+    port: 5432
+    host: localhost
+    databases:
+      - name: myapp
+        owner: app
+        extensions: [postgis]
+        init_sql: CREATE EXTENSION IF NOT EXISTS postgis;
+    users:
+      - name: app
+        password: devpassword
+        privileges: ALL PRIVILEGES ON DATABASE myapp
+    root_user: postgres
+    root_password: rootpassword
+    settings:
+      shared_buffers: 256MB
+      max_connections: 100
+    init_script: ./scripts/init-db.sql
+    data_volume: postgres_data      # named volume for persistence
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d myapp"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    exposed: true                  # expose port to host
+    resources:
+      memory: 512MB
+      cpu: 0.5
+```
+
+**Auto-generated environment variables:**
+```bash
+DATABASE_URL=postgresql://app:devpassword@localhost:5432/myapp
+PGHOST=localhost
+PGPORT=5432
+PGUSER=app
+PGPASSWORD=devpassword
+PGDATABASE=myapp
+```
+
+**Connection info printed on start:**
+```
+PostgreSQL:
+  Internal: postgres://app:devpassword@postgres:5432/myapp
+  External: postgresql://app:devpassword@localhost:5432/myapp
+  CLI: psql -h localhost -U app -d myapp
+  Admin UI: http://localhost:8080 (pgweb, optional)
+```
+
+### MongoDB
+
+```yaml
+services:
+  mongodb:
+    image: mongo:7
+    version: "7"
+    port: 27017
+    root_user: admin
+    root_password: devpassword
+    databases:
+      - name: myapp
+        collections:
+          - users
+          - posts
+    init_script: ./scripts/init-mongo.js
+    data_volume: mongo_data
+    exposed: true
+```
+
+**Auto-generated environment variables:**
+```bash
+MONGODB_URL=mongodb://admin:devpassword@localhost:27017/myapp
+MONGODB_URI=mongodb://admin:devpassword@localhost:27017/myapp?authSource=admin
+```
+
+**Connection info:**
+```
+MongoDB:
+  Internal: mongodb://admin:devpassword@mongodb:27017/myapp?authSource=admin
+  External: mongodb://admin:devpassword@localhost:27017/myapp
+  CLI: mongosh -u admin -p devpassword --authenticationDatabase admin localhost:27017/myapp
+  Admin UI: http://localhost:8081 (mongo-express, optional)
+```
+
+### Redis
+
+```yaml
+services:
+  redis:
+    image: redis:7-alpine
+    version: "7"
+    port: 6379
+    password: devpassword         # omit or set to null for no auth
+    settings:
+      maxmemory: 512mb
+      maxmemory-policy: allkeys-lru
+      appendonly: yes
+    data_volume: redis_data
+    exposed: true
+```
+
+**Auto-generated environment variables:**
+```bash
+REDIS_URL=redis://:devpassword@localhost:6379/0
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=devpassword
+```
+
+### MySQL
+
+```yaml
+services:
+  mysql:
+    image: mysql:8.0
+    version: "8.0"
+    port: 3306
+    root_password: devpassword
+    databases:
+      - name: myapp
+    users:
+      - name: app
+        password: devpassword
+    settings:
+      character-set-server: utf8mb4
+      collation-server: utf8mb4_unicode_ci
+    init_script: ./scripts/init-mysql.sql
+```
+
+### RabbitMQ (Message Broker)
+
+```yaml
+services:
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    version: "3"
+    ports:
+      amqp: 5672
+      management: 15672
+    users:
+      - name: app
+        password: devpassword
+        tags: administrator
+    virtual_hosts:
+      - myapp
+```
+
+### MinIO (S3-compatible Storage)
+
+```yaml
+services:
+  minio:
+    image: minio/minio
+    ports:
+      api: 9000
+      console: 9001
+    root_user: minioadmin
+    root_password: minioadmin
+    buckets:
+      - myapp-uploads
+      - myapp-assets
+```
+
+---
+
+## 6. React Native Support
+
+React Native (with Expo) requires special handling because it needs:
+- Node.js + watchman for file watching
+- Port 8081 for the Metro bundler
+- Network access for the Expo Go app on a phone
+- ADB forwarding for Android device connections
+
+```yaml
+# sandbox.yaml for React Native (Expo)
+version: 1
+
+name: my-rn-app
+
+languages:
+  node:
+    version: "20"
+    package_manager: npm
+    install_deps: true
+  java:
+    version: "17"               # required for Android builds
+
+packages:
+  apt:
+    - watchman                  # file watcher for Metro bundler
+    - adb                       # Android Debug Bridge
+  npm:
+    - expo-cli
+    - eas-cli
+
+services:
+  # React Native typically doesn't need backend services,
+  # but you can add them when needed:
+  # postgres:
+  #   version: "16"
+
+tools:
+  expo: latest
+  eas: latest
+
+scripts:
+  start: "npx expo start"
+  android: "npx expo start --android"
+  ios: "npx expo start --ios"
+  web: "npx expo start --web"
+  build: "eas build"
+
+env:
+  REACT_NATIVE_PACKAGER_HOSTNAME: "${HOST_IP}"   # set automatically
+
+ports:
+  metro: 8081                   # Metro bundler
+  devtools: 8097               # React DevTools
+
+hooks:
+  pre-start:
+    - command: adb start-server  # ensure ADB is running
+
+# Note: For Android emulator access, the dev container needs:
+# --network=host or special ADB forwarding setup
+```
+
+### React Native Architecture Considerations
+
+For React Native in a Docker sandbox:
+
+1. **Metro bundler on port 8081** -- must be exposed to the host
+2. **Watchman** -- needs `inotify` limits bumped in the container
+3. **Expo Go** -- needs `REACT_NATIVE_PACKAGER_HOSTNAME` set to the host's LAN IP
+4. **Android builds** -- require JDK 17+, Android SDK, Gradle
+5. **ADB forwarding** -- for connecting to physical devices / emulators on the host
+
+The sandbox manager should auto-detect React Native projects (presence of `app.json`, `expo` in `package.json`) and prompt for the host IP:
+
+```yaml
+# auto-generated by `sandbox init` for RN projects
+env:
+  REACT_NATIVE_PACKAGER_HOSTNAME: "{auto-detect-lan-ip}"
+```
+
+**Source**: Various devcontainer RN templates (https://github.com/matsu3m/react-native-expo-devcontainer-template, https://dev.to/animusna/dev-container-for-react-native-with-expo-f7j)
+
+---
+
+## 7. Tools: Purpose-Built CLI Abstractions
+
+Tools are well-known CLI programs that need specific install logic:
+
+```yaml
+tools:
+  # GitHub CLI
+  gh: latest
+  gh@2.40:                       # version pinning
+
+  # AWS CLI
+  aws-cli: "2"
+
+  # Docker (in Docker)
+  docker: true                   # enables Docker-in-Docker
+
+  # PostgreSQL client
+  psql: "16"                     # installs postgresql-client-16
+
+  # MongoDB CLI
+  mongosh: latest
+
+  # Kubernetes
+  kubectl: "1.29"
+  helm: "3.14"
+  minikube: latest
+
+  # Infrastructure as Code
+  terraform: "1.7"
+  pulumi: latest
+  terragrunt: latest
+
+  # Cloud
+  vercel: latest
+  netlify: latest
+  wrangler: latest               # Cloudflare Workers CLI
+```
+
+Each tool maps to a known install recipe:
+
+```yaml
+# Internal mapping (not user-facing)
+tool_recipes:
+  gh:
+    apt: gh
+    nix: github-cli
+    verify: gh --version
+  aws-cli:
+    apt: awscli
+    pip: awscli
+    nix: awscli2
+    verify: aws --version
+  docker:
+    apt: docker.io
+    script: |-
+      curl -fsSL https://get.docker.com | sh
+    verify: docker --version
+```
+
+---
+
+## 8. Generated Outputs
+
+### 8.1 Auto-generated Dockerfile
+
+From the config, the sandbox manager generates an optimized Dockerfile:
+
+```dockerfile
+# Auto-generated by sandbox-manager v1.0
+# Source: sandbox.yaml
+
+FROM node:20-slim AS base
+
+# Install system packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl git jq postgresql-client redis-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python + Poetry
+RUN pip install --no-cache-dir poetry
+
+# Copy dependency manifests
+COPY package.json pnpm-lock.yaml pyproject.toml poetry.lock ./
+
+# Install dependencies (layer cached until manifests change)
+RUN --mount=type=cache,target=/root/.npm \
+    corepack enable && corepack prepare pnpm@latest --activate && \
+    pnpm install
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    poetry install --no-root
+
+# Copy source code
+COPY . .
+
+# Set environment variables
+ENV NODE_ENV=development \
+    DATABASE_URL=postgresql://app:devpassword@postgres:5432/myapp \
+    REDIS_URL=redis://:devpassword@redis:6379/0
+
+CMD ["bash"]
+```
+
+### 8.2 Auto-generated docker-compose.yaml
+
+```yaml
+# Auto-generated by sandbox-manager v1.0
+version: "3.8"
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: .sandbox/Dockerfile
+    image: sandbox-my-project:latest
+    ports:
+      - "3000:3000"              # app port
+    volumes:
+      - .:/workspace            # source code
+      - node_modules:/workspace/node_modules
+    environment:
+      DATABASE_URL: postgresql://app:devpassword@postgres:5432/myapp
+      REDIS_URL: redis://:devpassword@redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - sandbox
+    command: sleep infinity      # keep container alive
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: myapp
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d myapp"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - sandbox
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass devpassword
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+    networks:
+      - sandbox
+
+volumes:
+  postgres_data:
+  redis_data:
+  node_modules:
+
+networks:
+  sandbox:
+    driver: bridge
+```
+
+### 8.3 Auto-generated AGENTS.md
+
+```markdown
+# Development Environment
+
+Auto-generated by sandbox-manager for `my-project`.
+
+## Languages & Tools
+- Node.js 20 (pnpm)
+- Python 3.12 (poetry)
+- PostgreSQL 16
+- Redis 7
+
+## Available Services
+
+### PostgreSQL
+- **Internal URL**: `postgresql://app:devpassword@postgres:5432/myapp`
+- **External URL**: `postgresql://app:devpassword@localhost:5432/myapp`
+- **Port**: 5432
+
+### Redis
+- **Internal URL**: `redis://:devpassword@redis:6379/0`
+- **External URL**: `redis://:devpassword@localhost:6379/0`
+- **Port**: 6379
+
+## Scripts (run via `sandbox run <script>`)
+- `dev` - Start dev server
+- `test` - Run tests
+- `lint` - Lint code
+- `db:reset` - Reset database
+
+## Project Commands
+- `npm run dev`
+- `npm test`
+- `npx prisma studio`
+```
+
+---
+
+## 9. The Simple API: Minimal Config to Get Started
+
+For maximum adoption, the sandbox manager should work with minimal config:
+
+```yaml
+# Minimal: auto-detect everything
+version: 1
+```
+
+Detects `package.json` -> Node.js, `pyproject.toml` -> Python+Poetry, `go.mod` -> Go, etc.
+
+```yaml
+# Common: just declare what's needed
+version: 1
+languages:
+  node: "20"
+services:
+  postgres: true               # defaults: version 16, port 5432
+  redis: true                  # defaults: version 7, port 6379
+```
+
+```yaml
+# Full: complete control
+version: 1
+name: my-api
+languages:
+  node:
+    version: "20"
+    package_manager: pnpm
+  python:
+    version: "3.12"
+    package_manager: poetry
+services:
+  postgres:
+    version: "16"
+    databases:
+      - name: myapp
+  redis:
+    version: "7"
+scripts:
+  dev: "pnpm dev"
+  test: "pnpm test"
+```
+
+### CLI Commands
+
+```bash
+# Initialize (auto-detects stack, creates sandbox.yaml)
+sandbox init
+
+# Add a package
+sandbox add node@20
+sandbox add postgres
+
+# Build the image
+sandbox build
+
+# Start the environment
+sandbox up
+
+# Run a command inside
+sandbox exec "npm test"
+
+# Stop
+sandbox down
+
+# Show connection info
+sandbox info
+
+# Generate agent context files
+sandbox generate agents.md
+```
+
+---
+
+## 10. Config-to-Image Generation Pipeline
+
+```
+sandbox.yaml
+    |
+    v
+[Parse + Validate]
+    |
+    |-- Resolve language versions (e.g., "lts" -> "20.11.1")
+    |-- Resolve service versions (e.g., "latest" -> "16-alpine")
+    |-- Resolve tool versions
+    |-- Resolve package versions from lock file if present
+    |
+    v
+[Generate Dockerfile]
+    |-- base FROM image based on languages
+    |-- apt packages in one RUN (with cache mount)
+    |-- copy dependency manifests first
+    |-- install language dependencies (npm ci, poetry install)
+    |-- copy source
+    |-- set env vars
+    |
+    v
+[Generate docker-compose.yaml]
+    |-- dev service with build context
+    |-- service definitions for each service
+    |-- health checks
+    |-- volumes for persistence
+    |-- environment variable wiring
+    |-- network config
+    |
+    v
+[Build Image]
+    |-- docker buildx build --cache-to/--cache-from
+    |-- tag as sandbox-{project-name}:latest
+    |-- push to registry if configured
+    |
+    v
+[Start Environment]
+    |-- docker compose up -d
+    |-- wait for health checks
+    |-- run post-start hooks
+    |-- print connection info
+```
+
+---
+
+## 11. Comparison: How Existing Tools Handle This
+
+| Aspect | Devbox (JSON) | devenv (Nix) | devcontainer.json | This Design |
+|--------|--------------|--------------|-------------------|-------------|
+| **Config format** | JSON | Nix | JSONC | YAML |
+| **Packages** | String array `["node@20"]` | Nixpkgs attributes | Features (OCI artifacts) | Namespaced: `apt:`, `npm:`, etc. |
+| **Languages** | Plugin-based | `languages.python` module | Features | Built-in language modules |
+| **Services** | `devbox services up` (process-compose) | `services.postgres` module | Docker Compose sidecars | First-class service definitions |
+| **Ports** | N/A | `services.x.port` | `forwardPorts` array | Per-service port config + auto env vars |
+| **Connection info** | Manual | Manual env vars | Manual | Auto-generated env vars + AGENTS.md |
+| **Dockerfile gen** | `devbox generate dockerfile` | `devenv container` | Manual (Dockerfile + features) | Automatic from config |
+| **Docker Compose gen** | Manual | Manual | References existing compose | Automatic from config |
+| **Scripts** | `shell.scripts` | `scripts` attr | `postCreateCommand` | `scripts` section |
+| **Hooks** | `shell.init_hook` | `enterShell` | `postCreateCommand`, `postStartCommand` | Lifecycle hooks (pre/post build/start/stop) |
+| **Env vars** | `env` object | `env` attr | `remoteEnv` | `env` + auto-generated service URLs |
+| **Lock file** | `devbox.lock` | `devenv.lock` | No | `sandbox.lock` |
+| **Include/import** | `include` | `imports` | N/A | `include` for monorepo |
+
+---
+
+## 12. Future: Service Templates & Plugin System
+
+### Built-in Service Templates
+
+```yaml
+services:
+  # Shorthand: use known template with defaults
+  postgres: {}
+  redis: {}
+  mongodb: {}
+  rabbitmq: {}
+  mysql: {}
+  elasticsearch: {}
+  minio: {}
+  mailhog: {}
+  kafka: {}
+  # etc.
+```
+
+### Custom Service Templates (Plugin)
+
+```yaml
+services:
+  my-custom-db:
+    template: postgres
+    version: "16"
+    databases:
+      - name: customdb
+    plugins:
+      vector: {}    # pgvector extension
+      timescaledb: {}
+```
+
+### Plugin System for Service Types
+
+```typescript
+// TypeScript plugin for a new service type
+export const myServicePlugin: ServicePlugin = {
+  type: "my-database",
+  
+  // Schema for the service's config section
+  configSchema: {
+    version: { type: "string", default: "latest" },
+    port: { type: "number", default: 9999 },
+    databases: { type: "array", items: { type: "string" } },
+  },
+  
+  // Generate docker-compose service definition
+  generateCompose(config) {
+    return {
+      image: `my-database:${config.version}-alpine`,
+      ports: [`${config.port}:${config.port}`],
+      environment: {
+        MY_DB_ROOT_PASSWORD: config.rootPassword,
+      },
+      healthcheck: {
+        test: ["CMD", "my-db-cli", "ping"],
+        interval: "5s",
+      },
+    };
+  },
+  
+  // Generate environment variables for the sandbox
+  generateEnv(config) {
+    return {
+      MY_DATABASE_URL: `mydb://root:${config.rootPassword}@${config.type}:${config.port}/${config.databases[0]}`,
+    };
+  },
+  
+  // Generate connection info string
+  generateConnectionInfo(config) {
+    return {
+      label: "My Database",
+      internal: `mydb://root:${config.rootPassword}@${config.type}:${config.port}`,
+      external: `mydb://root:${config.rootPassword}@localhost:${config.port}`,
+    };
+  },
+};
+```
+
+---
+
+## Sources
+
+- Devbox config reference: https://www.jetify.com/docs/devbox/configuration
+- Devbox Poetry template: https://www.jetify.com/devbox/templates/python-poetry
+- devenv services: https://devenv.sh/services/
+- devenv Postgres module: https://devenv.sh/services/postgres/
+- devenv Redis module: https://devenv.sh/services/redis/
+- devenv MySQL module: https://devenv.sh/services/mysql/
+- DevContainer JSON reference: https://containers.dev/implementors/json_reference/
+- DevContainer features: https://containers.dev/implementors/features/
+- Docker Compose best practices: https://docs.docker.com/compose/
+- Docker Compose health checks: https://the-practical-developer.online/posts/docker-compose-local-dev-environments/
+- React Native DevContainer: https://github.com/matsu3m/react-native-expo-devcontainer-template
+- React Native DevContainer guide: https://dev.to/animusna/dev-container-for-react-native-with-expo-f7j
+- Devbox schema: https://catalog.lintel.tools/schemas/schemastore/devbox-config/
+- devenv processes overview: https://devenv.sh/processes/
+- Nix flakes for dev shells: https://blogs.pavanrangani.com/nix-reproducible-dev-environments-flakes-guide/
