@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/anomalyco/sandbox-manager/internal/backend/local"
-	"github.com/anomalyco/sandbox-manager/pkg/secret"
 	"github.com/spf13/cobra"
 )
 
@@ -16,11 +14,13 @@ func newDeleteCmd() *cobra.Command {
 		Short: "Delete a secret",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			backend := local.New()
-			mgr := secret.NewManager(backend)
+			mgr, err := createManager(cmd)
+			if err != nil {
+				return err
+			}
 
 			ctx := context.Background()
-			if err := mgr.Init(ctx); err != nil {
+			if err := initManager(ctx, mgr); err != nil {
 				return fmt.Errorf("init: %w", err)
 			}
 
@@ -28,7 +28,7 @@ func newDeleteCmd() *cobra.Command {
 				return fmt.Errorf("delete: %w", err)
 			}
 
-			fmt.Fprintf(os.Stderr, "✓ secret %q deleted\n", args[0])
+			fmt.Fprintf(os.Stderr, "secret %q deleted\n", args[0])
 			return nil
 		},
 	}

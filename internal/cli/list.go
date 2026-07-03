@@ -6,8 +6,6 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/anomalyco/sandbox-manager/internal/backend/local"
-	"github.com/anomalyco/sandbox-manager/pkg/secret"
 	"github.com/spf13/cobra"
 )
 
@@ -16,11 +14,13 @@ func newListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List all stored secrets",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			backend := local.New()
-			mgr := secret.NewManager(backend)
+			mgr, err := createManager(cmd)
+			if err != nil {
+				return err
+			}
 
 			ctx := context.Background()
-			if err := mgr.Init(ctx); err != nil {
+			if err := initManager(ctx, mgr); err != nil {
 				return fmt.Errorf("init: %w", err)
 			}
 
