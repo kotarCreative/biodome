@@ -31,7 +31,7 @@ Examples:
 			ctx := context.Background()
 
 			localB := local.New()
-			localMgr := secret.NewManager(localB)
+			localMgr := secret.NewManager(localB, localB)
 			if err := localMgr.Init(ctx); err != nil {
 				return fmt.Errorf("init local backend: %w", err)
 			}

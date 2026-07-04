@@ -16,10 +16,15 @@ func Create(name string) secret.SecretBackend {
 	}
 }
 
+func CreateStore() secret.SecretBackend {
+	return local.New()
+}
+
 func CreateManager(name string) (*secret.Manager, error) {
 	be := Create(name)
 	if be == nil {
 		return nil, fmt.Errorf("unknown backend %q", name)
 	}
-	return secret.NewManager(be), nil
+
+	return secret.NewManager(be, CreateStore()), nil
 }

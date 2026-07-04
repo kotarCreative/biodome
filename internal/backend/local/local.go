@@ -15,6 +15,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/anomalyco/sandbox-manager/pkg/secret"
 	"golang.org/x/term"
 )
 
@@ -45,7 +46,7 @@ func New() *Backend {
 
 func (b *Backend) Name() string { return "local" }
 
-func (b *Backend) Init(_ context.Context) error {
+func (b *Backend) Init(_ context.Context, _ secret.SecretBackend) error {
 	if err := os.MkdirAll(filepath.Dir(b.storePath), 0700); err != nil {
 		return fmt.Errorf("create store dir: %w", err)
 	}

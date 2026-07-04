@@ -9,18 +9,20 @@ import (
 type Manager struct {
 	mu      sync.RWMutex
 	backend SecretBackend
+	store   SecretBackend
 	cache   map[string]string
 }
 
-func NewManager(backend SecretBackend) *Manager {
+func NewManager(backend, store SecretBackend) *Manager {
 	return &Manager{
 		backend: backend,
+		store:   store,
 		cache:   make(map[string]string),
 	}
 }
 
 func (m *Manager) Init(ctx context.Context) error {
-	return m.backend.Init(ctx)
+	return m.backend.Init(ctx, m.store)
 }
 
 func (m *Manager) Resolve(ctx context.Context, key string) (string, error) {
