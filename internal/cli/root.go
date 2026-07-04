@@ -26,6 +26,8 @@ for AWS Secrets Manager, GCP Secret Manager, 1Password, and more.`,
 	cmd.AddCommand(newGetCmd())
 	cmd.AddCommand(newListCmd())
 	cmd.AddCommand(newDeleteCmd())
+	cmd.AddCommand(newConfigCmd())
+	cmd.AddCommand(newLoginCmd())
 
 	return cmd
 }
