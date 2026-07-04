@@ -3,6 +3,7 @@ package backend
 import (
 	"fmt"
 
+	"github.com/anomalyco/sandbox-manager/internal/backend/aws"
 	"github.com/anomalyco/sandbox-manager/internal/backend/local"
 	"github.com/anomalyco/sandbox-manager/pkg/secret"
 )
@@ -11,6 +12,8 @@ func Create(name string) secret.SecretBackend {
 	switch name {
 	case "local":
 		return local.New()
+	case "aws":
+		return aws.New()
 	default:
 		return nil
 	}
