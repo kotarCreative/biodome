@@ -1,4 +1,5 @@
 import { execFileSync, StdioOptions } from "node:child_process";
+import type { Provider } from "../core/provider.js";
 
 const COMPOSE_FILE = ".sandbox/docker-compose.yaml";
 
@@ -20,7 +21,7 @@ export function assertDockerAvailable(): void {
   }
 }
 
-export class Runner {
+export class Runner implements Provider {
   project: string;
 
   constructor(project: string) {

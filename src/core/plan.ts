@@ -73,6 +73,7 @@ export interface Volume {
 }
 
 export interface Port {
+  name?: string;
   host: number;
   container: number;
 }

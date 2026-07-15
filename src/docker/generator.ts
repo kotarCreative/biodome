@@ -47,6 +47,7 @@ export function generateDockerfile(plan: Plan): string {
   if (hasDaemonProcesses && !aptPackages.includes("supervisor")) {
     aptPackages.push("supervisor");
   }
+  aptPackages.sort();
 
   if (aptPackages.length > 0) {
     lines.push("# Install system packages + service CLI clients.");
@@ -98,9 +99,10 @@ export function generateDockerfile(plan: Plan): string {
     const envVars = sortEnv(plan.build.environment);
     lines.push("ENV ");
     for (let i = 0; i < envVars.length; i++) {
+      const [k, v] = envVars[i];
       const prefix = i > 0 ? "    " : "";
       const suffix = i < envVars.length - 1 ? " \\" : "";
-      lines.push(`${prefix}${envVars[i]}${suffix}`);
+      lines.push(`${prefix}${k}=${v}${suffix}`);
     }
     lines.push("");
   }
@@ -150,7 +152,9 @@ export function generateSupervisordConf(plan: Plan): string {
     lines.push(`stderr_logfile=/tmp/${proc.name}.log`);
     if (Object.keys(proc.environment).length > 0) {
       const envVars = sortEnv(proc.environment);
-      lines.push(`environment=${envVars.map((e) => `${e}`).join(",")}`);
+      lines.push(
+        `environment=${envVars.map(([k, v]) => `${k}=${quoteSupervisordEnv(v)}`).join(",")}`
+      );
     }
     lines.push("");
   }
@@ -188,9 +192,15 @@ export function generateDockerignore(): string {
   ].join("\n");
 }
 
-function sortEnv(env: Record<string, string>): string[] {
-  const keys = Object.keys(env).sort();
-  return keys.map((k) => `${k}=${env[k]}`);
+function sortEnv(env: Record<string, string>): [string, string][] {
+  return Object.keys(env)
+    .sort()
+    .map((k) => [k, env[k]]);
+}
+
+function quoteSupervisordEnv(value: string): string {
+  // supervisord needs literal % doubled, and double quotes escaped.
+  return `"${value.replace(/%/g, "%%").replace(/"/g, '\\"')}"`;
 }
 
 export function generateCompose(plan: Plan): string {
@@ -285,7 +295,7 @@ function devService(plan: Plan): ComposeService {
     service.depends_on = {};
     for (const svc of plan.runtime.services) {
       service.depends_on[svc.name] = {
-        condition: svc.type === "postgres" ? "service_healthy" : "service_started",
+        condition: svc.healthCheck ? "service_healthy" : "service_started",
       };
     }
   }

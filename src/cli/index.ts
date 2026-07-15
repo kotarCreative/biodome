@@ -9,9 +9,10 @@ import {
   generateCompose,
   generateDockerignore,
 } from "../docker/generator.js";
-import { Runner, assertDockerAvailable, DockerError } from "../docker/runner.js";
+import { Runner, assertDockerAvailable } from "../docker/runner.js";
 import { formatInfo, formatAgentsMd } from "../core/info.js";
 import { Plan } from "../core/plan.js";
+import { resolveProjectName, runHooks, runSafe } from "./helpers.js";
 
 const SANDBOX_DIR = ".sandbox";
 
@@ -34,36 +35,6 @@ function writeGeneratedFiles(rootDir: string, plan: Plan): void {
   if (!existsSync(dockerignorePath)) {
     writeFileSync(dockerignorePath, generateDockerignore());
   }
-}
-
-function runHooks(plan: Plan, point: string, runner: Runner, rootDir: string): void {
-  const hooks = plan.runtime.processes.filter(
-    (p) => p.mode === "oneshot" && p.startOn === point
-  );
-  if (hooks.length === 0) return;
-
-  const hostPoints = new Set(["build.pre", "build.post", "start.pre", "stop.post"]);
-
-  for (const hook of hooks) {
-    console.log(`[hook] ${hook.name} (${point})`);
-    if (hostPoints.has(point)) {
-      const [cmd, ...args] = hook.command;
-      execFileSync(cmd, args, { stdio: "inherit", cwd: rootDir });
-    } else {
-      runner.execInDev(hook.command);
-    }
-  }
-}
-
-function runSafe(fn: () => void | Promise<void>): void {
-  Promise.resolve(fn()).catch((error) => {
-    if (error instanceof DockerError) {
-      console.error(`Error: ${error.message}`);
-    } else {
-      console.error(error instanceof Error ? error.message : String(error));
-    }
-    process.exit(1);
-  });
 }
 
 const program = new Command();
@@ -194,10 +165,10 @@ program
     runSafe(() => {
       assertDockerAvailable();
       const rootDir = process.cwd();
-      const runner = new Runner(rootDir.split("/").pop() || "project");
+      const project = resolveProjectName(rootDir);
       const args = processName
-        ? ["exec", `${runner.project}-dev`, "tail", "-f", `/tmp/${processName}.log`]
-        : ["exec", `${runner.project}-dev`, "tail", "-f", "/tmp/supervisord.log"];
+        ? ["exec", `${project}-dev`, "tail", "-f", `/tmp/${processName}.log`]
+        : ["exec", `${project}-dev`, "tail", "-f", "/tmp/supervisord.log"];
       execFileSync("docker", args, { stdio: "inherit" });
     });
   });
@@ -209,7 +180,8 @@ program
     runSafe(() => {
       assertDockerAvailable();
       const rootDir = process.cwd();
-      const runner = new Runner(rootDir.split("/").pop() || "project");
+      const project = resolveProjectName(rootDir);
+      const runner = new Runner(project);
       runner.ps();
     });
   });

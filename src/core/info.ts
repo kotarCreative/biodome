@@ -1,4 +1,9 @@
-import { Plan, Service } from "./plan.js";
+import { Plan, Service, Port } from "./plan.js";
+
+function formatPort(p: Port): string {
+  const label = p.name ? `${p.name}: ` : "";
+  return `${label}${p.host}:${p.container}`;
+}
 
 interface ServiceConnection {
   label: string;
@@ -50,7 +55,7 @@ export function formatInfo(plan: Plan): string {
     lines.push("");
     lines.push("Services:");
     for (const svc of plan.runtime.services) {
-      const port = svc.ports.map((p) => `${p.host}:${p.container}`).join(", ") || "none";
+      const port = svc.ports.map(formatPort).join(", ") || "none";
       lines.push(`  - ${svc.name} (${svc.image}) ports ${port}`);
       const conn = serviceConnection(svc);
       if (conn) {
@@ -68,7 +73,7 @@ export function formatInfo(plan: Plan): string {
       lines.push("");
       lines.push("Processes:");
       for (const proc of daemons) {
-        const port = proc.ports.map((p) => `${p.host}:${p.container}`).join(", ") || "none";
+        const port = proc.ports.map(formatPort).join(", ") || "none";
         lines.push(`  - ${proc.name}: ${proc.command.join(" ")} (ports: ${port})`);
       }
     }
@@ -113,7 +118,7 @@ export function formatAgentsMd(plan: Plan): string {
       lines.push("");
       lines.push(`- Image: \`${svc.image}\``);
       if (svc.ports.length > 0) {
-        lines.push(`- Ports: ${svc.ports.map((p) => `\`${p.host}:${p.container}\``).join(", ")}`);
+        lines.push(`- Ports: ${svc.ports.map((p) => `\`${formatPort(p)}\``).join(", ")}`);
       }
       const conn = serviceConnection(svc);
       if (conn) {
@@ -134,7 +139,7 @@ export function formatAgentsMd(plan: Plan): string {
       for (const proc of daemons) {
         lines.push(`- **${proc.name}**: \`${proc.command.join(" ")}\``);
         if (proc.ports.length > 0) {
-          lines.push(`  - Ports: ${proc.ports.map((p) => `\`${p.host}:${p.container}\``).join(", ")}`);
+          lines.push(`  - Ports: ${proc.ports.map((p) => `\`${formatPort(p)}\``).join(", ")}`);
         }
       }
       lines.push("");

@@ -238,4 +238,62 @@ describe("SandboxContext", () => {
 
     expect(ctx.plan.runtime.volumes).toHaveLength(0);
   });
+
+  it("rejects a process with a non-array command", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    expect(() =>
+      // @ts-expect-error testing runtime misuse
+      ctx.addProcess({ name: "bad", command: "node server.js", port: 3000 })
+    ).toThrow(/command must be a non-empty array of strings/);
+  });
+
+  it("rejects an invalid lifecycle point", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    expect(() =>
+      // @ts-expect-error testing runtime misuse
+      ctx.addProcess({ name: "bad", command: ["node"], startOn: "build.middle" })
+    ).toThrow(/startOn must be a valid lifecycle point/);
+  });
+
+  it("rejects an out-of-range port", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    expect(() => ctx.addProcess({ name: "bad", command: ["node"], port: 70000 })).toThrow(
+      /integer between 1 and 65535/
+    );
+  });
+
+  it("rejects a service with non-string environment values", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    expect(() =>
+      // @ts-expect-error testing runtime misuse
+      ctx.addService("bad", { environment: { COUNT: 42 } })
+    ).toThrow(/environment.COUNT must be a string/);
+  });
+
+  it("normalizes a relative workingDir to /workspace", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addProcess({ name: "web", command: ["node"], workingDir: "frontend" });
+    expect(ctx.plan.runtime.processes[0].workingDir).toBe("/workspace/frontend");
+  });
+
+  it("preserves an absolute workingDir", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addProcess({ name: "web", command: ["node"], workingDir: "/app" });
+    expect(ctx.plan.runtime.processes[0].workingDir).toBe("/app");
+  });
+
+  it("preserves named ports", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addProcess({
+      name: "api",
+      command: ["node", "server.js"],
+      ports: { http: 3000, debug: 9229 },
+    });
+
+    const ports = ctx.plan.runtime.processes[0].ports;
+    expect(ports).toEqual([
+      { name: "http", host: 3000, container: 3000 },
+      { name: "debug", host: 9229, container: 9229 },
+    ]);
+  });
 });

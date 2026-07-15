@@ -9,6 +9,8 @@ import {
   Port,
   LifecyclePoint,
   Service,
+  DependencyInstall,
+  CopyArtifact,
 } from "./plan.js";
 import {
   FeatureContext,
@@ -26,6 +28,53 @@ import { formatPackage } from "./packages.js";
 import { serviceConfigs, defaultImage } from "./services.js";
 import { toolHandlers } from "./tools.js";
 
+const LIFECYCLE_POINTS = new Set<string>([
+  "build.pre",
+  "build.post",
+  "start.pre",
+  "start.post",
+  "stop.pre",
+  "stop.post",
+  "exec.pre",
+  "exec.post",
+]);
+
+function validateName(name: unknown, label: string): void {
+  if (!name || typeof name !== "string") {
+    throw new Error(`${label} requires a non-empty string name`);
+  }
+}
+
+function validateCommand(command: unknown, label: string): void {
+  if (!Array.isArray(command) || command.length === 0 || command.some((c) => typeof c !== "string")) {
+    throw new Error(`${label} must be a non-empty array of strings`);
+  }
+}
+
+function validatePort(value: unknown, label: string): void {
+  if (value === undefined) return;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 65535) {
+    throw new Error(`${label} must be an integer between 1 and 65535`);
+  }
+}
+
+function validateEnv(env: Record<string, unknown>, label: string): asserts env is Record<string, string> {
+  if (typeof env !== "object" || env === null || Array.isArray(env)) {
+    throw new Error(`${label} must be a record of strings`);
+  }
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value !== "string") {
+      throw new Error(`${label}.${key} must be a string`);
+    }
+  }
+}
+
+function validateLifecyclePoint(value: unknown, label: string): void {
+  if (value !== undefined && !LIFECYCLE_POINTS.has(value as string)) {
+    throw new Error(`${label} must be a valid lifecycle point`);
+  }
+}
+
 export class SandboxContext implements FeatureContext, BuildContext {
   plan: Plan;
   private rootDir: string;
@@ -38,6 +87,19 @@ export class SandboxContext implements FeatureContext, BuildContext {
   }
 
   addProcess(spec: ProcessSpec): void {
+    validateName(spec.name, "Process");
+    validateCommand(spec.command, `Process ${spec.name}: command`);
+    validatePort(spec.port, `Process ${spec.name}: port`);
+    validateLifecyclePoint(spec.startOn, `Process ${spec.name}: startOn`);
+    if (spec.ports) {
+      for (const [portName, port] of Object.entries(spec.ports)) {
+        validatePort(port, `Process ${spec.name}: ports.${portName}`);
+      }
+    }
+    if (spec.environment) {
+      validateEnv(spec.environment as Record<string, unknown>, `Process ${spec.name}: environment`);
+    }
+
     this.assertUniqueProcessName(spec.name);
     const proc = this.normalizeProcess(spec, "daemon", "start.post");
     this.plan.runtime.processes.push(proc);
@@ -45,10 +107,24 @@ export class SandboxContext implements FeatureContext, BuildContext {
   }
 
   addHook(spec: HookSpec): void {
-    this.assertUniqueProcessName(spec.name);
+    validateName(spec.name, "Hook");
+    validateCommand(spec.command, `Hook ${spec.name}: command`);
+    validateLifecyclePoint(spec.startOn, `Hook ${spec.name}: startOn`);
+    validatePort(spec.port, `Hook ${spec.name}: port`);
+    if (spec.ports) {
+      for (const [portName, port] of Object.entries(spec.ports)) {
+        validatePort(port, `Hook ${spec.name}: ports.${portName}`);
+      }
+    }
+    if (spec.environment) {
+      validateEnv(spec.environment as Record<string, unknown>, `Hook ${spec.name}: environment`);
+    }
+
     if (!spec.startOn) {
       throw new Error(`Hook ${spec.name} requires a startOn lifecycle point`);
     }
+
+    this.assertUniqueProcessName(spec.name);
     const proc = this.normalizeProcess(spec, "oneshot", spec.startOn);
     this.plan.runtime.processes.push(proc);
     this.mergeProcessEnv(proc);
@@ -75,6 +151,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
   }
 
   addPackage(manager: string, name: string, options: PackageOptions = {}): void {
+    validateName(name, "Package");
     const registryFlag = options.indexUrl ? ` --registry ${options.indexUrl}` : "";
     const indexUrlFlag = options.indexUrl ? ` --index-url ${options.indexUrl}` : "";
 
@@ -94,6 +171,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
   }
 
   addTool(name: string, _options: ToolOptions = {}): void {
+    validateName(name, "Tool");
     const handler = toolHandlers[name];
     if (handler) {
       handler(this);
@@ -110,6 +188,12 @@ export class SandboxContext implements FeatureContext, BuildContext {
   }
 
   addService(name: string, options: ServiceOptions = {}): void {
+    validateName(name, "Service");
+    validatePort(options.port, `Service ${name}: port`);
+    if (options.environment) {
+      validateEnv(options.environment as Record<string, unknown>, `Service ${name}: environment`);
+    }
+
     if (this.plan.runtime.services.some((s) => s.name === name)) {
       throw new Error(`Duplicate service name: ${name}`);
     }
@@ -185,6 +269,37 @@ export class SandboxContext implements FeatureContext, BuildContext {
     }
   }
 
+  // BuildContext helpers — encapsulate plan mutations.
+
+  setBaseImage(name: string): boolean {
+    if (this.plan.build.baseImage) {
+      return false;
+    }
+    this.plan.build.baseImage = name;
+    return true;
+  }
+
+  requireDependencyFiles(files: string[]): string[] {
+    const existing: string[] = [];
+    for (const file of files) {
+      if (this.fileExists(file)) {
+        existing.push(file);
+        if (!this.plan.build.dependencyFiles.includes(file)) {
+          this.plan.build.dependencyFiles.push(file);
+        }
+      }
+    }
+    return existing;
+  }
+
+  addDependencyInstall(install: DependencyInstall): void {
+    this.plan.build.dependencyInstalls.push(install);
+  }
+
+  addCopyArtifact(artifact: CopyArtifact): void {
+    this.plan.build.copyArtifacts.push(artifact);
+  }
+
   private normalizeProcess(
     spec: ProcessSpec,
     defaultMode: "daemon" | "oneshot",
@@ -198,8 +313,8 @@ export class SandboxContext implements FeatureContext, BuildContext {
       ports.push({ host: spec.port, container: spec.port });
     }
     if (spec.ports) {
-      for (const p of Object.values(spec.ports)) {
-        ports.push({ host: p, container: p });
+      for (const [portName, p] of Object.entries(spec.ports)) {
+        ports.push({ name: portName, host: p, container: p });
       }
     }
 
@@ -212,11 +327,17 @@ export class SandboxContext implements FeatureContext, BuildContext {
       command: spec.command,
       ports,
       environment: spec.environment || {},
-      workingDir: spec.workingDir,
+      workingDir: this.normalizeWorkingDir(spec.workingDir),
       healthCheck,
       mode,
       startOn,
     };
+  }
+
+  private normalizeWorkingDir(workingDir: string | undefined): string | undefined {
+    if (!workingDir) return undefined;
+    if (workingDir.startsWith("/")) return workingDir;
+    return `/workspace/${workingDir}`;
   }
 
   private normalizeHealthCheck(
@@ -266,5 +387,12 @@ export class SandboxContext implements FeatureContext, BuildContext {
       this.plan.build.languageSnippets.push(snippet);
     }
   }
-}
 
+  enableNodeModulesVolume(): void {
+    this.plan.build.nodeModulesVolume = true;
+  }
+
+  enableVenvVolume(): void {
+    this.plan.build.venvVolume = true;
+  }
+}

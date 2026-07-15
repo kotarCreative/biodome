@@ -176,3 +176,26 @@ describe("validateConfig", () => {
     expect(() => validateConfig(dir)).toThrow(/expected a JSON object/);
   });
 });
+
+describe("validatePlan", () => {
+  it("throws when a process and service share a host port", async () => {
+    const dir = join("/tmp", "sandbox-test-" + Date.now());
+    createProject(dir, {
+      "sandbox/config.json": JSON.stringify({ project: { name: "port-conflict" } }),
+      "sandbox/services.mjs": `
+        export default function services(ctx) {
+          ctx.addService("postgres", { port: 5432 });
+        }
+      `,
+      "sandbox/features/django.mjs": `
+        export default function django(ctx) {
+          ctx.addProcess({ name: "pg", command: ["node"], port: 5432 });
+        }
+      `,
+    });
+
+    await expect(buildPlan(dir)).rejects.toThrow(
+      /Host port 5432 is used by both process "pg" and service "postgres"/
+    );
+  });
+});

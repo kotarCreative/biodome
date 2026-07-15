@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { SandboxContext } from "../core/context.js";
-import { Plan } from "../core/plan.js";
+import { Plan, Port } from "../core/plan.js";
 
 const SANDBOX_DIR = "sandbox";
 
@@ -22,6 +22,8 @@ export async function buildPlan(rootDir: string, options: BuildPlanOptions = {})
 
   await loadServices(rootDir, ctx);
   await loadFeatures(rootDir, ctx);
+
+  validatePlan(ctx.plan);
 
   return ctx.plan;
 }
@@ -65,6 +67,31 @@ function validateConfigShape(value: unknown, path: string): Config {
   }
 
   return { project: { name: project.name } };
+}
+
+function validatePlan(plan: Plan): void {
+  const seen = new Map<number, string>();
+
+  function registerPort(port: Port, label: string): void {
+    if (seen.has(port.host)) {
+      throw new Error(
+        `Host port ${port.host} is used by both ${seen.get(port.host)} and ${label}`
+      );
+    }
+    seen.set(port.host, label);
+  }
+
+  for (const proc of plan.runtime.processes) {
+    for (const port of proc.ports) {
+      registerPort(port, `process "${proc.name}"`);
+    }
+  }
+
+  for (const svc of plan.runtime.services) {
+    for (const port of svc.ports) {
+      registerPort(port, `service "${svc.name}"`);
+    }
+  }
 }
 
 async function loadServices(rootDir: string, ctx: SandboxContext): Promise<void> {
