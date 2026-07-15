@@ -64,12 +64,12 @@ The sandbox manager should:
 ## Proposed Architecture (High-Level)
 
 ```
-sandbox.yaml (config in any repo)
+sandbox/ directory (config in any repo)
        |
        v
 [sandbox CLI]
        |
-       |-- Config Parser
+       |-- Config Discovery & Parser
        |-- Dockerfile Generator (optimized)
        |-- Provider Plugin Interface
        |     |-- Docker (local)
@@ -92,7 +92,7 @@ sandbox.yaml (config in any repo)
 
 ## Next Steps
 
-1. Define the `sandbox.yaml` config schema
+1. Define the `sandbox/` directory structure and file schemas
 2. Build the Dockerfile generator (config -> optimized Dockerfile)
 3. Implement the CLI with local Docker provider
 4. Add service management (Docker Compose generation)

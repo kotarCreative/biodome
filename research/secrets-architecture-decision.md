@@ -61,7 +61,7 @@ Build an internal secret manager with a consistent interface. The manager stores
 **Key design:**
 - The core secret manager owns the encryption and storage abstraction
 - Backends are pure I/O providers — they read/write encrypted blobs or resolve secret references
-- Secrets are referenced uniformly in `sandbox.yaml` as `${{ secrets.MY_KEY }}`
+- Secrets are referenced uniformly in `sandbox/secrets.yaml` as `${{ secrets.MY_KEY }}`
 - Build-time secrets still use Docker BuildKit mounts under the hood (the manager resolves the value and passes it to BuildKit)
 - The manager caches secrets locally during a sandbox session, avoiding repeated network calls
 
@@ -70,7 +70,7 @@ Build an internal secret manager with a consistent interface. The manager stores
 - Users configure *one* backend, not multiple provider-specific config blocks
 - Easy to test — the local encrypted file backend works offline with no credentials
 - Future-proof — adding a new cloud provider is just implementing the backend interface
-- Secrets can be migrated between backends without changing `sandbox.yaml`
+- Secrets can be migrated between backends without changing `sandbox/secrets.yaml`
 - The local backend serves as the "batteries-included" default — sandbox-manager works out of the box
 
 **Cons:**

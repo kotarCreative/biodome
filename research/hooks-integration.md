@@ -303,15 +303,13 @@ Integration points:
 ### Config-level Hooks
 
 ```yaml
-# sandbox.yaml
-version: 1
-
+# sandbox/config.yaml
 name: my-project
-
-# Base image (prebuilt, fast)
 image: ghcr.io/sandbox-manager/node:20-python:3.12
+```
 
-# Packages to install on top
+```yaml
+# sandbox/env.yaml
 packages:
   apt:
     - postgresql-client
@@ -319,38 +317,40 @@ packages:
   npm:
     - typescript
     - vite
+```
 
-# Dependencies (services to start)
-services:
-  db:
-    image: postgres:16-alpine
-    ports: ["5432:5432"]
-    env:
-      POSTGRES_PASSWORD: dev
-  redis:
-    image: redis:7-alpine
-    ports: ["6379:6379"]
+```yaml
+# sandbox/services.yaml
+db:
+  image: postgres:16-alpine
+  ports: ["5432:5432"]
+  env:
+    POSTGRES_PASSWORD: dev
+redis:
+  image: redis:7-alpine
+  ports: ["6379:6379"]
+```
 
-# Lifecycle hooks
-hooks:
-  build:
-    pre:
-      - command: ./scripts/check-versions.sh
-      - inline: echo "Building sandbox for $USER"
-    post:
-      - command: ./scripts/validate-image.sh
-  
-  start:
-    post:
-      - command: ./scripts/wait-for-db.sh
-      - command: ./scripts/run-migrations.sh
-      - inline: |
-          echo "Sandbox ready!"
-          echo "PostgreSQL: postgres://user:pass@localhost:5432/mydb"
-  
-  stop:
-    pre:
-      - command: ./scripts/backup-data.sh
+```yaml
+# sandbox/hooks.yaml
+build:
+  pre:
+    - command: ./scripts/check-versions.sh
+    - inline: echo "Building sandbox for $USER"
+  post:
+    - command: ./scripts/validate-image.sh
+
+start:
+  post:
+    - command: ./scripts/wait-for-db.sh
+    - command: ./scripts/run-migrations.sh
+    - inline: |
+        echo "Sandbox ready!"
+        echo "PostgreSQL: postgres://user:pass@localhost:5432/mydb"
+
+stop:
+  pre:
+    - command: ./scripts/backup-data.sh
 
 # Agent integrations
 agents:
@@ -406,33 +406,24 @@ interface SandboxPlugin {
 
 ### Example Plugins
 
-**Docker Build Cache Plugin:**
+**Docker Build Cache:**
 ```yaml
-plugins:
-  - source: sandbox-manager/build-cache
-    config:
-      registry: ghcr.io/myorg/cache
-      mode: max
+# sandbox/config.yaml
+build:
+  cache:
+    registry: ghcr.io/myorg/cache
+    mode: max
 ```
 
-**GitHub Actions Prebuild Plugin:**
+**Idle Management:**
 ```yaml
-plugins:
-  - source: sandbox-manager/github-actions-prebuild
-    config:
-      workflow: .github/workflows/prebuild-sandbox.yml
-      triggers:
-        - paths: ["sandbox.yaml", "Dockerfile.sandbox"]
+# sandbox/config.yaml
+idle:
+  timeout: 30m
+  action: stop       # stop, snapshot, or hibernate
 ```
 
-**Idle Management Plugin:**
-```yaml
-plugins:
-  - source: sandbox-manager/idle-management
-    config:
-      timeout: 30m
-      action: stop # stop, snapshot, or hibernate
-```
+**GitHub Actions Prebuild:** Handled by `sandbox generate ci`, not sandbox config. The generated workflow triggers on changes to `sandbox/**/*.yaml`.
 
 ---
 

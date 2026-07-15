@@ -2,7 +2,7 @@
 
 ## How Our Proposed Tool Differs
 
-Our sandbox manager aims to fill a specific gap: a **platform-agnostic, config-driven** tool that generates optimized Docker environments, manages services, and integrates with AI coding agents -- all from a single YAML file. Below is how it stacks up against each competitor.
+Our sandbox manager aims to fill a specific gap: a **platform-agnostic, config-driven** tool that generates optimized Docker environments, manages services, and integrates with AI coding agents -- using a filesystem-first config structure (each concern in its own file under a `sandbox/` directory). Below is how it stacks up against each competitor.
 
 ---
 
@@ -10,7 +10,7 @@ Our sandbox manager aims to fill a specific gap: a **platform-agnostic, config-d
 
 | Aspect | Devbox | Our Tool |
 |--------|--------|----------|
-| Config | JSON (`devbox.json`) | YAML (`sandbox.yaml`) |
+| Config | JSON (`devbox.json`) | Filesystem (`sandbox/` directory) |
 | Runtime | Nix (isolated shell) | Docker (container) |
 | Services | Via process-compose plugin | First-class service definitions |
 | AI hooks | None built-in | OpenCode MCP + Pi extension |
@@ -35,7 +35,7 @@ Our sandbox manager aims to fill a specific gap: a **platform-agnostic, config-d
 
 | Aspect | devenv | Our Tool |
 |--------|-------|----------|
-| Config | Nix (`devenv.nix`) | YAML (`sandbox.yaml`) |
+| Config | Nix (`devenv.nix`) | Filesystem (`sandbox/` directory) |
 | Runtime | Nix (shell) | Docker (container) |
 | Services | Built-in (postgres, redis, mysql, etc.) | Built-in (similar scope) |
 | Process mgmt | Built-in process-compose | Docker Compose |
@@ -60,7 +60,7 @@ Our sandbox manager aims to fill a specific gap: a **platform-agnostic, config-d
 
 | Aspect | Dev Containers | Our Tool |
 |--------|---------------|----------|
-| Config | JSONC (`devcontainer.json`) | YAML (`sandbox.yaml`) |
+| Config | JSONC (`devcontainer.json`) | Filesystem (`sandbox/` directory) |
 | IDE support | Excellent (VS Code, JetBrains) | CLI-first (IDE via generated config) |
 | Features | OCI artifact features | Namespaced packages + languages |
 | Services | Docker Compose sidecars | First-class service definitions |
@@ -88,13 +88,13 @@ Our sandbox manager aims to fill a specific gap: a **platform-agnostic, config-d
 | Aspect | sandboxd | Our Tool |
 |--------|---------|----------|
 | Focus | AI agent sandboxes | General dev environments |
-| Config | Hardcoded | YAML config |
+| Config | Hardcoded | Filesystem (`sandbox/` directory) |
 | Services | None | Full service definitions |
 | Preview URLs | Built-in (Traefik) | Planned via provider |
 | Idle mgmt | Built-in | Via plugin |
 
 ### Pros vs sandboxd
-- **Config-driven**: sandboxd has no user-facing config; we have full `sandbox.yaml`
+- **Config-driven**: sandboxd has no user-facing config; we have a full `sandbox/` directory
 - **Package management**: sandboxd provides base images; we let users declare packages
 - **Service management**: sandboxd is container-only; we manage postgres/redis etc.
 - **Generality**: We target all dev workflows; sandboxd targets AI agent sandboxes
@@ -160,7 +160,7 @@ Our sandbox manager aims to fill a specific gap: a **platform-agnostic, config-d
 
 | Aspect | DevPod | Our Tool |
 |--------|-------|----------|
-| Config | devcontainer.json | sandbox.yaml |
+| Config | devcontainer.json | `sandbox/` directory |
 | Providers | Docker, AWS, GCP, Azure, SSH, K8s | Docker, Fly.io, Modal, SSH, K8s (planned) |
 | Service mgmt | Docker Compose sidecars | First-class service definitions |
 | IDE support | VS Code, JetBrains | CLI-first (agent-focused) |
@@ -217,7 +217,7 @@ Our sandbox manager aims to fill a specific gap: a **platform-agnostic, config-d
 
 ### Pros vs Agentrove
 - **Lightweight**: CLI tool vs full web app with database, Redis, API server
-- **Config-driven**: sandbox.yaml in any repo vs Agentrove's workspace management
+- **Config-driven**: `sandbox/` directory in any repo vs Agentrove's workspace management
 - **Platform portability**: Provider model vs Docker-only
 - **Package management**: Declarative packages vs pre-built images
 
@@ -235,7 +235,7 @@ Our sandbox manager aims to fill a specific gap: a **platform-agnostic, config-d
 
 | Need | Devbox | devenv | Dev Containers | sandboxd | mkenv | Asylum | DevPod | Containarium |
 |------|--------|--------|---------------|---------|-------|--------|--------|-------------|
-| Simple YAML config | JSON | Nix | JSONC | None | None | YAML | JSONC | Pre-defined |
+| Simple filesystem config | JSON | Nix | JSONC | None | None | YAML | JSONC | Pre-defined |
 | Service definitions | Plugin | Built-in | Compose | No | No | No | Compose | Stack scripts |
 | Platform abstraction | No | No | No | No | No | No | Yes | LXC only |
 | AI agent hooks | No | No | No | Implicit | No | Claude | No | No |
@@ -247,7 +247,7 @@ Our sandbox manager aims to fill a specific gap: a **platform-agnostic, config-d
 ### Our Differentiator
 
 A tool that combines:
-1. **Devbox's simplicity** (JSON/YAML config) + **devenv's services** (built-in postgres/redis) + **DevPod's provider model** (any infrastructure) + **Asylum's AI agent focus** (MCP, Pi, OpenCode) + **mkenv's fast startup** (prebuilt images)
+1. **Devbox's simplicity** (config-driven) + **Eve's filesystem-first design** (config as directory of files) + **devenv's services** (built-in postgres/redis) + **DevPod's provider model** (any infrastructure) + **Asylum's AI agent focus** (MCP, Pi, OpenCode) + **mkenv's fast startup** (prebuilt images)
 2. **Config-to-container generation** -- users never write a Dockerfile or Docker Compose file
 3. **Auto-generated context** -- AGENTS.md with connection strings, MCP servers for agents
 4. **Platform-agnostic by design** -- same config works on Docker, Fly.io, Modal, SSH, K8s
@@ -266,7 +266,7 @@ A tool that combines:
 
 | Week | Deliverable |
 |------|-------------|
-| 1 | `sandbox.yaml` schema (languages, packages: apt/npm/pip, services: postgres/redis) + validator |
+| 1 | `sandbox/` directory structure + file schemas (languages, packages: apt/npm/pip, services: postgres/redis) + validators |
 | 2 | Config → optimized Dockerfile generator (layer ordering, cache mounts, .dockerignore) |
 | 3 | Config → docker-compose.yaml generator (service healthchecks, env wiring, volumes) |
 | 4 | `sandbox build` (buildx + registry cache) + `sandbox up` (compose up + health waits) |

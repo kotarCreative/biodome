@@ -340,7 +340,7 @@ The provider abstraction will leak at:
 ### Architectural Recommendation
 
 ```
-[User CLI/TUI] -> [Config (sandbox.yaml)] -> [Provider Plugin Interface]
+[User CLI/TUI] -> [Config (sandbox/ directory)] -> [Provider Plugin Interface]
                                                |
                            +-------------------+-------------------+
                            |                   |                   |

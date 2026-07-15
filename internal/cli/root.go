@@ -12,22 +12,27 @@ import (
 func NewRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sandbox",
-		Short: "Sandbox Manager - secure secrets management for development environments",
-		Long: `A unified secrets manager that works locally and across cloud providers.
+		Short: "Sandbox Manager - declarative development environments",
+		Long: `A declarative development environment manager.
 
-Stores secrets encrypted at rest and supports pluggable backends
-for AWS Secrets Manager, GCP Secret Manager, 1Password, and more.`,
+Reads sandbox/ config files and provisions a reproducible workspace
+with languages, tools, and backing services. The runtime is opaque:
+you configure what you need, and the tool handles the rest.
+
+Includes a pluggable secret store with local encrypted storage
+and AWS Secrets Manager support.`,
 	}
 
 	pflags := cmd.PersistentFlags()
 	pflags.StringP("backend", "b", "", "secret backend to use (default from config)")
 
-	cmd.AddCommand(newSetCmd())
-	cmd.AddCommand(newGetCmd())
-	cmd.AddCommand(newListCmd())
-	cmd.AddCommand(newDeleteCmd())
+	cmd.AddCommand(newInitCmd())
+	cmd.AddCommand(newBuildCmd())
+	cmd.AddCommand(newUpCmd())
+	cmd.AddCommand(newDownCmd())
+	cmd.AddCommand(newExecCmd())
 	cmd.AddCommand(newConfigCmd())
-	cmd.AddCommand(newLoginCmd())
+	cmd.AddCommand(newSecretCmd())
 
 	return cmd
 }

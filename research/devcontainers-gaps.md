@@ -111,7 +111,7 @@ The same information must be manually duplicated across `docker-compose.yml`, `d
 }
 ```
 
-If someone changes the database password in `docker-compose.yml`, the `remoteEnv` in `devcontainer.json` and the `README.md` both need manual updates. Our tool generates all of these from the single `sandbox.yaml`.
+If someone changes the database password in `docker-compose.yml`, the `remoteEnv` in `devcontainer.json` and the `README.md` both need manual updates. Our tool generates all of these from the `sandbox/` directory.
 
 ---
 
@@ -144,7 +144,7 @@ Dev Containers uses Docker images. Dependency changes require a full image rebui
 |----------|---------------|----------|
 | Change Dockerfile | 2-5 min rebuild | Config change triggers prebuild in CI |
 | Change package.json | npm install in container (fast) | Prebuilt image with deps cached |
-| Add a package | Update Dockerfile + rebuild | Add line to sandbox.yaml |
+| Add a package | Update Dockerfile + rebuild | Add file under `sandbox/` |
 | First setup on new machine | Pull + build (5-10 min) | Pull prebuilt image (seconds) |
 
 From the DevToolReviews comparison:
@@ -247,7 +247,7 @@ For AI coding agents that work in a terminal (Pi, OpenCode), the Dev Containers 
 
 It works, but the agent gets none of the benefits -- no auto-generated context, no service discovery, no MCP tools.
 
-Our tool is CLI-first with IDE as optional output. It can generate `devcontainer.json` from `sandbox.yaml` when you want IDE integration, but the primary interface is terminal-native.
+Our tool is CLI-first with IDE as optional output. It can generate `devcontainer.json` from the `sandbox/` directory when you want IDE integration, but the primary interface is terminal-native.
 
 **Source**: Dev Containers JetBrains support (https://www.jetbrains.com/help/idea/connect-to-devcontainer.html)
 
@@ -257,7 +257,7 @@ Our tool is CLI-first with IDE as optional output. It can generate `devcontainer
 
 | Capability | Dev Containers | Our Tool |
 |-----------|---------------|----------|
-| **Config format** | `devcontainer.json` (JSONC) | `sandbox.yaml` (YAML) |
+| **Config format** | `devcontainer.json` (JSONC) | `sandbox/` directory (YAML files) |
 | **Runtime** | Docker only | Docker + providers (Fly, Modal, K8s, SSH) |
 | **Service definitions** | Raw Docker Compose YAML | Typed service types (postgres, redis, etc.) |
 | **Auto-generated env vars** | Manual everywhere | Auto-generated from config |
@@ -272,10 +272,10 @@ Our tool is CLI-first with IDE as optional output. It can generate `devcontainer
 
 ## The Hybrid Path
 
-The smartest approach isn't to compete with Dev Containers -- it's to **be a superset**. Our `sandbox.yaml` can **generate** `devcontainer.json` + `Dockerfile` + `docker-compose.yml` as an output format. Users who want VS Code integration get it. Users who want AI agent integration get that too. Same config, different outputs.
+The smartest approach isn't to compete with Dev Containers -- it's to **be a superset**. Our `sandbox/` directory can **generate** `devcontainer.json` + `Dockerfile` + `docker-compose.yml` as output. Users who want VS Code integration get it. Users who want AI agent integration get that too. Same config source, different outputs.
 
 ```
-sandbox.yaml
+sandbox/ directory
     |
     ├──> Dockerfile + docker-compose.yml  (for local Docker)
     ├──> devcontainer.json                (for VS Code / Codespaces)

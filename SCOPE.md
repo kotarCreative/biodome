@@ -10,31 +10,31 @@ This document defines the scope and timeline for the sandbox manager project, br
 
 ### Primary Goal
 Build a working sandbox manager that can:
-- Parse `sandbox.yaml` configuration files
+- Parse the `sandbox/` configuration directory structure
 - Generate optimized Dockerfiles
 - Build and run containers with services
 - Execute basic lifecycle hooks
 
 ### Deliverables
 
-#### Week 1: Config Parser + Basic YAML Handling
+#### Week 1: Config Discovery + File Parsing
 
 **Core Components:**
 1. `sandbox-cli` main entry point
-2. YAML config parser (`sandbox.yaml` schema)
-3. Basic validation with helpful error messages
+2. Config file discovery and parser for the `sandbox/` directory
+3. Per-file schema validation with helpful error messages
 4. Simple help/usage output
 
 **Technical Specifications:**
-- Parse sandbox.yaml schema (see `research/package-service-interface.md`)
-- Validate required fields (name, version, packages, languages)
+- Discover and parse files under the `sandbox/` directory (`config.yaml`, `env.yaml`, `services.yaml`, `hooks.yaml`, `secrets.yaml`)
 - Support basic interpolation (`${LOCAL_SSH_AGENT}`, `${VARIABLE}`)
 - Generate error messages that guide users toward fixes
+- See `research/package-service-interface.md` for the full file structure
 
 **Acceptance Criteria:**
-- `sandbox init` creates valid `sandbox.yaml`
-- `sandbox config validate sandbox.yaml` passes
-- Invalid configs produce helpful error messages
+- `sandbox init` creates a valid `sandbox/` directory with default files
+- `sandbox config validate` passes for all files under `sandbox/`
+- Invalid configs produce helpful error messages pointing to the exact file
 
 #### Week 2: Dockerfile Generator
 
@@ -343,14 +343,13 @@ export VAULT_PATH="company/dev-vault"
 **Implementation Patterns:**
 
 ```yaml
-# sandbox.yaml - 1Password secrets source
-sandbox_secrets:
-  source: "1password"
-  vault: "company/dev-vault"
-  items:
-    - "Production Database Password"
-    - "API Authentication Key"
-    - "SSH Private Key"
+# sandbox/secrets.yaml - 1Password secrets source
+source: "1password"
+vault: "company/dev-vault"
+items:
+  - "Production Database Password"
+  - "API Authentication Key"
+  - "SSH Private Key"
 ```
 
 #### Week 9: Provider Abstraction
@@ -452,23 +451,15 @@ hooks:
 **Plugin Architecture:**
 
 ```yaml
-sandbox.yaml
-plugins:
-  - source: "sandbox-manager/build-cache"
-    config:
-      registry: "ghcr.io/myorg/cache"
-      mode: "max"
-  
-  - source: "sandbox-manager/idle-management"
-    config:
-      timeout: "30m"
-      action: "stop"
-  
-  - source: "github-actions-prebuild"
-    config:
-      workflow: ".github/workflows/prebuild.yml"
-      triggers:
-        - paths: ["sandbox.yaml", "Dockerfile.sandbox"]
+# sandbox/config.yaml
+build:
+  cache:
+    registry: "ghcr.io/myorg/cache"
+    mode: "max"
+
+idle:
+  timeout: "30m"
+  action: "stop"
 ```
 
 ---

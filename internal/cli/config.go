@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/anomalyco/sandbox-manager/internal/config"
+	"github.com/anomalyco/sandbox-manager/internal/sandbox"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -30,6 +31,33 @@ func newConfigCmd() *cobra.Command {
 			}
 			fmt.Fprint(os.Stdout, string(out))
 			return nil
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "validate",
+		Short: "Validate the sandbox/ config files",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rootDir, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("get working directory: %w", err)
+			}
+
+			cfg, err := sandbox.Discover(rootDir)
+			if err != nil {
+				return err
+			}
+
+			errs := sandbox.Validate(cfg)
+			if len(errs) == 0 {
+				fmt.Fprintln(os.Stderr, "sandbox config is valid")
+				return nil
+			}
+
+			for _, e := range errs {
+				fmt.Fprintf(os.Stderr, "  %s\n", e.Error())
+			}
+			return fmt.Errorf("%d validation error(s) found", len(errs))
 		},
 	})
 

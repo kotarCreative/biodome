@@ -145,12 +145,17 @@ Run builds from a directory with only necessary files. Use `docker build -f path
 Build and push dev images to a registry. Users pull instead of building:
 
 ```yaml
-# sandbox.yaml
+# sandbox/config.yaml
 image: ghcr.io/myorg/dev-env:node20-python312
+```
+
+```yaml
+# sandbox/env.yaml
 packages:
-  - [apt] build-essential
-  - [nix] nodejs@20
-  - [pip] pytest
+  apt:
+    - build-essential
+  pip:
+    - pytest
 ```
 
 ### CI/CD Prebuild Pipelines
@@ -161,7 +166,7 @@ Use GitHub Actions or similar to rebuild dev images on config changes:
 on:
   push:
     paths:
-      - 'sandbox.yaml'
+      - 'sandbox/**/*.yaml'
 ```
 
 ### Layer Prefetching
@@ -291,10 +296,10 @@ During active development, prefer bind mounts + hot reload (nodemon, air, etc.) 
 ## 9. Config-to-Image Pipeline (Proposed)
 
 ```
-sandbox.yaml
+sandbox/ directory
   |
   v
-[Parse + Validate]
+[Discover + Parse + Validate]
   |
   |-- Resolve language versions (e.g., "lts" -> "20.11.1")
   |-- Resolve service versions (e.g., "latest" -> "16-alpine")

@@ -363,7 +363,7 @@ stringData:
 **Implementation:**
 
 ```yaml
-# sandbox.yaml - Build secrets section
+# sandbox/secrets.yaml - Build secrets section
 sandbox_secrets:
   # Git credentials for cloning private repos
   git_ssh_key: "${LOCAL_SSH_AGENT}"
@@ -401,7 +401,7 @@ RUN --mount=type=secret,id=git_ssh_key \
 **Implementation:**
 
 ```yaml
-# sandbox.yaml - Runtime secrets approach
+# sandbox/secrets.yaml - Runtime secrets approach
 runtime_secrets:
   environment_variables:
     # Auto-generated from service definitions
@@ -563,26 +563,24 @@ RUN git clone [[email protected]](/cdn-cgi/l/email-protection) :org/private-repo
 CMD ["bash"]
 ```
 
-### sandbox.yaml (Config)
+### sandbox/ Directory (Config)
 
 ```yaml
-version: 1
+# sandbox/config.yaml
 name: my-app
+```
 
-sandbox_secrets:
-  git_ssh_key: "${LOCAL_SSH_AGENT}"
-  git_config: "${LOCAL_GIT_CONFIG}"
-
+```yaml
+# sandbox/env.yaml
 packages:
   apt:
     - curl
     - git
     - openssh-client
+```
 
-services:
-  app:
-    image: my-app:latest
-    environment:
-      APP_ENVIRONMENT: production
-      APP_API_URL: "${CONFIGURED_API_URL}"
+```yaml
+# sandbox/secrets.yaml
+git_ssh_key: "${LOCAL_SSH_AGENT}"
+git_config: "${LOCAL_GIT_CONFIG}"
 ```
