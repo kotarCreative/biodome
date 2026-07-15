@@ -20,8 +20,13 @@ import {
   ToolOptions,
   ServiceOptions,
 } from "./feature.js";
+import { BuildContext } from "./build-context.js";
+import { languageHandlers } from "./languages.js";
+import { formatPackage } from "./packages.js";
+import { serviceConfigs, defaultImage } from "./services.js";
+import { toolHandlers } from "./tools.js";
 
-export class SandboxContext implements FeatureContext {
+export class SandboxContext implements FeatureContext, BuildContext {
   plan: Plan;
   private rootDir: string;
 
@@ -46,78 +51,40 @@ export class SandboxContext implements FeatureContext {
   }
 
   addLanguage(name: string, options: LanguageOptions = {}): void {
-    if (name === "python") {
-      this.setupPython(options);
-    } else if (name === "node") {
-      this.setupNode(options);
-    } else if (name === "go") {
-      this.setupGo(options);
-    } else if (name === "rust") {
-      this.setupRust(options);
-    } else if (name === "java") {
-      this.setupJava(options);
+    const handler = languageHandlers[name];
+    if (!handler) {
+      return;
     }
+    handler(this, options);
   }
 
   addPackage(manager: string, name: string, options: PackageOptions = {}): void {
-    switch (manager) {
-      case "npm":
-        this.addLanguageSnippet(`RUN npm install -g ${formatPackage(name, options)}`);
-        break;
-      case "pip":
-        this.addLanguageSnippet(`RUN pip install --no-cache-dir ${formatPackage(name, options, "==")}`);
-        break;
-      case "cargo":
-        this.addLanguageSnippet(`RUN cargo install ${name}`);
-        break;
-      case "go":
-        this.addLanguageSnippet(`RUN go install ${name}@latest`);
-        break;
-      case "gem":
-        this.addLanguageSnippet(`RUN gem install ${name}`);
-        break;
-      default:
-        throw new Error(`Unknown package manager ${manager}`);
+    const commands: Record<string, string> = {
+      npm: `npm install -g ${formatPackage(name, options)}`,
+      pip: `pip install --no-cache-dir ${formatPackage(name, options, "==")}`,
+      cargo: `cargo install ${name}`,
+      go: `go install ${name}@latest`,
+      gem: `gem install ${name}`,
+    };
+
+    const command = commands[manager];
+    if (!command) {
+      throw new Error(`Unknown package manager ${manager}`);
     }
+    this.addLanguageSnippet(`RUN ${command}`);
   }
 
   addTool(name: string, _options: ToolOptions = {}): void {
-    switch (name) {
-      case "gh":
-        this.addAptPackage("gh");
-        this.addLanguageSnippet("RUN gh --version");
-        break;
-      case "kubectl":
-        this.addLanguageSnippet(
-          "RUN curl -fsSL https://dl.k8s.io/release/stable.txt > /tmp/kubectl-version && curl -fsSL https://dl.k8s.io/release/$(cat /tmp/kubectl-version)/bin/linux/amd64/kubectl -o /usr/local/bin/kubectl && chmod +x /usr/local/bin/kubectl"
-        );
-        this.addLanguageSnippet("RUN kubectl version --client");
-        break;
-      case "terraform":
-        this.addLanguageSnippet(
-          "RUN curl -fsSL https://releases.hashicorp.com/terraform/1.7.0/terraform_1.7.0_linux_amd64.zip -o /tmp/terraform.zip && unzip -o /tmp/terraform.zip -d /usr/local/bin/"
-        );
-        this.addLanguageSnippet("RUN terraform -version");
-        break;
-      case "psql":
-        this.addAptPackage("postgresql-client");
-        this.addLanguageSnippet("RUN psql --version");
-        break;
-      case "redis-cli":
-        this.addAptPackage("redis-tools");
-        this.addLanguageSnippet("RUN redis-cli --version");
-        break;
-      case "docker":
-        this.addAptPackage("docker.io");
-        this.addLanguageSnippet("RUN docker --version");
-        break;
-      default:
-        // Unknown tools are treated as apt packages.
-        this.addAptPackage(name);
+    const handler = toolHandlers[name];
+    if (handler) {
+      handler(this);
+    } else {
+      // Unknown tools are treated as apt packages.
+      this.addAptPackage(name);
     }
   }
 
-  private addAptPackage(name: string): void {
+  addAptPackage(name: string): void {
     if (!this.plan.build.aptPackages.includes(name)) {
       this.plan.build.aptPackages.push(name);
     }
@@ -141,31 +108,9 @@ export class SandboxContext implements FeatureContext {
       networks: ["sandbox"],
     };
 
-    if (type === "postgres") {
-      svc.environment.POSTGRES_USER = options.users?.[0]?.name || "postgres";
-      svc.environment.POSTGRES_PASSWORD = options.users?.[0]?.password || "postgres";
-      svc.environment.POSTGRES_DB = options.databases?.[0]?.name || "postgres";
-      svc.volumes.push({ host: `${name}_data`, container: "/var/lib/postgresql/data" });
-      svc.healthCheck = {
-        test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"],
-        interval: "5s",
-        timeout: "3s",
-        retries: 10,
-      };
-    } else if (type === "redis") {
-      if (options.password) {
-        svc.environment.REDIS_PASSWORD = options.password;
-      }
-      svc.volumes.push({ host: `${name}_data`, container: "/data" });
-      const test = options.password
-        ? `redis-cli ping | grep -q PONG`
-        : "redis-cli ping | grep -q PONG";
-      svc.healthCheck = {
-        test: ["CMD-SHELL", test],
-        interval: "5s",
-        timeout: "3s",
-        retries: 10,
-      };
+    const config = serviceConfigs[type];
+    if (config) {
+      config(svc, options);
     }
 
     this.plan.runtime.services.push(svc);
@@ -280,137 +225,10 @@ export class SandboxContext implements FeatureContext {
     }
   }
 
-  private addLanguageSnippet(snippet: string): void {
+  addLanguageSnippet(snippet: string): void {
     if (!this.plan.build.languageSnippets.includes(snippet)) {
       this.plan.build.languageSnippets.push(snippet);
     }
   }
-
-  private setupPython(options: LanguageOptions): void {
-    const version = options.version || "3.12";
-    if (!this.plan.build.baseImage) {
-      this.plan.build.baseImage = `python:${version}-slim`;
-    }
-
-    if (options.packageManager === "poetry") {
-      this.plan.build.dependencyFiles.push("pyproject.toml", "poetry.lock");
-      this.plan.build.dependencyInstalls.push({
-        files: ["pyproject.toml", "poetry.lock"],
-        command: `RUN pip install --no-cache-dir poetry && poetry config virtualenvs.in-project true && poetry install --no-root && poetry cache clear --all pypi && pip cache purge`,
-      });
-      this.plan.build.copyArtifacts.push({
-        files: ["pyproject.toml"],
-        lines: ["COPY --from=deps /workspace/.venv /workspace/.venv", "ENV PATH=/workspace/.venv/bin:$PATH"],
-      });
-    } else {
-      this.plan.build.dependencyFiles.push("requirements.txt");
-      this.plan.build.dependencyInstalls.push({
-        files: ["requirements.txt"],
-        command: `RUN python -m venv /workspace/.venv && /workspace/.venv/bin/pip install --no-cache-dir -r requirements.txt && pip cache purge`,
-      });
-      this.plan.build.copyArtifacts.push({
-        files: ["requirements.txt"],
-        lines: ["COPY --from=deps /workspace/.venv /workspace/.venv", "ENV PATH=/workspace/.venv/bin:$PATH"],
-      });
-    }
-  }
-
-  private setupNode(options: LanguageOptions): void {
-    const version = options.version || "20";
-    if (!this.plan.build.baseImage) {
-      this.plan.build.baseImage = `node:${version}-slim`;
-    }
-
-    if (options.packageManager === "pnpm") {
-      this.plan.build.languageSnippets.push("RUN corepack enable && corepack prepare pnpm@latest --activate");
-      this.plan.build.dependencyFiles.push("package.json", "pnpm-lock.yaml");
-      this.plan.build.dependencyInstalls.push({
-        files: ["package.json", "pnpm-lock.yaml"],
-        command: `RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile && pnpm store prune`,
-      });
-    } else if (options.packageManager === "yarn") {
-      this.plan.build.languageSnippets.push("RUN corepack enable && corepack prepare yarn@stable --activate");
-      this.plan.build.dependencyFiles.push("package.json", "yarn.lock");
-      this.plan.build.dependencyInstalls.push({
-        files: ["package.json", "yarn.lock"],
-        command: `RUN --mount=type=cache,target=/usr/local/share/.cache/yarn yarn install --frozen-lockfile && yarn cache clean`,
-      });
-    } else {
-      this.plan.build.dependencyFiles.push("package.json", "package-lock.json");
-      this.plan.build.dependencyInstalls.push(
-        {
-          files: ["package-lock.json"],
-          command: `RUN --mount=type=cache,target=/root/.npm npm ci --prefer-offline && npm cache clean --force`,
-        },
-        {
-          files: ["package.json"],
-          command: `RUN --mount=type=cache,target=/root/.npm npm install && npm cache clean --force`,
-        }
-      );
-    }
-
-    this.plan.build.copyArtifacts.push({
-      files: ["package.json"],
-      lines: ["COPY --from=deps /workspace/node_modules /workspace/node_modules"],
-    });
-    this.plan.build.nodeModulesVolume = true;
-  }
-
-  private setupGo(options: LanguageOptions): void {
-    const version = options.version || "1.22";
-    if (!this.plan.build.baseImage) {
-      this.plan.build.baseImage = `golang:${version}-alpine`;
-    }
-    this.plan.build.dependencyFiles.push("go.mod", "go.sum");
-    this.plan.build.dependencyInstalls.push({
-      files: ["go.mod", "go.sum"],
-      command: `RUN mkdir -p /workspace/go-mod && GOMODCACHE=/workspace/go-mod go mod download && go clean -cache`,
-    });
-    this.plan.build.copyArtifacts.push({
-      files: ["go.mod"],
-      lines: ["COPY --from=deps /workspace/go-mod /go/pkg/mod"],
-    });
-  }
-
-  private setupRust(options: LanguageOptions): void {
-    const version = options.version || "1.75";
-    if (!this.plan.build.baseImage) {
-      this.plan.build.baseImage = `rust:${version}-slim`;
-    }
-    this.plan.build.dependencyFiles.push("Cargo.toml", "Cargo.lock");
-    this.plan.build.dependencyInstalls.push({
-      files: ["Cargo.toml", "Cargo.lock"],
-      command: `RUN cargo fetch && rm -rf /usr/local/cargo/registry/cache`,
-    });
-    this.plan.build.copyArtifacts.push({
-      files: ["Cargo.toml"],
-      lines: ["COPY --from=deps /usr/local/cargo/registry /usr/local/cargo/registry"],
-    });
-  }
-
-  private setupJava(options: LanguageOptions): void {
-    const version = options.version || "21";
-    if (!this.plan.build.baseImage) {
-      this.plan.build.baseImage = `eclipse-temurin:${version}-jdk`;
-    }
-  }
 }
 
-function formatPackage(name: string, options: PackageOptions, sep = "@"): string {
-  return options.version ? `${name}${sep}${options.version}` : name;
-}
-
-function defaultImage(name: string): string {
-  switch (name) {
-    case "postgres":
-      return "postgres:16-alpine";
-    case "redis":
-      return "redis:7-alpine";
-    case "mysql":
-      return "mysql:8";
-    case "mongo":
-      return "mongo:7";
-    default:
-      return name;
-  }
-}
