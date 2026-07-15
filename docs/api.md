@@ -1,13 +1,11 @@
 # API reference
 
-Feature files are evaluated in a Node.js VM with a `sandbox` global. The only API you need is `sandbox.ctx()`.
-
-## `sandbox.ctx()`
-
-Returns the `FeatureContext` for the current project. All contributions mutate the shared Plan.
+Feature files are ECMAScript modules. Each file must export a default function that receives the `FeatureContext` for the current project.
 
 ```javascript
-const ctx = sandbox.ctx();
+export default function example(ctx) {
+  // contribute to the shared Plan
+}
 ```
 
 ## Context methods
@@ -28,6 +26,8 @@ Add a language runtime.
 - `options.version`: version string
 - `options.packageManager`: for Python `"poetry"`; for Node `"pnpm"`, `"yarn"`, or `"npm"`
 
+Only one base image is supported; a second language is ignored with a warning.
+
 ### `addPackage(manager, name, options)`
 
 Install a package.
@@ -35,7 +35,7 @@ Install a package.
 - `manager`: `"npm"`, `"pip"`, `"cargo"`, `"go"`, `"gem"`
 - `name`: package name
 - `options.version`: optional version
-- `options.indexUrl`: optional package index URL
+- `options.indexUrl`: optional registry/index URL (respected by `npm` and `pip`)
 
 ### `addTool(name, options)`
 
@@ -56,8 +56,10 @@ Set an environment variable for both build and runtime.
 Check if a file exists relative to the project root.
 
 ```javascript
-if (ctx.fileExists("vite.config.ts")) {
-  // ...
+export default function detect(ctx) {
+  if (ctx.fileExists("vite.config.ts")) {
+    // ...
+  }
 }
 ```
 
@@ -66,7 +68,9 @@ if (ctx.fileExists("vite.config.ts")) {
 Read a file as a UTF-8 string.
 
 ```javascript
-const content = ctx.readFile("README.md");
+export default function readMe(ctx) {
+  const content = ctx.readFile("README.md");
+}
 ```
 
 ### `readJSON(path)`
@@ -74,7 +78,9 @@ const content = ctx.readFile("README.md");
 Read and parse a JSON file.
 
 ```javascript
-const pkg = ctx.readJSON("package.json");
+export default function pkgCheck(ctx) {
+  const pkg = ctx.readJSON("package.json");
+}
 ```
 
 ### `exec(command)`
@@ -82,13 +88,15 @@ const pkg = ctx.readJSON("package.json");
 Run a shell command on the host during plan generation.
 
 ```javascript
-const result = ctx.exec("git branch --show-current");
-console.log(result.stdout);
-console.log(result.stderr);
-console.log(result.exitCode);
+export default function branchEnv(ctx) {
+  const result = ctx.exec("git branch --show-current");
+  console.log(result.stdout);
+  console.log(result.stderr);
+  console.log(result.exitCode);
+}
 ```
 
-All commands are logged to stdout.
+All commands are logged to stdout. Read-only commands (`info`, `config validate`, `generate agents.md`) execute feature modules in dry-run mode, so `ctx.exec` returns empty output and does not shell out.
 
 ## Process specification
 
@@ -166,3 +174,15 @@ Validate the `sandbox/` configuration without building.
 ### `sandbox generate agents.md`
 
 Generate an `AGENTS.md` file with connection info and available commands for AI coding agents.
+
+### `sandbox logs [process]`
+
+Tail logs from a managed process. Omit the process name to see all logs.
+
+### `sandbox ps`
+
+Show running containers for the project.
+
+### `sandbox restart [process]`
+
+Restart a managed process or all daemon processes.

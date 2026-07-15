@@ -201,4 +201,41 @@ describe("SandboxContext", () => {
 
     expect(ctx.plan.build.aptPackages).toContain("curl");
   });
+
+  it("adds netcat for tcp health checks", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addProcess({
+      name: "tcp-app",
+      command: ["node", "server.js"],
+      port: 3000,
+      healthCheck: { type: "tcp", port: 3000 },
+    });
+
+    expect(ctx.plan.build.aptPackages).toContain("netcat-openbsd");
+  });
+
+  it("rejects duplicate process names", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addProcess({ name: "web", command: ["node", "server.js"], port: 3000 });
+
+    expect(() =>
+      ctx.addProcess({ name: "web", command: ["node", "server.js"], port: 3001 })
+    ).toThrow(/Duplicate process or hook name/);
+  });
+
+  it("rejects duplicate service names", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addService("postgres", { port: 5432 });
+
+    expect(() => ctx.addService("postgres", { port: 5433 })).toThrow(
+      /Duplicate service name/
+    );
+  });
+
+  it("does not create orphan volumes for services with no mounts", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addService("custom", { image: "nginx:latest" });
+
+    expect(ctx.plan.runtime.volumes).toHaveLength(0);
+  });
 });

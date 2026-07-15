@@ -6,12 +6,12 @@ Every sandbox project has a `sandbox/` directory at the repository root. The dir
 my-project/
 ├── sandbox/
 │   ├── config.json          # project metadata
-│   ├── services.js          # backing services
+│   ├── services.mjs         # backing services
 │   └── features/
-│       ├── django.js        # daemon process
-│       ├── migrate.js       # one-shot hook
-│       ├── python.js        # language runtime
-│       └── npm-tools.js     # tools and packages
+│       ├── django.mjs       # daemon process
+│       ├── migrate.mjs      # one-shot hook
+│       ├── python.mjs       # language runtime
+│       └── npm-tools.mjs    # tools and packages
 ├── .sandbox/
 │   ├── Dockerfile           # generated
 │   ├── supervisord.conf     # generated
@@ -31,33 +31,33 @@ Static metadata for the project. Currently only the project name is required.
 }
 ```
 
-## `sandbox/services.js`
+## `sandbox/services.mjs`
 
 Backing services run as separate containers. Use `ctx.addService()` for each service.
 
 ```javascript
-const ctx = sandbox.ctx();
+export default function services(ctx) {
+  ctx.addService("postgres", {
+    port: 5432,
+    databases: [{ name: "myapp" }],
+    users: [{ name: "myapp", password: "devpassword" }],
+  });
 
-ctx.addService("postgres", {
-  port: 5432,
-  databases: [{ name: "myapp" }],
-  users: [{ name: "myapp", password: "devpassword" }],
-});
-
-ctx.addService("redis", { port: 6379 });
+  ctx.addService("redis", { port: 6379 });
+}
 ```
 
-## `sandbox/features/*.js`
+## `sandbox/features/*.mjs`
 
-Feature files declare languages, packages, tools, processes, and hooks. They are evaluated in sorted order with a shared `sandbox.ctx()`.
+Feature files declare languages, packages, tools, processes, and hooks. They are loaded in sorted order and each receives the shared context.
 
 ```javascript
-// sandbox/features/python.js
-const ctx = sandbox.ctx();
-
-ctx.addLanguage("python", { version: "3.12" });
-ctx.addTool("libpq-dev");
-ctx.addPackage("pip", "django", { version: "5.0" });
+// sandbox/features/python.mjs
+export default function python(ctx) {
+  ctx.addLanguage("python", { version: "3.12" });
+  ctx.addTool("libpq-dev");
+  ctx.addPackage("pip", "django", { version: "5.0" });
+}
 ```
 
 ## Generated files

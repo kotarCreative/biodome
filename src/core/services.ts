@@ -31,8 +31,6 @@ export const serviceConfigs: Record<string, (svc: Service, options: ServiceOptio
 export const defaultImages: Record<string, string> = {
   postgres: "postgres:16-alpine",
   redis: "redis:7-alpine",
-  mysql: "mysql:8",
-  mongo: "mongo:7",
 };
 
 export function defaultImage(name: string): string {

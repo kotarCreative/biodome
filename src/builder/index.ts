@@ -68,11 +68,13 @@ function validateConfigShape(value: unknown, path: string): Config {
 }
 
 async function loadServices(rootDir: string, ctx: SandboxContext): Promise<void> {
-  const path = join(rootDir, SANDBOX_DIR, "services.js");
-  if (!existsSync(path)) {
-    return;
+  for (const name of ["services.mjs", "services.js"]) {
+    const path = join(rootDir, SANDBOX_DIR, name);
+    if (existsSync(path)) {
+      await executeFeatureModule(path, ctx);
+      return;
+    }
   }
-  await executeFeatureModule(path, ctx);
 }
 
 async function loadFeatures(rootDir: string, ctx: SandboxContext): Promise<void> {
@@ -82,7 +84,7 @@ async function loadFeatures(rootDir: string, ctx: SandboxContext): Promise<void>
   }
 
   const files = readdirSync(featuresDir)
-    .filter((f) => f.endsWith(".js"))
+    .filter((f) => f.endsWith(".mjs") || f.endsWith(".js"))
     .sort();
 
   for (const file of files) {

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildPlan, validateConfig } from "../../builder/index";
-import { generateDockerfile } from "../../docker/generator";
+import { generateDockerfile, generateCompose } from "../../docker/generator";
 
 function createProject(dir: string, files: Record<string, string>): void {
   rmSync(dir, { recursive: true, force: true });
@@ -19,12 +19,12 @@ describe("buildPlan", () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
       "sandbox/config.json": JSON.stringify({ project: { name: "my-app" } }),
-      "sandbox/services.js": `
+      "sandbox/services.mjs": `
         export default function services(ctx) {
           ctx.addService("postgres", { port: 5432 });
         }
       `,
-      "sandbox/features/django.js": `
+      "sandbox/features/django.mjs": `
         export default function django(ctx) {
           ctx.addLanguage("python", { version: "3.12" });
           ctx.addProcess({
@@ -44,11 +44,27 @@ describe("buildPlan", () => {
     expect(plan.runtime.services[0].name).toBe("postgres");
   });
 
+  it("still loads legacy .js feature files", async () => {
+    const dir = join("/tmp", "sandbox-test-" + Date.now());
+    createProject(dir, {
+      "sandbox/config.json": JSON.stringify({ project: { name: "legacy-app" } }),
+      "sandbox/services.js": `
+        export default function services(ctx) {
+          ctx.addService("redis", { port: 6379 });
+        }
+      `,
+    });
+
+    const plan = await buildPlan(dir);
+    expect(plan.runtime.services).toHaveLength(1);
+    expect(plan.runtime.services[0].name).toBe("redis");
+  });
+
   it("executes arbitrary commands in features", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
       "sandbox/config.json": JSON.stringify({ project: { name: "cmd-app" } }),
-      "sandbox/features/env.js": `
+      "sandbox/features/env.mjs": `
         export default function env(ctx) {
           const result = ctx.exec("echo branch=main");
           ctx.setEnv("BRANCH", result.stdout.trim().split("=")[1]);
@@ -65,7 +81,7 @@ describe("buildPlan", () => {
     createProject(dir, {
       "sandbox/config.json": JSON.stringify({ project: { name: "node-app" } }),
       "package.json": JSON.stringify({ name: "node-app" }),
-      "sandbox/features/node.js": `
+      "sandbox/features/node.mjs": `
         export default function node(ctx) {
           ctx.addLanguage("node", { version: "20" });
         }
@@ -89,7 +105,7 @@ describe("buildPlan", () => {
       "sandbox/config.json": JSON.stringify({ project: { name: "node-app" } }),
       "package.json": JSON.stringify({ name: "node-app" }),
       "package-lock.json": JSON.stringify({}),
-      "sandbox/features/node.js": `
+      "sandbox/features/node.mjs": `
         export default function node(ctx) {
           ctx.addLanguage("node", { version: "20" });
         }
@@ -104,6 +120,24 @@ describe("buildPlan", () => {
     const dockerfile = generateDockerfile(plan);
     expect(dockerfile).toContain("npm ci");
   });
+
+  it("adds a named volume for the Python venv", async () => {
+    const dir = join("/tmp", "sandbox-test-" + Date.now());
+    createProject(dir, {
+      "sandbox/config.json": JSON.stringify({ project: { name: "py-app" } }),
+      "requirements.txt": "django\n",
+      "sandbox/features/python.mjs": `
+        export default function python(ctx) {
+          ctx.addLanguage("python", { version: "3.12" });
+        }
+      `,
+    });
+
+    const plan = await buildPlan(dir);
+    expect(plan.build.venvVolume).toBe(true);
+    const compose = generateCompose(plan);
+    expect(compose).toContain("venv:/workspace/.venv");
+  });
 });
 
 describe("validateConfig", () => {
@@ -111,7 +145,7 @@ describe("validateConfig", () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
       "sandbox/config.json": JSON.stringify({ project: { name: "my-app" } }),
-      "sandbox/features/dangerous.js": `
+      "sandbox/features/dangerous.mjs": `
         export default function dangerous(ctx) {
           ctx.exec("touch /tmp/should-not-run");
         }

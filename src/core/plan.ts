@@ -11,6 +11,7 @@ export interface BuildPlan {
   copyArtifacts: CopyArtifact[];
   environment: Record<string, string>;
   nodeModulesVolume: boolean;
+  venvVolume: boolean;
 }
 
 export interface DependencyInstall {
@@ -127,6 +128,7 @@ export function createPlan(project: string): Plan {
       copyArtifacts: [],
       environment: {},
       nodeModulesVolume: false,
+      venvVolume: false,
     },
     runtime: {
       services: [],

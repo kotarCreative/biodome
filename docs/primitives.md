@@ -1,25 +1,27 @@
 # Primitives
 
-Primitives are the building blocks of a sandbox. You add them through `sandbox.ctx()` inside your feature files.
+Primitives are the building blocks of a sandbox. You add them through the context object passed to your feature modules.
 
 ## `addProcess(spec)`
 
 Declares a long-running process managed by `supervisord` inside the dev container. Daemon processes are started automatically when the container starts, expose ports, and can have health checks.
 
 ```javascript
-ctx.addProcess({
-  name: "django",
-  command: ["python", "manage.py", "runserver", "0.0.0.0:8000"],
-  port: 8000,
-  healthCheck: {
-    type: "http",
-    url: "http://localhost:8000/admin/login/",
-    interval: "5s",
-    timeout: "3s",
-    retries: 10,
-  },
-  environment: { DEBUG: "1" },
-});
+export default function django(ctx) {
+  ctx.addProcess({
+    name: "django",
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8000"],
+    port: 8000,
+    healthCheck: {
+      type: "http",
+      url: "http://localhost:8000/admin/login/",
+      interval: "5s",
+      timeout: "3s",
+      retries: 10,
+    },
+    environment: { DEBUG: "1" },
+  });
+}
 ```
 
 - `name` — unique identifier.
@@ -37,11 +39,13 @@ ctx.addProcess({
 Sugar for `addProcess({ mode: "oneshot", ... })`. Hooks run once at a specific lifecycle point.
 
 ```javascript
-ctx.addHook({
-  name: "migrate",
-  command: ["python", "manage.py", "migrate"],
-  startOn: "start.post",
-});
+export default function migrate(ctx) {
+  ctx.addHook({
+    name: "migrate",
+    command: ["python", "manage.py", "migrate"],
+    startOn: "start.post",
+  });
+}
 ```
 
 Lifecycle points:
@@ -56,11 +60,10 @@ Lifecycle points:
 Adds a language runtime and configures dependency installation.
 
 ```javascript
-ctx.addLanguage("python", { version: "3.12" });
-ctx.addLanguage("node", { version: "20", packageManager: "pnpm" });
-ctx.addLanguage("go", { version: "1.22" });
-ctx.addLanguage("rust", { version: "1.75" });
-ctx.addLanguage("java", { version: "21" });
+export default function stack(ctx) {
+  ctx.addLanguage("python", { version: "3.12" });
+  ctx.addLanguage("node", { version: "20", packageManager: "pnpm" });
+}
 ```
 
 Language setup affects:
@@ -72,34 +75,41 @@ Language setup affects:
 
 Manifest files are detected from the project root. For example, Node.js uses `npm ci` when `package-lock.json` exists and falls back to `npm install` when only `package.json` exists. If no manifest is present, only the base image is configured and no dependency install step is emitted.
 
+Only one base image is supported. If a second `addLanguage` call would change the base image, it is ignored and a warning is logged.
+
 ## `addPackage(manager, name, options)`
 
 Installs a package through a language-specific package manager.
 
 ```javascript
-ctx.addPackage("npm", "typescript", { version: "5.4" });
-ctx.addPackage("pip", "django", { version: "5.0" });
-ctx.addPackage("cargo", "ripgrep");
-ctx.addPackage("go", "github.com/air-verse/air");
-ctx.addPackage("gem", "bundler");
+export default function packages(ctx) {
+  ctx.addPackage("npm", "typescript", { version: "5.4" });
+  ctx.addPackage("pip", "django", { version: "5.0" });
+  ctx.addPackage("cargo", "ripgrep");
+  ctx.addPackage("go", "github.com/air-verse/air");
+}
 ```
+
+- `options.version` pins a version where the manager supports it.
 
 ## `addTool(name, options)`
 
 Installs a CLI tool or system package. Well-known tools use custom install scripts; unknown names are treated as apt packages.
 
 ```javascript
-ctx.addTool("gh");
-ctx.addTool("kubectl");
-ctx.addTool("terraform");
-ctx.addTool("psql");
-ctx.addTool("redis-cli");
-ctx.addTool("docker");
+export default function tools(ctx) {
+  ctx.addTool("gh");
+  ctx.addTool("kubectl");
+  ctx.addTool("terraform");
+  ctx.addTool("psql");
+  ctx.addTool("redis-cli");
+  ctx.addTool("docker");
 
-// Unknown names are installed via apt.
-ctx.addTool("curl");
-ctx.addTool("git");
-ctx.addTool("libpq-dev");
+  // Unknown names are installed via apt.
+  ctx.addTool("curl");
+  ctx.addTool("git");
+  ctx.addTool("libpq-dev");
+}
 ```
 
 ## `addService(name, options)`
@@ -107,11 +117,13 @@ ctx.addTool("libpq-dev");
 Declares a backing service. See [services in file-layout.md](file-layout.md) for details.
 
 ```javascript
-ctx.addService("postgres", {
-  port: 5432,
-  databases: [{ name: "myapp" }],
-  users: [{ name: "myapp", password: "devpassword" }],
-});
+export default function services(ctx) {
+  ctx.addService("postgres", {
+    port: 5432,
+    databases: [{ name: "myapp" }],
+    users: [{ name: "myapp", password: "devpassword" }],
+  });
+}
 ```
 
 ## `setEnv(key, value)`
@@ -119,32 +131,36 @@ ctx.addService("postgres", {
 Sets an environment variable available in both the build and runtime environments.
 
 ```javascript
-ctx.setEnv("DEBUG", "1");
+export default function env(ctx) {
+  ctx.setEnv("DEBUG", "1");
+}
 ```
 
 ## Health checks
 
-Health checks are attached to daemon processes and, in the generated compose file, to the dev service.
+Health checks are attached to daemon processes. In the generated compose file, the first daemon health check is also wired to the dev service health check.
 
 ```javascript
-ctx.addProcess({
-  name: "api",
-  command: ["node", "server.js"],
-  port: 3000,
-  healthCheck: {
-    type: "http",
-    url: "http://localhost:3000/health",
-    interval: "5s",
-    timeout: "3s",
-    retries: 10,
-  },
-});
+export default function api(ctx) {
+  ctx.addProcess({
+    name: "api",
+    command: ["node", "server.js"],
+    port: 3000,
+    healthCheck: {
+      type: "http",
+      url: "http://localhost:3000/health",
+      interval: "5s",
+      timeout: "3s",
+      retries: 10,
+    },
+  });
+}
 ```
 
 Supported types:
 
 - `http` — checks via `curl`. Default type.
-- `tcp` — checks via `nc`.
+- `tcp` — checks via `nc` (netcat is installed automatically).
 - `exec` — runs a custom command.
 
 For `http`, if `url` is omitted, it is derived from the declared port.
@@ -154,17 +170,17 @@ For `http`, if `url` is omitted, it is derived from the declared port.
 Features can inspect the project before contributing.
 
 ```javascript
-const ctx = sandbox.ctx();
+export default function detect(ctx) {
+  if (ctx.fileExists("pyproject.toml")) {
+    ctx.addLanguage("python", { version: "3.12", packageManager: "poetry" });
+  } else {
+    ctx.addLanguage("python", { version: "3.12" });
+  }
 
-if (ctx.fileExists("pyproject.toml")) {
-  ctx.addLanguage("python", { version: "3.12", packageManager: "poetry" });
-} else {
-  ctx.addLanguage("python", { version: "3.12" });
-}
-
-const pkg = ctx.readJSON("package.json");
-if (pkg?.dependencies?.next) {
-  ctx.addTool("vercel");
+  const pkg = ctx.readJSON("package.json");
+  if (pkg?.dependencies?.next) {
+    ctx.addTool("vercel");
+  }
 }
 ```
 
@@ -173,13 +189,14 @@ if (pkg?.dependencies?.next) {
 Features can run arbitrary commands during plan generation.
 
 ```javascript
-const ctx = sandbox.ctx();
-const result = ctx.exec("git branch --show-current");
-const branch = result.stdout.trim();
+export default function branchEnv(ctx) {
+  const result = ctx.exec("git branch --show-current");
+  const branch = result.stdout.trim();
 
-if (branch !== "main") {
-  ctx.setEnv("DEBUG", "1");
+  if (branch !== "main") {
+    ctx.setEnv("DEBUG", "1");
+  }
 }
 ```
 
-Commands are logged to stdout.
+Commands are logged to stdout. Read-only commands such as `info` and `config validate` run feature modules in dry-run mode, so `ctx.exec` returns empty output and does not shell out.

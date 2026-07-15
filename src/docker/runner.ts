@@ -2,6 +2,24 @@ import { execFileSync, StdioOptions } from "node:child_process";
 
 const COMPOSE_FILE = ".sandbox/docker-compose.yaml";
 
+export class DockerError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DockerError";
+  }
+}
+
+export function assertDockerAvailable(): void {
+  try {
+    execFileSync("docker", ["version"], { stdio: "ignore" });
+  } catch {
+    throw new DockerError(
+      "Docker is not available or the daemon is not running. " +
+        "Make sure Docker is installed and started, or run a command that does not need Docker (e.g. 'sandbox config validate')."
+    );
+  }
+}
+
 export class Runner {
   project: string;
 
@@ -27,6 +45,14 @@ export class Runner {
 
   execInDev(command: string[]): void {
     this.exec("docker", ["exec", `${this.project}-dev`, ...command]);
+  }
+
+  ps(): void {
+    this.exec("docker", ["compose", "-f", COMPOSE_FILE, "-p", this.project, "ps"]);
+  }
+
+  restart(processName: string): void {
+    this.exec("docker", ["exec", `${this.project}-dev`, "supervisorctl", "restart", processName]);
   }
 
   private exec(cmd: string, args: string[], cwd?: string): void {

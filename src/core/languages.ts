@@ -31,6 +31,7 @@ export function setupPython(ctx: BuildContext, options: LanguageOptions): void {
         files: ["pyproject.toml"],
         lines: ["COPY --from=deps /workspace/.venv /workspace/.venv", "ENV PATH=/workspace/.venv/bin:$PATH"],
       });
+      ctx.plan.build.venvVolume = true;
     }
   } else {
     const files = addDependencyFiles(ctx, ["requirements.txt"]);
@@ -43,6 +44,7 @@ export function setupPython(ctx: BuildContext, options: LanguageOptions): void {
         files: ["requirements.txt"],
         lines: ["COPY --from=deps /workspace/.venv /workspace/.venv", "ENV PATH=/workspace/.venv/bin:$PATH"],
       });
+      ctx.plan.build.venvVolume = true;
     }
   }
 }

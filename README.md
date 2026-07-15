@@ -23,6 +23,9 @@ npx sandbox-manager info
 - `sandbox info` — show services, ports, and connection strings.
 - `sandbox config validate` — validate `sandbox/` without building.
 - `sandbox generate agents.md` — create `AGENTS.md` for AI context.
+- `sandbox logs [process]` — tail logs from a managed process.
+- `sandbox ps` — show running containers for the project.
+- `sandbox restart [process]` — restart a managed process or all daemons.
 
 ## Documentation
 

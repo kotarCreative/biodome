@@ -216,6 +216,13 @@ export function generateCompose(plan: Plan): string {
     dev.volumes.push("node_modules:/workspace/node_modules");
   }
 
+  if (plan.build.venvVolume) {
+    volumes.venv = {};
+    const dev = services.dev;
+    dev.volumes = dev.volumes || [];
+    dev.volumes.push("venv:/workspace/.venv");
+  }
+
   const compose: ComposeFile = {
     services,
     volumes,
@@ -240,9 +247,12 @@ function devService(plan: Plan): ComposeService {
     container_name: `${plan.project}-dev`,
     working_dir: "/workspace",
     volumes: ["..:/workspace"],
-    environment: { ...plan.runtime.environment },
     networks: ["sandbox"],
   };
+
+  if (Object.keys(plan.runtime.environment).length > 0) {
+    service.environment = { ...plan.runtime.environment };
+  }
 
   const daemonProcesses = plan.runtime.processes.filter((p) => p.mode === "daemon");
 

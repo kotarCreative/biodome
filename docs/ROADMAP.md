@@ -13,14 +13,13 @@
 
 ## Known gaps
 
-- No integration tests: generated images and compose files are not exercised in CI.
-- No `.github/workflows` yet.
 - Service support is limited to Postgres and Redis; custom images are treated as generic containers.
 - Only one base image per project is supported; mixing languages emits a warning.
+- Java has only a base image; Maven/Gradle dependency handling is not implemented.
+- Only the first daemon health check is wired to the compose dev service; `supervisord` entries do not run their own health probes.
 
 ## Next steps
 
-1. Add a GitHub Actions workflow that builds the generated Dockerfile for a fixture project.
-2. Expand integration tests to run `docker compose up` and assert services become healthy.
-3. Add validation for feature module exports and service configuration.
-4. Document the feature module API and the available language handlers.
+1. Expand integration tests to assert services become healthy and exercise more languages.
+2. Add validation for feature module exports and service configuration.
+3. Document the feature module API and the available language handlers.

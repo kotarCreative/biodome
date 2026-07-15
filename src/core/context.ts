@@ -38,18 +38,26 @@ export class SandboxContext implements FeatureContext, BuildContext {
   }
 
   addProcess(spec: ProcessSpec): void {
+    this.assertUniqueProcessName(spec.name);
     const proc = this.normalizeProcess(spec, "daemon", "start.post");
     this.plan.runtime.processes.push(proc);
     this.mergeProcessEnv(proc);
   }
 
   addHook(spec: HookSpec): void {
+    this.assertUniqueProcessName(spec.name);
     if (!spec.startOn) {
       throw new Error(`Hook ${spec.name} requires a startOn lifecycle point`);
     }
     const proc = this.normalizeProcess(spec, "oneshot", spec.startOn);
     this.plan.runtime.processes.push(proc);
     this.mergeProcessEnv(proc);
+  }
+
+  private assertUniqueProcessName(name: string): void {
+    if (this.plan.runtime.processes.some((p) => p.name === name)) {
+      throw new Error(`Duplicate process or hook name: ${name}`);
+    }
   }
 
   addLanguage(name: string, options: LanguageOptions = {}): void {
@@ -67,9 +75,12 @@ export class SandboxContext implements FeatureContext, BuildContext {
   }
 
   addPackage(manager: string, name: string, options: PackageOptions = {}): void {
+    const registryFlag = options.indexUrl ? ` --registry ${options.indexUrl}` : "";
+    const indexUrlFlag = options.indexUrl ? ` --index-url ${options.indexUrl}` : "";
+
     const commands: Record<string, string> = {
-      npm: `npm install -g ${formatPackage(name, options)}`,
-      pip: `pip install --no-cache-dir ${formatPackage(name, options, "==")}`,
+      npm: `npm install -g${registryFlag} ${formatPackage(name, options)}`,
+      pip: `pip install --no-cache-dir${indexUrlFlag} ${formatPackage(name, options, "==")}`,
       cargo: `cargo install ${name}`,
       go: `go install ${name}@latest`,
       gem: `gem install ${name}`,
@@ -99,6 +110,10 @@ export class SandboxContext implements FeatureContext, BuildContext {
   }
 
   addService(name: string, options: ServiceOptions = {}): void {
+    if (this.plan.runtime.services.some((s) => s.name === name)) {
+      throw new Error(`Duplicate service name: ${name}`);
+    }
+
     let type = name;
     if (options.image) {
       // Custom image-based service; treat as a generic container.
@@ -122,7 +137,11 @@ export class SandboxContext implements FeatureContext, BuildContext {
     }
 
     this.plan.runtime.services.push(svc);
-    this.plan.runtime.volumes.push({ name: `${name}_data` });
+    for (const vol of svc.volumes) {
+      if (!vol.host.startsWith("/") && !vol.host.startsWith("./") && !vol.host.startsWith("~")) {
+        this.plan.runtime.volumes.push({ name: vol.host });
+      }
+    }
   }
 
   setEnv(key: string, value: string): void {
@@ -218,6 +237,10 @@ export class SandboxContext implements FeatureContext, BuildContext {
 
     if (type === "http") {
       this.addAptPackage("curl");
+    }
+
+    if (type === "tcp") {
+      this.addAptPackage("netcat-openbsd");
     }
 
     return {
