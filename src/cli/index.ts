@@ -55,7 +55,6 @@ program
       JSON.stringify({ project: { name: projectName } }, null, 2) + "\n"
     );
     writeFileSync(join(sandboxDir, "services.js"), "// Define backing services here\n");
-    writeFileSync(join(sandboxDir, "features"), ""); // placeholder
     mkdirSync(join(sandboxDir, "features"), { recursive: true });
     writeFileSync(join(sandboxDir, "features", ".gitkeep"), "");
     console.log(`Initialized sandbox for ${projectName}`);
