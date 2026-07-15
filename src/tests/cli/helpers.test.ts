@@ -1,13 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { runHooks, resolveProjectName, runSafe } from "../../cli/helpers";
-import { createPlan } from "../../core/plan";
-import type { Provider } from "../../core/provider";
+import { Effect, Layer } from "effect";
+import * as NodeChildProcessSpawner from "@effect/platform-node-shared/NodeChildProcessSpawner";
+import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem";
+import * as NodePath from "@effect/platform-node-shared/NodePath";
+import { runHooks, resolveProjectName, runSafe } from "../../cli/helpers.js";
+import { createPlan } from "../../core/plan.js";
+import type { Provider } from "../../core/provider.js";
+import { PlanError } from "../../core/errors.js";
 
 function tmpDir(prefix: string): string {
   return join("/tmp", `${prefix}-${Date.now()}`);
 }
+
+const NodeRuntime = NodeChildProcessSpawner.layer.pipe(
+  Layer.provide(Layer.merge(NodeFileSystem.layer, NodePath.layer))
+);
 
 describe("resolveProjectName", () => {
   it("reads the project name from sandbox/config.json", () => {
@@ -24,15 +33,7 @@ describe("resolveProjectName", () => {
 });
 
 describe("runHooks", () => {
-  beforeEach(() => {
-    vi.spyOn(console, "log").mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("runs container hooks through the provider", () => {
+  it("runs container hooks through the provider", async () => {
     const plan = createPlan("test");
     plan.runtime.processes.push({
       name: "migrate",
@@ -43,12 +44,16 @@ describe("runHooks", () => {
       startOn: "start.post",
     });
 
-    const runner = { execInDev: vi.fn() } as unknown as Provider;
-    runHooks(plan, "start.post", runner, "/tmp");
-    expect(runner.execInDev).toHaveBeenCalledWith(["python", "manage.py", "migrate"]);
+    const execInDev = vi.fn().mockReturnValue(Effect.void);
+    const runner = { execInDev } as unknown as Provider;
+    const program = runHooks(plan, "start.post", runner, "/tmp").pipe(
+      Effect.provide(NodeRuntime)
+    );
+    await Effect.runPromise(program);
+    expect(execInDev).toHaveBeenCalledWith(["python", "manage.py", "migrate"]);
   });
 
-  it("does not run host hooks through the provider", () => {
+  it("does not run host hooks through the provider", async () => {
     const plan = createPlan("test");
     plan.runtime.processes.push({
       name: "check",
@@ -59,12 +64,16 @@ describe("runHooks", () => {
       startOn: "build.pre",
     });
 
-    const runner = { execInDev: vi.fn() } as unknown as Provider;
-    runHooks(plan, "build.pre", runner, "/tmp");
-    expect(runner.execInDev).not.toHaveBeenCalled();
+    const execInDev = vi.fn().mockReturnValue(Effect.void);
+    const runner = { execInDev } as unknown as Provider;
+    const program = runHooks(plan, "build.pre", runner, "/tmp").pipe(
+      Effect.provide(NodeRuntime)
+    );
+    await Effect.runPromise(program);
+    expect(execInDev).not.toHaveBeenCalled();
   });
 
-  it("ignores hooks at unrelated lifecycle points", () => {
+  it("ignores hooks at unrelated lifecycle points", async () => {
     const plan = createPlan("test");
     plan.runtime.processes.push({
       name: "migrate",
@@ -75,9 +84,13 @@ describe("runHooks", () => {
       startOn: "start.post",
     });
 
-    const runner = { execInDev: vi.fn() } as unknown as Provider;
-    runHooks(plan, "stop.pre", runner, "/tmp");
-    expect(runner.execInDev).not.toHaveBeenCalled();
+    const execInDev = vi.fn().mockReturnValue(Effect.void);
+    const runner = { execInDev } as unknown as Provider;
+    const program = runHooks(plan, "stop.pre", runner, "/tmp").pipe(
+      Effect.provide(NodeRuntime)
+    );
+    await Effect.runPromise(program);
+    expect(execInDev).not.toHaveBeenCalled();
   });
 });
 
@@ -92,9 +105,7 @@ describe("runSafe", () => {
   });
 
   it("prints a friendly error and exits on failure", async () => {
-    await runSafe(async () => {
-      throw new Error("boom");
-    });
+    await runSafe(Effect.fail(new PlanError({ message: "boom" })));
 
     expect(console.error).toHaveBeenCalledWith("Error: boom");
     expect(process.exit).toHaveBeenCalledWith(1);

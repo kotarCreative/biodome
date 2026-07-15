@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SandboxContext } from "../../core/context";
+import { SandboxContext } from "../../core/context.js";
 
 function makeProject(files: string[] = []): string {
   const dir = mkdtempSync(join(tmpdir(), "sandbox-context-"));
@@ -242,17 +242,23 @@ describe("SandboxContext", () => {
   it("rejects a process with a non-array command", () => {
     const ctx = new SandboxContext("/tmp", "test");
     expect(() =>
-      // @ts-expect-error testing runtime misuse
-      ctx.addProcess({ name: "bad", command: "node server.js", port: 3000 })
-    ).toThrow(/command must be a non-empty array of strings/);
+      ctx.addProcess({
+        name: "bad",
+        command: "node server.js" as unknown as readonly string[],
+        port: 3000,
+      })
+    ).toThrow(/Expected array, got "node server.js"/);
   });
 
   it("rejects an invalid lifecycle point", () => {
     const ctx = new SandboxContext("/tmp", "test");
     expect(() =>
-      // @ts-expect-error testing runtime misuse
-      ctx.addProcess({ name: "bad", command: ["node"], startOn: "build.middle" })
-    ).toThrow(/startOn must be a valid lifecycle point/);
+      ctx.addProcess({
+        name: "bad",
+        command: ["node"],
+        startOn: "build.middle" as unknown as "build.pre",
+      })
+    ).toThrow(/Expected .* got "build.middle"/);
   });
 
   it("rejects an out-of-range port", () => {
@@ -265,9 +271,8 @@ describe("SandboxContext", () => {
   it("rejects a service with non-string environment values", () => {
     const ctx = new SandboxContext("/tmp", "test");
     expect(() =>
-      // @ts-expect-error testing runtime misuse
-      ctx.addService("bad", { environment: { COUNT: 42 } })
-    ).toThrow(/environment.COUNT must be a string/);
+      ctx.addService("bad", { environment: { COUNT: 42 as unknown as string } })
+    ).toThrow(/Expected string, got 42/);
   });
 
   it("normalizes a relative workingDir to /workspace", () => {

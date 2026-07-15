@@ -1,137 +1,172 @@
-import { readdirSync, readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { SandboxContext } from "../core/context.js";
-import { Plan, Port } from "../core/plan.js";
+import { readdirSync, readFileSync, existsSync } from "node:fs"
+import { join } from "node:path"
+import { pathToFileURL } from "node:url"
+import { Effect, Schema } from "effect"
+import { SandboxContext } from "../core/context.js"
+import { Plan, Port, ConfigSchema } from "../core/plan.js"
+import { ConfigError, FeatureError, PlanError, SandboxError, ValidationError } from "../core/errors.js"
 
-const SANDBOX_DIR = "sandbox";
+const SANDBOX_DIR = "sandbox"
+
+export interface BuildPlanOptions {
+  dryRun?: boolean
+}
 
 export interface Config {
   project: {
-    name: string;
-  };
+    name: string
+  }
 }
 
-export interface BuildPlanOptions {
-  dryRun?: boolean;
-}
+export const buildPlanEffect = Effect.fnUntraced(function*(
+  rootDir: string,
+  options: BuildPlanOptions = {}
+) {
+  const config = yield* readConfig(rootDir)
+  const ctx = new SandboxContext(rootDir, config.project.name, options.dryRun)
+
+  yield* loadServices(rootDir, ctx)
+  yield* loadFeatures(rootDir, ctx)
+
+  yield* validatePlan(ctx.plan)
+
+  return ctx.plan
+})
 
 export async function buildPlan(rootDir: string, options: BuildPlanOptions = {}): Promise<Plan> {
-  const config = readConfig(rootDir);
-  const ctx = new SandboxContext(rootDir, config.project.name, options.dryRun);
-
-  await loadServices(rootDir, ctx);
-  await loadFeatures(rootDir, ctx);
-
-  validatePlan(ctx.plan);
-
-  return ctx.plan;
+  return Effect.runPromise(buildPlanEffect(rootDir, options))
 }
+
+export const validateConfigEffect = Effect.fnUntraced(function*(rootDir: string) {
+  return yield* readConfig(rootDir)
+})
 
 export function validateConfig(rootDir: string): Config {
-  return readConfig(rootDir);
+  return Effect.runSync(readConfig(rootDir))
 }
 
-function readConfig(rootDir: string): Config {
-  const path = join(rootDir, SANDBOX_DIR, "config.json");
-  if (!existsSync(path)) {
-    throw new Error(`Missing sandbox config file: ${path}`);
+const readConfig = Effect.fnUntraced(function*(rootDir: string) {
+  const path = join(rootDir, SANDBOX_DIR, "config.json")
+  const exists = yield* Effect.sync(() => existsSync(path))
+  if (!exists) {
+    return yield* new ConfigError({ message: "Missing sandbox config file", path })
   }
 
-  let raw: unknown;
-  try {
-    raw = JSON.parse(readFileSync(path, "utf-8"));
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid sandbox config file ${path}: ${message}`);
-  }
+  const raw = yield* Effect.try({
+    try: () => JSON.parse(readFileSync(path, "utf-8")),
+    catch: (error) =>
+      new ConfigError({
+        message: `Invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+        path,
+      }),
+  })
 
-  return validateConfigShape(raw, path);
+  return yield* Schema.decodeUnknownEffect(ConfigSchema)(raw).pipe(
+    Effect.mapError(
+      (issue) =>
+        new ConfigError({
+          message: `Invalid config: ${formatSchemaIssue(issue)}`,
+          path,
+        })
+    )
+  )
+})
+
+function formatSchemaIssue(issue: unknown): string {
+  // Best-effort formatting of a SchemaError.
+  if (issue && typeof issue === "object" && "toString" in issue) {
+    return String(issue)
+  }
+  return String(issue)
 }
 
-function validateConfigShape(value: unknown, path: string): Config {
-  if (value === null || typeof value !== "object") {
-    throw new Error(`Invalid sandbox config file ${path}: expected a JSON object`);
-  }
+function validatePlan(plan: Plan): Effect.Effect<void, SandboxError, never> {
+  return Effect.try({
+    try: () => {
+      const seen = new Map<number, string>()
 
-  const config = value as Record<string, unknown>;
-  if (!config.project || typeof config.project !== "object") {
-    throw new Error(`Invalid sandbox config file ${path}: missing required field "project"`);
-  }
+      function registerPort(port: Port, label: string): void {
+        if (seen.has(port.host)) {
+          throw new ValidationError({
+            message: `Host port ${port.host} is used by both ${seen.get(port.host)} and ${label}`,
+          })
+        }
+        seen.set(port.host, label)
+      }
 
-  const project = config.project as Record<string, unknown>;
-  if (typeof project.name !== "string" || project.name.length === 0) {
-    throw new Error(
-      `Invalid sandbox config file ${path}: "project.name" must be a non-empty string`
-    );
-  }
+      for (const proc of plan.runtime.processes) {
+        for (const port of proc.ports) {
+          registerPort(port, `process "${proc.name}"`)
+        }
+      }
 
-  return { project: { name: project.name } };
+      for (const svc of plan.runtime.services) {
+        for (const port of svc.ports) {
+          registerPort(port, `service "${svc.name}"`)
+        }
+      }
+    },
+    catch: (error) =>
+      error instanceof ValidationError ? error : new PlanError({ message: String(error) }),
+  })
 }
 
-function validatePlan(plan: Plan): void {
-  const seen = new Map<number, string>();
-
-  function registerPort(port: Port, label: string): void {
-    if (seen.has(port.host)) {
-      throw new Error(
-        `Host port ${port.host} is used by both ${seen.get(port.host)} and ${label}`
-      );
-    }
-    seen.set(port.host, label);
-  }
-
-  for (const proc of plan.runtime.processes) {
-    for (const port of proc.ports) {
-      registerPort(port, `process "${proc.name}"`);
-    }
-  }
-
-  for (const svc of plan.runtime.services) {
-    for (const port of svc.ports) {
-      registerPort(port, `service "${svc.name}"`);
-    }
-  }
-}
-
-async function loadServices(rootDir: string, ctx: SandboxContext): Promise<void> {
+const loadServices = Effect.fnUntraced(function*(rootDir: string, ctx: SandboxContext) {
   for (const name of ["services.mjs", "services.js"]) {
-    const path = join(rootDir, SANDBOX_DIR, name);
-    if (existsSync(path)) {
-      await executeFeatureModule(path, ctx);
-      return;
+    const path = join(rootDir, SANDBOX_DIR, name)
+    const exists = yield* Effect.sync(() => existsSync(path))
+    if (exists) {
+      yield* executeFeatureModule(path, ctx)
+      return
     }
   }
-}
+})
 
-async function loadFeatures(rootDir: string, ctx: SandboxContext): Promise<void> {
-  const featuresDir = join(rootDir, SANDBOX_DIR, "features");
-  if (!existsSync(featuresDir)) {
-    return;
+const loadFeatures = Effect.fnUntraced(function*(rootDir: string, ctx: SandboxContext) {
+  const featuresDir = join(rootDir, SANDBOX_DIR, "features")
+  const exists = yield* Effect.sync(() => existsSync(featuresDir))
+  if (!exists) {
+    return
   }
 
-  const files = readdirSync(featuresDir)
-    .filter((f) => f.endsWith(".mjs") || f.endsWith(".js"))
-    .sort();
+  const files = yield* Effect.sync(() =>
+    readdirSync(featuresDir)
+      .filter((f) => f.endsWith(".mjs") || f.endsWith(".js"))
+      .sort()
+  )
 
   for (const file of files) {
-    const path = join(featuresDir, file);
-    await executeFeatureModule(path, ctx);
+    const path = join(featuresDir, file)
+    yield* executeFeatureModule(path, ctx)
   }
-}
+})
 
-async function executeFeatureModule(path: string, ctx: SandboxContext): Promise<void> {
-  const url = pathToFileURL(path).href;
-  try {
-    const mod = (await import(url)) as { default?: (ctx: SandboxContext) => void | Promise<void> };
-    if (typeof mod.default !== "function") {
-      throw new Error(
-        `Feature module ${path} must export a default function that accepts the sandbox context`
-      );
-    }
-    await mod.default(ctx);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to load feature ${path}: ${message}`);
+const executeFeatureModule = Effect.fnUntraced(function*(path: string, ctx: SandboxContext) {
+  const url = pathToFileURL(path).href
+  const mod = (yield* Effect.tryPromise<unknown, FeatureError>({
+    try: () => import(url),
+    catch: (error) =>
+      new FeatureError({
+        message: error instanceof Error ? error.message : String(error),
+        path,
+      }),
+  })) as { default?: (ctx: SandboxContext) => void | Promise<void> }
+
+  if (typeof mod.default !== "function") {
+    return yield* new FeatureError({
+      message: "Feature module must export a default function that accepts the sandbox context",
+      path,
+    })
   }
-}
+
+  yield* Effect.tryPromise<void, FeatureError>({
+    try: () => Promise.resolve(mod.default!(ctx)),
+    catch: (error) =>
+      error instanceof FeatureError
+        ? error
+        : new FeatureError({
+            message: error instanceof Error ? error.message : String(error),
+            path,
+          }),
+  })
+})

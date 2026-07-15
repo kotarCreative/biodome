@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { formatInfo, formatAgentsMd } from "../../core/info";
-import { createPlan } from "../../core/plan";
+import { formatInfo, formatAgentsMd } from "../../core/info.js";
+import { createPlan } from "../../core/plan.js";
 
 describe("formatInfo", () => {
   it("includes project and base image", () => {

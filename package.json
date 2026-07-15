@@ -2,6 +2,7 @@
   "name": "sandbox-manager",
   "version": "0.1.0",
   "description": "Development environment manager powered by composable primitives",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
@@ -32,7 +33,10 @@
     "vitest": "^2.0.0"
   },
   "dependencies": {
+    "@effect/platform-node": "^4.0.0-beta.98",
+    "@effect/platform-node-shared": "^4.0.0-beta.98",
     "commander": "^12.0.0",
+    "effect": "^4.0.0-beta.98",
     "yaml": "^2.5.0"
   }
 }

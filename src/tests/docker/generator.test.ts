@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { generateDockerfile, generateSupervisordConf, generateCompose, generateDockerignore } from "../../docker/generator";
-import { createPlan } from "../../core/plan";
+import { generateDockerfile, generateSupervisordConf, generateCompose, generateDockerignore } from "../../docker/generator.js";
+import { createPlan } from "../../core/plan.js";
 
 describe("Docker generators", () => {
   it("generates a Dockerfile with supervisord for daemon processes", () => {

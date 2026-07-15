@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { buildPlan } from "../../builder/index";
-import { generateDockerfile, generateCompose, generateSupervisordConf } from "../../docker/generator";
+import { buildPlan } from "../../builder/index.js";
+import { generateDockerfile, generateCompose, generateSupervisordConf } from "../../docker/generator.js";
 
 function hasDocker(): boolean {
   try {

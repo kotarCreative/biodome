@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { generateDockerfile, generateCompose, generateSupervisordConf } from "../../docker/generator";
-import { createPlan } from "../../core/plan";
+import { generateDockerfile, generateCompose, generateSupervisordConf } from "../../docker/generator.js";
+import { createPlan } from "../../core/plan.js";
 
 describe("Docker generator snapshots", () => {
   it("matches for node + postgres + daemon", () => {

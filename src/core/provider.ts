@@ -2,13 +2,17 @@
 // The default implementation is Docker Compose, but the interface leaves room
 // for remote or alternative backends.
 
-export interface Provider {
-  readonly project: string;
+import { Effect } from "effect"
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import { DockerError } from "./errors.js"
 
-  build(rootDir: string): void;
-  up(rootDir: string, build?: boolean): void;
-  down(rootDir?: string): void;
-  execInDev(command: string[]): void;
-  ps(): void;
-  restart(processName: string): void;
+export interface Provider {
+  readonly project: string
+
+  build(rootDir: string): Effect.Effect<void, DockerError, ChildProcessSpawner.ChildProcessSpawner>
+  up(rootDir: string, build?: boolean): Effect.Effect<void, DockerError, ChildProcessSpawner.ChildProcessSpawner>
+  down(rootDir?: string): Effect.Effect<void, DockerError, ChildProcessSpawner.ChildProcessSpawner>
+  execInDev(command: string[]): Effect.Effect<void, DockerError, ChildProcessSpawner.ChildProcessSpawner>
+  ps(): Effect.Effect<void, DockerError, ChildProcessSpawner.ChildProcessSpawner>
+  restart(processName: string): Effect.Effect<void, DockerError, ChildProcessSpawner.ChildProcessSpawner>
 }

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { buildPlan, validateConfig } from "../../builder/index";
-import { generateDockerfile, generateCompose } from "../../docker/generator";
+import { buildPlan, validateConfig } from "../../builder/index.js";
+import { generateDockerfile, generateCompose } from "../../docker/generator.js";
 
 function createProject(dir: string, files: Record<string, string>): void {
   rmSync(dir, { recursive: true, force: true });
@@ -162,9 +162,7 @@ describe("validateConfig", () => {
       "sandbox/config.json": JSON.stringify({ project: {} }),
     });
 
-    expect(() => validateConfig(dir)).toThrow(
-      /"project\.name" must be a non-empty string/
-    );
+    expect(() => validateConfig(dir)).toThrow(/Missing key/);
   });
 
   it("throws a helpful error for non-object config", () => {
@@ -173,7 +171,7 @@ describe("validateConfig", () => {
       "sandbox/config.json": JSON.stringify("bad"),
     });
 
-    expect(() => validateConfig(dir)).toThrow(/expected a JSON object/);
+    expect(() => validateConfig(dir)).toThrow(/Expected object, got "bad"/);
   });
 });
 
