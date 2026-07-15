@@ -77,24 +77,14 @@ Installs a package through a language-specific package manager.
 ```javascript
 ctx.addPackage("npm", "typescript", { version: "5.4" });
 ctx.addPackage("pip", "django", { version: "5.0" });
-ctx.addPackage("apt", "libpq-dev");
 ctx.addPackage("cargo", "ripgrep");
 ctx.addPackage("go", "github.com/air-verse/air");
 ctx.addPackage("gem", "bundler");
 ```
 
-## `addAptPackage(name)`
-
-Installs a Debian package via `apt`. Automatically deduplicates.
-
-```javascript
-ctx.addAptPackage("curl");
-ctx.addAptPackage("git");
-```
-
 ## `addTool(name, options)`
 
-Installs a well-known CLI tool.
+Installs a CLI tool or system package. Well-known tools use custom install scripts; unknown names are treated as apt packages.
 
 ```javascript
 ctx.addTool("gh");
@@ -103,6 +93,11 @@ ctx.addTool("terraform");
 ctx.addTool("psql");
 ctx.addTool("redis-cli");
 ctx.addTool("docker");
+
+// Unknown names are installed via apt.
+ctx.addTool("curl");
+ctx.addTool("git");
+ctx.addTool("libpq-dev");
 ```
 
 ## `addService(name, options)`

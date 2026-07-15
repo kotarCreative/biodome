@@ -56,7 +56,7 @@ Feature files declare languages, packages, tools, processes, and hooks. They are
 const ctx = sandbox.ctx();
 
 ctx.addLanguage("python", { version: "3.12" });
-ctx.addAptPackage("libpq-dev");
+ctx.addTool("libpq-dev");
 ctx.addPackage("pip", "django", { version: "5.0" });
 ```
 

@@ -39,11 +39,11 @@ describe("SandboxContext", () => {
     expect(ctx.plan.build.dependencyFiles).toContain("requirements.txt");
   });
 
-  it("adds an apt package uniquely", () => {
+  it("adds a tool and treats unknown tools as apt packages", () => {
     const ctx = new SandboxContext("/tmp", "test");
-    ctx.addAptPackage("curl");
-    ctx.addAptPackage("curl");
-    ctx.addAptPackage("git");
+    ctx.addTool("curl");
+    ctx.addTool("curl");
+    ctx.addTool("git");
 
     expect(ctx.plan.build.aptPackages).toEqual(["curl", "git"]);
   });

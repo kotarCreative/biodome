@@ -14,7 +14,6 @@ export interface FeatureContext {
 
   addLanguage(name: string, options?: LanguageOptions): void;
   addPackage(manager: string, name: string, options?: PackageOptions): void;
-  addAptPackage(name: string): void;
   addTool(name: string, options?: ToolOptions): void;
   addService(name: string, options?: ServiceOptions): void;
 

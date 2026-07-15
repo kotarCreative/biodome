@@ -23,7 +23,7 @@ ctx.addLanguage("python", { version: "3.12" });
 ctx.addPackage("pip", "django", { version: "5.0" });
 ctx.addPackage("pip", "psycopg");
 ctx.addPackage("pip", "redis");
-ctx.addAptPackage("libpq-dev");
+ctx.addTool("libpq-dev");
 ```
 
 ```javascript

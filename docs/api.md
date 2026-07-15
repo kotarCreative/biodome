@@ -32,20 +32,16 @@ Add a language runtime.
 
 Install a package.
 
-- `manager`: `"npm"`, `"pip"`, `"apt"`, `"cargo"`, `"go"`, `"gem"`
+- `manager`: `"npm"`, `"pip"`, `"cargo"`, `"go"`, `"gem"`
 - `name`: package name
 - `options.version`: optional version
 - `options.indexUrl`: optional package index URL
 
-### `addAptPackage(name)`
-
-Install a Debian package via apt.
-
 ### `addTool(name, options)`
 
-Install a well-known CLI tool.
+Install a CLI tool or system package. Well-known tools use custom install scripts; unknown names are installed via apt.
 
-- `name`: `"gh"`, `"kubectl"`, `"terraform"`, `"psql"`, `"redis-cli"`, `"docker"`
+- `name`: `"gh"`, `"kubectl"`, `"terraform"`, `"psql"`, `"redis-cli"`, `"docker"`, or any apt package name
 
 ### `addService(name, options)`
 

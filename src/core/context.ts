@@ -67,9 +67,6 @@ export class SandboxContext implements FeatureContext {
       case "pip":
         this.addLanguageSnippet(`RUN pip install --no-cache-dir ${formatPackage(name, options, "==")}`);
         break;
-      case "apt":
-        this.addAptPackage(name);
-        break;
       case "cargo":
         this.addLanguageSnippet(`RUN cargo install ${name}`);
         break;
@@ -81,12 +78,6 @@ export class SandboxContext implements FeatureContext {
         break;
       default:
         throw new Error(`Unknown package manager ${manager}`);
-    }
-  }
-
-  addAptPackage(name: string): void {
-    if (!this.plan.build.aptPackages.includes(name)) {
-      this.plan.build.aptPackages.push(name);
     }
   }
 
@@ -121,7 +112,14 @@ export class SandboxContext implements FeatureContext {
         this.addLanguageSnippet("RUN docker --version");
         break;
       default:
-        throw new Error(`Unknown tool ${name}`);
+        // Unknown tools are treated as apt packages.
+        this.addAptPackage(name);
+    }
+  }
+
+  private addAptPackage(name: string): void {
+    if (!this.plan.build.aptPackages.includes(name)) {
+      this.plan.build.aptPackages.push(name);
     }
   }
 
