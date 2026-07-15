@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { generateDockerfile, generateSupervisordConf, generateCompose } from "../../docker/generator";
+import { generateDockerfile, generateSupervisordConf, generateCompose, generateDockerignore } from "../../docker/generator";
 import { createPlan } from "../../core/plan";
 
 describe("Docker generators", () => {
@@ -69,5 +69,13 @@ describe("Docker generators", () => {
     expect(compose).toContain("healthcheck:");
     expect(compose).toContain("curl -fsS");
     expect(compose).not.toContain("sleep infinity");
+    expect(compose).toContain("..:/workspace");
+  });
+
+  it("generates a .dockerignore that excludes .sandbox but keeps supervisord.conf", () => {
+    const dockerignore = generateDockerignore();
+    expect(dockerignore).toContain(".sandbox/*");
+    expect(dockerignore).toContain("!.sandbox/supervisord.conf");
+    expect(dockerignore).not.toContain(".sandbox\n");
   });
 });

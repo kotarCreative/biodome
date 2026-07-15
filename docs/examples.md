@@ -40,7 +40,7 @@ ctx.addProcess({
     interval: "5s",
     retries: 10,
   },
-  env: { DEBUG: "1" },
+  environment: { DEBUG: "1" },
 });
 ```
 

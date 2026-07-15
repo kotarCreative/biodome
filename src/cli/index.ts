@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { Command } from "commander";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -24,14 +25,20 @@ function writeGeneratedFiles(rootDir: string, plan: any): void {
   writeFileSync(join(rootDir, ".dockerignore"), generateDockerignore());
 }
 
-function runHooks(plan: any, point: string): void {
+function runHooks(plan: any, point: string, runner: Runner, rootDir: string): void {
   const hooks = plan.runtime.processes.filter((p: any) => p.mode === "oneshot" && p.startOn === point);
   if (hooks.length === 0) return;
 
-  const runner = new Runner(plan.project);
+  const hostPoints = new Set(["build.pre", "build.post", "start.pre", "stop.post"]);
+
   for (const hook of hooks) {
     console.log(`[hook] ${hook.name} (${point})`);
-    runner.execInDev(hook.command);
+    if (hostPoints.has(point)) {
+      const [cmd, ...args] = hook.command;
+      execSync(`${cmd} ${args.join(" ")}`, { stdio: "inherit", cwd: rootDir });
+    } else {
+      runner.execInDev(hook.command);
+    }
   }
 }
 
@@ -68,7 +75,9 @@ program
     const plan = buildPlan(rootDir);
     writeGeneratedFiles(rootDir, plan);
     const runner = new Runner(plan.project);
+    runHooks(plan, "build.pre", runner, rootDir);
     runner.build(rootDir);
+    runHooks(plan, "build.post", runner, rootDir);
     console.log(`Environment ready for ${plan.project}`);
   });
 
@@ -82,16 +91,10 @@ program
     const plan = buildPlan(rootDir);
     writeGeneratedFiles(rootDir, plan);
 
-    if (options.build) {
-      const runner = new Runner(plan.project);
-      runner.build(rootDir);
-    }
-
     const runner = new Runner(plan.project);
-    // Start services here if plan.runtime.services.length > 0
-    // For now, services are handled via docker-compose manually.
-    runner.startDev(plan, rootDir);
-    runHooks(plan, "start.post");
+    runHooks(plan, "start.pre", runner, rootDir);
+    runner.up(rootDir, options.build);
+    runHooks(plan, "start.post", runner, rootDir);
 
     console.log(`Workspace ${plan.project} is running`);
 
@@ -99,7 +102,7 @@ program
       console.log("Press Ctrl+C to stop");
       process.on("SIGINT", () => {
         console.log("\nStopping...");
-        runner.stopDev();
+        runner.down(rootDir);
         process.exit(0);
       });
       // Keep alive
@@ -113,9 +116,10 @@ program
   .action(() => {
     const rootDir = process.cwd();
     const plan = buildPlan(rootDir);
-    runHooks(plan, "stop.pre");
     const runner = new Runner(plan.project);
-    runner.stopDev();
+    runHooks(plan, "stop.pre", runner, rootDir);
+    runner.down(rootDir);
+    runHooks(plan, "stop.post", runner, rootDir);
     console.log("Stopped");
   });
 
@@ -127,9 +131,9 @@ program
     const rootDir = process.cwd();
     const plan = buildPlan(rootDir);
     const runner = new Runner(plan.project);
-    runHooks(plan, "exec.pre");
+    runHooks(plan, "exec.pre", runner, rootDir);
     runner.execInDev(cmd);
-    runHooks(plan, "exec.post");
+    runHooks(plan, "exec.post", runner, rootDir);
   });
 
 program.parse();

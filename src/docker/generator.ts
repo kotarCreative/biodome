@@ -139,7 +139,7 @@ export function generateDockerignore(): string {
     "",
     ".git",
     ".gitignore",
-    ".sandbox",
+    ".sandbox/*",
     "!.sandbox/supervisord.conf",
     ".data",
     "sandbox",
@@ -207,13 +207,13 @@ export function generateCompose(plan: Plan): string {
 function devService(plan: Plan): unknown {
   const service: any = {
     build: {
-      context: ".",
+      context: "..",
       dockerfile: ".sandbox/Dockerfile",
     },
     image: `${plan.project}-dev:latest`,
     container_name: `${plan.project}-dev`,
     working_dir: "/workspace",
-    volumes: [".:/workspace"],
+    volumes: ["..:/workspace"],
     environment: { ...plan.runtime.environment },
     networks: ["sandbox"],
   };

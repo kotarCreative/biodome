@@ -25,7 +25,7 @@ ctx.addProcess({
     timeout: "3s",
     retries: 10,
   },
-  env: { DEBUG: "1" },
+  environment: { DEBUG: "1" },
 });
 ```
 
@@ -37,6 +37,7 @@ When this feature is loaded, the CLI will:
 4. Set the dev container CMD to `supervisord`.
 5. Expose `8000:8000` in `docker-compose.yaml`.
 6. Add a compose health check that hits the login URL.
+7. Start the dev container and any backing services with `docker compose up`.
 
 ## One-shot hooks
 
@@ -57,13 +58,16 @@ This runs after the dev container starts. The command executes inside the dev co
 
 ## Lifecycle points
 
-- `build.pre` — before `docker build`.
-- `build.post` — after `docker build`.
-- `start.pre` — before the dev container starts.
-- `start.post` — after the dev container starts (default for hooks).
-- `stop.pre` — before `sandbox down`.
-- `exec.pre` — before `sandbox exec <command>`.
-- `exec.post` — after `sandbox exec <command>`.
+| Point | When it runs | Where it runs |
+|-------|--------------|---------------|
+| `build.pre` | Before `docker compose build` | Host |
+| `build.post` | After `docker compose build` | Host |
+| `start.pre` | Before `docker compose up` | Host |
+| `start.post` | After the dev container starts | Inside the dev container |
+| `stop.pre` | Before `docker compose down` | Inside the dev container |
+| `stop.post` | After `docker compose down` | Host |
+| `exec.pre` | Before `sandbox exec <command>` | Inside the dev container |
+| `exec.post` | After `sandbox exec <command>` | Inside the dev container |
 
 ## Writing custom processes
 
@@ -198,7 +202,7 @@ ctx.addProcess({
   name: "api",
   command: ["node", "server.js"],
   port: 3000,
-  env: {
+  environment: {
     DATABASE_URL: "postgresql://localhost:5432/myapp",
   },
 });

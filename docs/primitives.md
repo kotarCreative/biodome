@@ -18,7 +18,7 @@ ctx.addProcess({
     timeout: "3s",
     retries: 10,
   },
-  env: { DEBUG: "1" },
+  environment: { DEBUG: "1" },
 });
 ```
 
@@ -26,7 +26,7 @@ ctx.addProcess({
 - `command` — array of command arguments.
 - `port` — single port to expose (host and container use the same port).
 - `ports` — named ports, e.g. `{ app: 8000, debug: 5678 }`.
-- `env` — environment variables for the process.
+- `environment` — environment variables for the process.
 - `workingDir` — working directory inside the container.
 - `healthCheck` — see [health checks](#health-checks).
 - `mode` — defaults to `"daemon"`. Set to `"oneshot"` for a one-shot command.
