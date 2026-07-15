@@ -4,6 +4,8 @@
 
 This document defines the scope and timeline for the sandbox manager project, breaking down the development into clear phases with specific deliverables and priorities.
 
+> **Implementation note:** The project currently ships as a TypeScript/Node.js CLI with JavaScript-based feature files under `sandbox/`. Early drafts of this roadmap describe a Go implementation and YAML-based configuration; those sections are kept for historical context but the active codebase uses the TypeScript stack documented in `README.md` and `docs/`. Phase milestones and acceptance criteria remain valid, but language-specific details refer to the older plan.
+
 ---
 
 ## Phase 1: Core MVP (Weeks 1-6)
@@ -219,25 +221,18 @@ hooks:
 
 ```
 sandbox-manager/
-├── bin/
-│   └── sandbox (main CLI)
-├── cmd/
-│   ├── build/
-│   ├── up/
-│   ├── exec/
-│   └── ...
-├── pkg/
-│   ├── config/ (schema + parsing)
-│   ├── docker/ (Dockerfile generation)
-│   ├── hooks/ (lifecycle hooks)
-│   └── ...
-├── internal/
-│   ├── services/ (service management)
-│   ├── agent/ (AI integration)
-│   └── ...
-└── scripts/
-    ├── prebuild.sh (GitHub Actions)
-    └── examples/
+├── src/
+│   ├── cli/          # CLI entry point and commands
+│   ├── core/         # Plan, context, features, languages, tools, services
+│   ├── builder/      # Config discovery and plan assembly
+│   ├── docker/       # Dockerfile, compose, and runner
+│   └── tests/        # Unit tests
+├── dist/             # Compiled JavaScript output
+├── docs/             # User documentation
+├── research/           # Design notes and competitive analysis
+├── package.json
+├── tsconfig.json
+└── vitest.config.ts
 ```
 
 **Testing:**
@@ -524,59 +519,21 @@ security:
 
 ### Phase 1 Language
 
-**Core Language:** Go (1.22+ with generics)
+**Core Language:** TypeScript (Node.js LTS) with `tsc` and `vitest`.
 
-```go
-package main
-
-import (
-    "context"
-    "flag"
-    "os"
-    "os/signal"
-    "syscall"
-)
-
-func main() {
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
-    
-    // Handle signals
-    sigs := make(chan os.Signal, 1)
-    signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-    go func() {
-        <-sigs
-        cancel()
-    }()
-    
-    // Main CLI logic
-    if err := run(ctx); err != nil {
-        fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-        os.Exit(1)
-    }
-}
-
-func run(ctx context.Context) error {
-    // Parse flags
-    // Initialize components
-    // Execute commands
-    return nil
-}
-```
+The CLI, plan generator, and feature execution are implemented in TypeScript. Feature files are evaluated with Node.js `vm.runInNewContext` and contribute to a shared plan object. Generated artifacts (Dockerfile, `docker-compose.yaml`, `.dockerignore`, `supervisord.conf`) are emitted as plain text.
 
 ### Phase 2 Language Extensions
 
-**Add Go 1.18+ features:**
-- Generics for type-safe plugin system
-- Parallel processing for faster builds
-- Context cancellation for clean shutdown
-
-**Optional:** Consider TypeScript for CLI with consistent auth flow
+**Add Node.js/TypeScript features:**
+- Strongly typed plugin interfaces
+- Async hook execution with proper error handling
+- Parallel service startup where supported by Docker Compose
 
 ### Phase 3 Performance Optimizations
 
-**Add Go 1.21+ features:**
-- New observability APIs for better logging
+**Add Node.js/TypeScript optimizations:**
+- Faster plan caching and incremental config validation
 - Improved container lifecycle management
 - Enhanced credential handling
 
@@ -587,15 +544,16 @@ func run(ctx context.Context) error {
 ### Phase 1 Dependencies
 
 **Required:**
-- Go 1.22+
+- Node.js LTS (matching `mise.toml`)
+- npm
 - Docker BuildKit
 - Docker Compose
 - Git
-- Makefile
 
 **Optional:**
 - docker buildx plugin
 - GitHub CLI
+- `mise` for toolchain management
 
 ### Phase 2 Dependencies
 
@@ -657,7 +615,6 @@ func run(ctx context.Context) error {
 ---
 
 ## Deployment and CI/CD
-
 ### Phase 1 Deployment
 
 **Local Installation:**
@@ -666,23 +623,12 @@ func run(ctx context.Context) error {
 # Clone and build
 git clone https://github.com/sandbox-manager/sandbox-manager.git
 cd sandbox-manager
-make install
+npm install
+npm run build
+npm link
 
 # Verify installation
 sandbox --version
-```
-
-**Container Image:**
-
-```Dockerfile
-FROM golang:1.22-alpine AS builder
-WORKDIR /app
-COPY . .
-RUN make build
-
-FROM alpine:latest
-COPY --from=builder /app/bin/sandbox /usr/local/bin/sandbox
-ENTRYPOINT ["sandbox"]
 ```
 
 **GitHub Actions:**
@@ -697,31 +643,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          go-version: '1.22'
-      - name: Run tests
-        run: make test
-      - name: Build
-        run: make build
-  
-  integration:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-      - name: Build and test integration
-        run: |
-          make build
-          make integration
+          node-version: 'lts/*'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:run
+      - run: npm run build
 ```
 
 ### Phase 2 Deployment
 
-**GitHub Packages:**
+**GitHub Packages / npm:**
 
 ```yaml
 name: package
@@ -734,21 +668,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          go-version: '1.22'
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push
-        run: |
-          make build
-          docker tag sandbox-my-app:latest ghcr.io/myorg/sandbox-manager:v${{ github.sha }}
-          docker push ghcr.io/myorg/sandbox-manager:v${{ github.sha }}
+          node-version: 'lts/*'
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm ci
+      - run: npm run build
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 ```
 
 ### Phase 3 Deployment
