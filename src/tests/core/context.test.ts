@@ -1,5 +1,19 @@
 import { describe, it, expect } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SandboxContext } from "../../core/context";
+
+function makeProject(files: string[] = []): string {
+  const dir = mkdtempSync(join(tmpdir(), "sandbox-context-"));
+  for (const file of files) {
+    const fullPath = join(dir, file);
+    const parent = fullPath.split("/").slice(0, -1).join("/");
+    if (parent) mkdirSync(parent, { recursive: true });
+    writeFileSync(fullPath, "");
+  }
+  return dir;
+}
 
 describe("SandboxContext", () => {
   it("adds a daemon process by default", () => {
@@ -32,11 +46,103 @@ describe("SandboxContext", () => {
   });
 
   it("adds a language and sets the base image", () => {
-    const ctx = new SandboxContext("/tmp", "test");
-    ctx.addLanguage("python", { version: "3.12" });
+    const dir = makeProject(["requirements.txt"]);
+    try {
+      const ctx = new SandboxContext(dir, "test");
+      ctx.addLanguage("python", { version: "3.12" });
 
-    expect(ctx.plan.build.baseImage).toBe("python:3.12-slim");
-    expect(ctx.plan.build.dependencyFiles).toContain("requirements.txt");
+      expect(ctx.plan.build.baseImage).toBe("python:3.12-slim");
+      expect(ctx.plan.build.dependencyFiles).toContain("requirements.txt");
+      expect(ctx.plan.build.dependencyInstalls).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips Python dependency install when no manifest exists", () => {
+    const dir = makeProject();
+    try {
+      const ctx = new SandboxContext(dir, "test");
+      ctx.addLanguage("python", { version: "3.12" });
+
+      expect(ctx.plan.build.baseImage).toBe("python:3.12-slim");
+      expect(ctx.plan.build.dependencyFiles).toHaveLength(0);
+      expect(ctx.plan.build.dependencyInstalls).toHaveLength(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses npm ci when package-lock.json exists", () => {
+    const dir = makeProject(["package.json", "package-lock.json"]);
+    try {
+      const ctx = new SandboxContext(dir, "test");
+      ctx.addLanguage("node", { version: "20" });
+
+      expect(ctx.plan.build.dependencyFiles).toEqual(["package.json", "package-lock.json"]);
+      expect(ctx.plan.build.dependencyInstalls).toHaveLength(1);
+      expect(ctx.plan.build.dependencyInstalls[0].command).toContain("npm ci");
+      expect(ctx.plan.build.dependencyInstalls[0].command).toContain("mkdir -p /workspace/node_modules");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to npm install when no lock file exists", () => {
+    const dir = makeProject(["package.json"]);
+    try {
+      const ctx = new SandboxContext(dir, "test");
+      ctx.addLanguage("node", { version: "20" });
+
+      expect(ctx.plan.build.dependencyFiles).toEqual(["package.json"]);
+      expect(ctx.plan.build.dependencyInstalls).toHaveLength(1);
+      expect(ctx.plan.build.dependencyInstalls[0].command).toContain("npm install");
+      expect(ctx.plan.build.dependencyInstalls[0].command).not.toContain("npm ci");
+      expect(ctx.plan.build.dependencyInstalls[0].command).toContain("mkdir -p /workspace/node_modules");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips Node dependency install when no package.json exists", () => {
+    const dir = makeProject();
+    try {
+      const ctx = new SandboxContext(dir, "test");
+      ctx.addLanguage("node", { version: "20" });
+
+      expect(ctx.plan.build.dependencyFiles).toHaveLength(0);
+      expect(ctx.plan.build.dependencyInstalls).toHaveLength(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses pnpm frozen-lockfile when pnpm-lock.yaml exists", () => {
+    const dir = makeProject(["package.json", "pnpm-lock.yaml"]);
+    try {
+      const ctx = new SandboxContext(dir, "test");
+      ctx.addLanguage("node", { version: "20", packageManager: "pnpm" });
+
+      expect(ctx.plan.build.dependencyFiles).toEqual(["package.json", "pnpm-lock.yaml"]);
+      expect(ctx.plan.build.dependencyInstalls).toHaveLength(1);
+      expect(ctx.plan.build.dependencyInstalls[0].command).toContain("pnpm install --frozen-lockfile");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses yarn frozen-lockfile when yarn.lock exists", () => {
+    const dir = makeProject(["package.json", "yarn.lock"]);
+    try {
+      const ctx = new SandboxContext(dir, "test");
+      ctx.addLanguage("node", { version: "20", packageManager: "yarn" });
+
+      expect(ctx.plan.build.dependencyFiles).toEqual(["package.json", "yarn.lock"]);
+      expect(ctx.plan.build.dependencyInstalls).toHaveLength(1);
+      expect(ctx.plan.build.dependencyInstalls[0].command).toContain("yarn install --frozen-lockfile");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("adds a tool and treats unknown tools as apt packages", () => {

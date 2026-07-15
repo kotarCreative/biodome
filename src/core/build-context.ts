@@ -4,4 +4,5 @@ export interface BuildContext {
   plan: Plan;
   addAptPackage(name: string): void;
   addLanguageSnippet(snippet: string): void;
+  fileExists(path: string): boolean;
 }

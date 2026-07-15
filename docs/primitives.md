@@ -70,6 +70,8 @@ Language setup affects:
 - How dependencies are installed.
 - What artifacts are copied into the final dev stage.
 
+Manifest files are detected from the project root. For example, Node.js uses `npm ci` when `package-lock.json` exists and falls back to `npm install` when only `package.json` exists. If no manifest is present, only the base image is configured and no dependency install step is emitted.
+
 ## `addPackage(manager, name, options)`
 
 Installs a package through a language-specific package manager.
