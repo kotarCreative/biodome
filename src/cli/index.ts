@@ -1,11 +1,17 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { Command } from "commander";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildPlan } from "../builder/index.js";
-import { generateDockerfile, generateSupervisordConf, generateCompose, generateDockerignore } from "../docker/generator.js";
+import { buildPlan, validateConfig } from "../builder/index.js";
+import {
+  generateDockerfile,
+  generateSupervisordConf,
+  generateCompose,
+  generateDockerignore,
+} from "../docker/generator.js";
 import { Runner } from "../docker/runner.js";
 import { formatInfo, formatAgentsMd } from "../core/info.js";
+import { Plan } from "../core/plan.js";
 
 const SANDBOX_DIR = ".sandbox";
 
@@ -13,7 +19,7 @@ function ensureSandboxDir(rootDir: string): void {
   mkdirSync(join(rootDir, SANDBOX_DIR), { recursive: true });
 }
 
-function writeGeneratedFiles(rootDir: string, plan: any): void {
+function writeGeneratedFiles(rootDir: string, plan: Plan): void {
   ensureSandboxDir(rootDir);
   writeFileSync(join(rootDir, SANDBOX_DIR, "Dockerfile"), generateDockerfile(plan));
 
@@ -26,8 +32,10 @@ function writeGeneratedFiles(rootDir: string, plan: any): void {
   writeFileSync(join(rootDir, ".dockerignore"), generateDockerignore());
 }
 
-function runHooks(plan: any, point: string, runner: Runner, rootDir: string): void {
-  const hooks = plan.runtime.processes.filter((p: any) => p.mode === "oneshot" && p.startOn === point);
+function runHooks(plan: Plan, point: string, runner: Runner, rootDir: string): void {
+  const hooks = plan.runtime.processes.filter(
+    (p) => p.mode === "oneshot" && p.startOn === point
+  );
   if (hooks.length === 0) return;
 
   const hostPoints = new Set(["build.pre", "build.post", "start.pre", "stop.post"]);
@@ -36,7 +44,7 @@ function runHooks(plan: any, point: string, runner: Runner, rootDir: string): vo
     console.log(`[hook] ${hook.name} (${point})`);
     if (hostPoints.has(point)) {
       const [cmd, ...args] = hook.command;
-      execSync(`${cmd} ${args.join(" ")}`, { stdio: "inherit", cwd: rootDir });
+      execFileSync(cmd, args, { stdio: "inherit", cwd: rootDir });
     } else {
       runner.execInDev(hook.command);
     }
@@ -62,7 +70,7 @@ program
       join(sandboxDir, "config.json"),
       JSON.stringify({ project: { name: projectName } }, null, 2) + "\n"
     );
-    writeFileSync(join(sandboxDir, "services.js"), "// Define backing services here\n");
+    writeFileSync(join(sandboxDir, "services.js"), "export default function services(ctx) {\n  // Define backing services here\n}\n");
     mkdirSync(join(sandboxDir, "features"), { recursive: true });
     writeFileSync(join(sandboxDir, "features", ".gitkeep"), "");
     console.log(`Initialized sandbox for ${projectName}`);
@@ -71,9 +79,9 @@ program
 program
   .command("build")
   .description("Prepare the development environment")
-  .action(() => {
+  .action(async () => {
     const rootDir = process.cwd();
-    const plan = buildPlan(rootDir);
+    const plan = await buildPlan(rootDir);
     writeGeneratedFiles(rootDir, plan);
     const runner = new Runner(plan.project);
     runHooks(plan, "build.pre", runner, rootDir);
@@ -87,9 +95,9 @@ program
   .description("Start the development environment")
   .option("--build", "Rebuild the environment before starting")
   .option("--wait", "Block until Ctrl+C is pressed")
-  .action((options) => {
+  .action(async (options) => {
     const rootDir = process.cwd();
-    const plan = buildPlan(rootDir);
+    const plan = await buildPlan(rootDir);
     writeGeneratedFiles(rootDir, plan);
 
     const runner = new Runner(plan.project);
@@ -114,9 +122,9 @@ program
 program
   .command("down")
   .description("Stop the development environment")
-  .action(() => {
+  .action(async () => {
     const rootDir = process.cwd();
-    const plan = buildPlan(rootDir);
+    const plan = await buildPlan(rootDir);
     const runner = new Runner(plan.project);
     runHooks(plan, "stop.pre", runner, rootDir);
     runner.down(rootDir);
@@ -128,9 +136,9 @@ program
   .command("exec <command...>")
   .description("Run a command in the dev container")
   .allowUnknownOption()
-  .action((cmd: string[]) => {
+  .action(async (cmd: string[]) => {
     const rootDir = process.cwd();
-    const plan = buildPlan(rootDir);
+    const plan = await buildPlan(rootDir);
     const runner = new Runner(plan.project);
     runHooks(plan, "exec.pre", runner, rootDir);
     runner.execInDev(cmd);
@@ -140,9 +148,9 @@ program
 program
   .command("info")
   .description("Show project summary and connection info")
-  .action(() => {
+  .action(async () => {
     const rootDir = process.cwd();
-    const plan = buildPlan(rootDir);
+    const plan = await buildPlan(rootDir, { dryRun: true });
     console.log(formatInfo(plan));
   });
 
@@ -151,9 +159,9 @@ const configCmd = program.command("config").description("Manage sandbox configur
 configCmd
   .command("validate")
   .description("Validate sandbox/ configuration without building")
-  .action(() => {
+  .action(async () => {
     const rootDir = process.cwd();
-    buildPlan(rootDir);
+    validateConfig(rootDir);
     console.log("Configuration is valid");
   });
 
@@ -162,9 +170,9 @@ const generateCmd = program.command("generate").description("Generate project fi
 generateCmd
   .command("agents.md")
   .description("Generate AGENTS.md for AI context")
-  .action(() => {
+  .action(async () => {
     const rootDir = process.cwd();
-    const plan = buildPlan(rootDir);
+    const plan = await buildPlan(rootDir, { dryRun: true });
     writeFileSync(join(rootDir, "AGENTS.md"), formatAgentsMd(plan));
     console.log("Generated AGENTS.md");
   });

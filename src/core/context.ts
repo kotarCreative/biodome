@@ -29,9 +29,11 @@ import { toolHandlers } from "./tools.js";
 export class SandboxContext implements FeatureContext, BuildContext {
   plan: Plan;
   private rootDir: string;
+  private dryRun: boolean;
 
-  constructor(rootDir: string, project: string) {
+  constructor(rootDir: string, project: string, dryRun = false) {
     this.rootDir = rootDir;
+    this.dryRun = dryRun;
     this.plan = createPlan(project);
   }
 
@@ -53,6 +55,12 @@ export class SandboxContext implements FeatureContext, BuildContext {
   addLanguage(name: string, options: LanguageOptions = {}): void {
     const handler = languageHandlers[name];
     if (!handler) {
+      return;
+    }
+    if (this.plan.build.baseImage) {
+      console.warn(
+        `[warn] Language ${name} is ignored: a base image is already set by a previous language. Only one base image is supported.`
+      );
       return;
     }
     handler(this, options);
@@ -135,6 +143,11 @@ export class SandboxContext implements FeatureContext, BuildContext {
   }
 
   exec(command: string): { stdout: string; stderr: string; exitCode: number } {
+    if (this.dryRun) {
+      console.log(`[exec] (dry run) ${command}`);
+      return { stdout: "", stderr: "", exitCode: 0 };
+    }
+
     console.log(`[exec] ${command}`);
     try {
       const stdout = execSync(command, {

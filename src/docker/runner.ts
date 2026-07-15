@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync, StdioOptions } from "node:child_process";
 
 const COMPOSE_FILE = ".sandbox/docker-compose.yaml";
 
@@ -30,8 +30,8 @@ export class Runner {
   }
 
   private exec(cmd: string, args: string[], cwd?: string): void {
-    const opts: any = { stdio: "inherit" };
-    if (cwd) opts.cwd = cwd;
-    execSync(`${cmd} ${args.map((a) => `"${a}"`).join(" ")}`, opts);
+    const options: { stdio: StdioOptions; cwd?: string } = { stdio: "inherit" };
+    if (cwd) options.cwd = cwd;
+    execFileSync(cmd, args, options);
   }
 }

@@ -75,29 +75,3 @@ export interface ServiceOptions {
   password?: string;
 }
 
-export type FeatureConstructor = (name: string, raw: unknown) => Feature;
-
-export class Registry {
-  private constructors = new Map<string, FeatureConstructor>();
-
-  register(type: string, ctor: FeatureConstructor): void {
-    this.constructors.set(type, ctor);
-  }
-
-  create(type: string, name: string, raw: unknown): Feature {
-    const ctor = this.constructors.get(type);
-    if (!ctor) {
-      throw new Error(`Unknown feature type ${type}`);
-    }
-    return ctor(name, raw);
-  }
-
-  has(type: string): boolean {
-    return this.constructors.has(type);
-  }
-
-  types(): string[] {
-    return Array.from(this.constructors.keys()).sort();
-  }
-}
-

@@ -17,16 +17,10 @@ export const serviceConfigs: Record<string, (svc: Service, options: ServiceOptio
       retries: 10,
     };
   },
-  redis: (svc, options) => {
-    if (options.password) {
-      svc.environment.REDIS_PASSWORD = options.password;
-    }
+  redis: (svc, _options) => {
     svc.volumes.push({ host: `${svc.name}_data`, container: "/data" });
-    const test = options.password
-      ? `redis-cli ping | grep -q PONG`
-      : "redis-cli ping | grep -q PONG";
     svc.healthCheck = {
-      test: ["CMD-SHELL", test],
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"],
       interval: "5s",
       timeout: "3s",
       retries: 10,

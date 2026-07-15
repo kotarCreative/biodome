@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { runInNewContext } from "node:vm";
+import { pathToFileURL } from "node:url";
 import { SandboxContext } from "../core/context.js";
 import { Plan } from "../core/plan.js";
 
@@ -12,14 +12,22 @@ export interface Config {
   };
 }
 
-export function buildPlan(rootDir: string): Plan {
-  const config = readConfig(rootDir);
-  const ctx = new SandboxContext(rootDir, config.project.name);
+export interface BuildPlanOptions {
+  dryRun?: boolean;
+}
 
-  loadServices(rootDir, ctx);
-  loadFeatures(rootDir, ctx);
+export async function buildPlan(rootDir: string, options: BuildPlanOptions = {}): Promise<Plan> {
+  const config = readConfig(rootDir);
+  const ctx = new SandboxContext(rootDir, config.project.name, options.dryRun);
+
+  await loadServices(rootDir, ctx);
+  await loadFeatures(rootDir, ctx);
 
   return ctx.plan;
+}
+
+export function validateConfig(rootDir: string): Config {
+  return readConfig(rootDir);
 }
 
 function readConfig(rootDir: string): Config {
@@ -27,19 +35,47 @@ function readConfig(rootDir: string): Config {
   if (!existsSync(path)) {
     throw new Error(`Missing sandbox config file: ${path}`);
   }
-  return JSON.parse(readFileSync(path, "utf-8")) as Config;
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf-8"));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid sandbox config file ${path}: ${message}`);
+  }
+
+  return validateConfigShape(raw, path);
 }
 
-function loadServices(rootDir: string, ctx: SandboxContext): void {
+function validateConfigShape(value: unknown, path: string): Config {
+  if (value === null || typeof value !== "object") {
+    throw new Error(`Invalid sandbox config file ${path}: expected a JSON object`);
+  }
+
+  const config = value as Record<string, unknown>;
+  if (!config.project || typeof config.project !== "object") {
+    throw new Error(`Invalid sandbox config file ${path}: missing required field "project"`);
+  }
+
+  const project = config.project as Record<string, unknown>;
+  if (typeof project.name !== "string" || project.name.length === 0) {
+    throw new Error(
+      `Invalid sandbox config file ${path}: "project.name" must be a non-empty string`
+    );
+  }
+
+  return { project: { name: project.name } };
+}
+
+async function loadServices(rootDir: string, ctx: SandboxContext): Promise<void> {
   const path = join(rootDir, SANDBOX_DIR, "services.js");
   if (!existsSync(path)) {
     return;
   }
-  const source = readFileSync(path, "utf-8");
-  executeFeatureScript(path, source, ctx);
+  await executeFeatureModule(path, ctx);
 }
 
-function loadFeatures(rootDir: string, ctx: SandboxContext): void {
+async function loadFeatures(rootDir: string, ctx: SandboxContext): Promise<void> {
   const featuresDir = join(rootDir, SANDBOX_DIR, "features");
   if (!existsSync(featuresDir)) {
     return;
@@ -51,21 +87,20 @@ function loadFeatures(rootDir: string, ctx: SandboxContext): void {
 
   for (const file of files) {
     const path = join(featuresDir, file);
-    const source = readFileSync(path, "utf-8");
-    executeFeatureScript(path, source, ctx);
+    await executeFeatureModule(path, ctx);
   }
 }
 
-function executeFeatureScript(path: string, source: string, ctx: SandboxContext): void {
-  const sandbox = {
-    ctx: () => ctx,
-  };
-
+async function executeFeatureModule(path: string, ctx: SandboxContext): Promise<void> {
+  const url = pathToFileURL(path).href;
   try {
-    runInNewContext(source, { sandbox, console }, {
-      filename: path,
-      displayErrors: true,
-    });
+    const mod = (await import(url)) as { default?: (ctx: SandboxContext) => void | Promise<void> };
+    if (typeof mod.default !== "function") {
+      throw new Error(
+        `Feature module ${path} must export a default function that accepts the sandbox context`
+      );
+    }
+    await mod.default(ctx);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to load feature ${path}: ${message}`);

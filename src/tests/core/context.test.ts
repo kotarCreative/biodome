@@ -59,6 +59,19 @@ describe("SandboxContext", () => {
     }
   });
 
+  it("warns when a second language would override the base image", () => {
+    const dir = makeProject(["package.json"]);
+    try {
+      const ctx = new SandboxContext(dir, "test");
+      ctx.addLanguage("python", { version: "3.12" });
+      ctx.addLanguage("node", { version: "20" });
+
+      expect(ctx.plan.build.baseImage).toBe("python:3.12-slim");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("skips Python dependency install when no manifest exists", () => {
     const dir = makeProject();
     try {
