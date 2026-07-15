@@ -4,7 +4,7 @@
 
 ## Current state
 
-- `sandbox init` scaffolds `sandbox/config.json`, `sandbox/services.js`, and `sandbox/features/*.js`.
+- `sandbox init` scaffolds `sandbox/config.json`, `sandbox/services.mjs`, and `sandbox/features/*.mjs` (legacy `.js` extensions are also supported).
 - `sandbox build` / `up` / `down` / `exec` manage the generated Docker environment.
 - `sandbox info` and `sandbox generate agents.md` produce project summaries from the computed plan.
 - `sandbox config validate` checks `sandbox/config.json` schema without executing feature scripts.

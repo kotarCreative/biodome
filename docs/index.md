@@ -22,7 +22,7 @@ npx sandbox-manager up
 - **Primitives:** The building blocks you add to a sandbox. `process`, `hook`, `language`, `package`, `tool`, `service`.
 - **Plan:** The intermediate representation of your environment. Each feature contributes to it.
 - **Features:** JavaScript modules in `sandbox/features/` that export a default function receiving the sandbox context.
-- **Services:** Backing containers like Postgres or Redis, declared in `sandbox/services.js`.
+- **Services:** Backing containers like Postgres or Redis, declared in `sandbox/services.mjs`.
 
 ## Documentation
 

@@ -145,7 +145,7 @@ Create a `sandbox/` directory with a starter config.
 
 ### `sandbox build`
 
-Generate `.sandbox/Dockerfile`, `.sandbox/docker-compose.yaml`, `.dockerignore`, and build the dev image.
+Generate `.sandbox/Dockerfile`, `.sandbox/docker-compose.yaml`, `.sandbox/supervisord.conf` (when there are daemon processes), `.dockerignore`, and build the dev image.
 
 ### `sandbox up [--build] [--wait]`
 
@@ -177,7 +177,7 @@ Generate an `AGENTS.md` file with connection info and available commands for AI 
 
 ### `sandbox logs [process]`
 
-Tail logs from a managed process. Omit the process name to see all logs.
+Tail logs from a managed process. Omit the process name to see the `supervisord` log.
 
 ### `sandbox ps`
 

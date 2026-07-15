@@ -226,7 +226,7 @@ Use the CLI to tail `supervisord` managed logs:
 
 ```bash
 sandbox logs django
-sandbox logs --all
+sandbox logs
 ```
 
-Logs are stored at `/tmp/<process>.log` inside the dev container by default.
+Without a process name, the command tails the `supervisord` log. Logs are stored at `/tmp/<process>.log` inside the dev container by default.

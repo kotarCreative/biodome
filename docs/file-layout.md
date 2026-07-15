@@ -35,6 +35,8 @@ Static metadata for the project. Currently only the project name is required.
 
 Backing services run as separate containers. Use `ctx.addService()` for each service.
 
+> Legacy `.js` extensions are also supported (`sandbox/services.js`).
+
 ```javascript
 export default function services(ctx) {
   ctx.addService("postgres", {
@@ -50,6 +52,8 @@ export default function services(ctx) {
 ## `sandbox/features/*.mjs`
 
 Feature files declare languages, packages, tools, processes, and hooks. They are loaded in sorted order and each receives the shared context.
+
+> Legacy `.js` extensions are also supported (`sandbox/features/*.js`).
 
 ```javascript
 // sandbox/features/python.mjs

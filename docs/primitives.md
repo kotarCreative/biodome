@@ -199,4 +199,4 @@ export default function branchEnv(ctx) {
 }
 ```
 
-Commands are logged to stdout. Read-only commands such as `info` and `config validate` run feature modules in dry-run mode, so `ctx.exec` returns empty output and does not shell out.
+Commands are logged to stdout. Read-only commands such as `info`, `config validate`, and `generate agents.md` run feature modules in dry-run mode, so `ctx.exec` returns empty output and does not shell out.
