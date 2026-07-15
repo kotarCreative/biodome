@@ -1,3 +1,5 @@
 /sandbox
 /sandbox.exe
 .sandbox/
+node_modules
+package-lock.json
