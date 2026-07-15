@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { buildPlan } from "../builder/index.js";
 import { generateDockerfile, generateSupervisordConf, generateCompose, generateDockerignore } from "../docker/generator.js";
 import { Runner } from "../docker/runner.js";
+import { formatInfo, formatAgentsMd } from "../core/info.js";
 
 const SANDBOX_DIR = ".sandbox";
 
@@ -134,6 +135,38 @@ program
     runHooks(plan, "exec.pre", runner, rootDir);
     runner.execInDev(cmd);
     runHooks(plan, "exec.post", runner, rootDir);
+  });
+
+program
+  .command("info")
+  .description("Show project summary and connection info")
+  .action(() => {
+    const rootDir = process.cwd();
+    const plan = buildPlan(rootDir);
+    console.log(formatInfo(plan));
+  });
+
+const configCmd = program.command("config").description("Manage sandbox configuration");
+
+configCmd
+  .command("validate")
+  .description("Validate sandbox/ configuration without building")
+  .action(() => {
+    const rootDir = process.cwd();
+    buildPlan(rootDir);
+    console.log("Configuration is valid");
+  });
+
+const generateCmd = program.command("generate").description("Generate project files");
+
+generateCmd
+  .command("agents.md")
+  .description("Generate AGENTS.md for AI context")
+  .action(() => {
+    const rootDir = process.cwd();
+    const plan = buildPlan(rootDir);
+    writeFileSync(join(rootDir, "AGENTS.md"), formatAgentsMd(plan));
+    console.log("Generated AGENTS.md");
   });
 
 program.parse();

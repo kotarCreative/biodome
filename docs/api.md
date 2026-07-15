@@ -128,3 +128,41 @@ type LifecyclePoint =
   | "exec.pre"
   | "exec.post";
 ```
+
+## CLI commands
+
+### `sandbox init`
+
+Create a `sandbox/` directory with a starter config.
+
+### `sandbox build`
+
+Generate `.sandbox/Dockerfile`, `.sandbox/docker-compose.yaml`, `.dockerignore`, and build the dev image.
+
+### `sandbox up [--build] [--wait]`
+
+Start the dev container and backing services with Docker Compose. Use `--build` to force a rebuild. Use `--wait` to keep the CLI alive until Ctrl+C.
+
+### `sandbox down`
+
+Stop and remove the dev container and backing services.
+
+### `sandbox exec <command...>`
+
+Run a command inside the dev container.
+
+```bash
+sandbox exec npm test
+```
+
+### `sandbox info`
+
+Print a summary of the project: base image, services, ports, connection strings, processes, and hooks.
+
+### `sandbox config validate`
+
+Validate the `sandbox/` configuration without building.
+
+### `sandbox generate agents.md`
+
+Generate an `AGENTS.md` file with connection info and available commands for AI coding agents.

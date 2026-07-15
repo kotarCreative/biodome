@@ -10,7 +10,19 @@ See the [docs](docs/index.md) for full documentation.
 npx sandbox-manager init
 npx sandbox-manager build
 npx sandbox-manager up
+npx sandbox-manager info
 ```
+
+## Commands
+
+- `sandbox init` — create a `sandbox/` directory in the current project.
+- `sandbox build` — generate Docker files and build the dev image.
+- `sandbox up` — start the dev container and backing services.
+- `sandbox down` — stop the environment.
+- `sandbox exec <command>` — run a command inside the dev container.
+- `sandbox info` — show services, ports, and connection strings.
+- `sandbox config validate` — validate `sandbox/` without building.
+- `sandbox generate agents.md` — create `AGENTS.md` for AI context.
 
 ## Documentation
 
