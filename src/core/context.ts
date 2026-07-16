@@ -213,7 +213,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       environment: validated.environment || {},
       ports: validated.port ? [{ host: validated.port, container: validated.port }] : [],
       volumes: [],
-      networks: ["sandbox"],
+      networks: ["biodome"],
     }
 
     const config = serviceConfigs[type]

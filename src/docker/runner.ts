@@ -6,7 +6,7 @@ import { NodeRuntime } from "../core/runtime-node.js"
 import type { SandboxRuntime } from "../core/runtime.js"
 import { RuntimeError } from "../core/errors.js"
 
-const COMPOSE_FILE = ".sandbox/docker-compose.yaml"
+const COMPOSE_FILE = ".biodome/docker-compose.yaml"
 
 const DOCKER_CAPABILITIES = capabilitiesOf(
   "lifecycle.build",
@@ -78,7 +78,7 @@ export class DockerRuntime implements SandboxRuntime {
         return yield* new RuntimeError({
           message:
             "Docker is not available or the daemon is not running. " +
-            "Make sure Docker is installed and started, or run a command that does not need Docker (e.g. 'sandbox config validate').",
+            "Make sure Docker is installed and started, or run a command that does not need Docker (e.g. 'biodome config validate').",
         })
       }
     },
@@ -151,7 +151,7 @@ export class DockerRuntime implements SandboxRuntime {
         `${this.project}-dev`,
         "supervisorctl",
         "-c",
-        "/workspace/.sandbox/supervisord.conf",
+        "/workspace/.biodome/supervisord.conf",
         "restart",
         processName,
       ],

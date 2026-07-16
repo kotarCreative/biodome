@@ -25,7 +25,7 @@ describe("Docker generators", () => {
     expect(dockerfile).toContain("FROM python:3.12-slim AS base");
     expect(dockerfile).toContain("supervisor");
     expect(dockerfile).toContain("supervisord.conf");
-    expect(dockerfile).toContain('CMD ["supervisord", "-c", "/workspace/.sandbox/supervisord.conf"]');
+    expect(dockerfile).toContain('CMD ["supervisord", "-c", "/workspace/.biodome/supervisord.conf"]');
     expect(dockerfile).not.toContain('CMD ["bash"]');
   });
 
@@ -69,7 +69,7 @@ describe("Docker generators", () => {
     expect(conf).toContain("[supervisorctl]");
     expect(conf).toContain("[rpcinterface:supervisor]");
     expect(conf).toContain("[program:django-healthcheck]");
-    expect(conf).toContain("sh /workspace/.sandbox/healthchecks/django-monitor.sh");
+    expect(conf).toContain("sh /workspace/.biodome/healthchecks/django-monitor.sh");
   });
 
   it("does not include bash CMD when no daemon processes exist", () => {
@@ -99,7 +99,7 @@ describe("Docker generators", () => {
     const compose = generateCompose(plan);
     expect(compose).toContain("8000:8000");
     expect(compose).toContain("healthcheck:");
-    expect(compose).toContain("sh /workspace/.sandbox/healthchecks/all.sh");
+    expect(compose).toContain("sh /workspace/.biodome/healthchecks/all.sh");
     expect(compose).not.toContain("sleep infinity");
     expect(compose).toContain("..:/workspace");
 
@@ -107,7 +107,7 @@ describe("Docker generators", () => {
     expect(healthchecks["django.sh"]).toContain("curl -fsS");
     expect(healthchecks["django.sh"]).toContain("http://localhost:8000/admin/login/");
     expect(healthchecks["django-monitor.sh"]).toContain("supervisorctl");
-    expect(healthchecks["all.sh"]).toContain("sh /workspace/.sandbox/healthchecks/django.sh");
+    expect(healthchecks["all.sh"]).toContain("sh /workspace/.biodome/healthchecks/django.sh");
   });
 
   it("generates health check scripts with timeout in seconds", () => {
@@ -149,10 +149,10 @@ describe("Docker generators", () => {
     expect(healthchecks["custom.sh"]).toContain("sh -c 'curl -f http://localhost/'");
   });
 
-  it("generates a .dockerignore that excludes .sandbox but keeps supervisord.conf", () => {
+  it("generates a .dockerignore that excludes .biodome but keeps supervisord.conf", () => {
     const dockerignore = generateDockerignore();
-    expect(dockerignore).toContain(".sandbox/*");
-    expect(dockerignore).toContain("!.sandbox/supervisord.conf");
-    expect(dockerignore).not.toContain(".sandbox\n");
+    expect(dockerignore).toContain(".biodome/*");
+    expect(dockerignore).toContain("!.biodome/supervisord.conf");
+    expect(dockerignore).not.toContain(".biodome\n");
   });
 });

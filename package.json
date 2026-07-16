@@ -1,12 +1,12 @@
 {
-  "name": "sandbox-manager",
+  "name": "@kotarcreative/biodome",
   "version": "0.1.0",
-  "description": "Development environment manager powered by composable primitives",
+  "description": "Self-contained development environments powered by composable primitives",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "sandbox": "dist/cli/index.js"
+    "biodome": "dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
-    "sandbox",
+    "biodome",
     "development-environment",
     "containers",
     "dev-server"

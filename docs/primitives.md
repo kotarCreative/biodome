@@ -1,6 +1,6 @@
 # Primitives
 
-Primitives are the building blocks of a sandbox. You add them through the context object passed to your feature modules.
+Primitives are the building blocks of a biodome. You add them through the context object passed to your feature modules.
 
 ## `addProcess(spec)`
 
@@ -138,7 +138,7 @@ export default function env(ctx) {
 
 ## Health checks
 
-Health checks are attached to daemon processes. Each daemon with a health check gets a generated shell script in `.sandbox/healthchecks/<name>.sh`, and `supervisord` runs a companion `<name>-healthcheck` program that restarts the process after repeated failures. The dev service health check in the generated compose file runs all daemon health checks via `.sandbox/healthchecks/all.sh`.
+Health checks are attached to daemon processes. Each daemon with a health check gets a generated shell script in `.biodome/healthchecks/<name>.sh`, and `supervisord` runs a companion `<name>-healthcheck` program that restarts the process after repeated failures. The dev service health check in the generated compose file runs all daemon health checks via `.biodome/healthchecks/all.sh`.
 
 ```javascript
 export default function api(ctx) {

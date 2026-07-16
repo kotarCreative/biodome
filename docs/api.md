@@ -139,54 +139,54 @@ type LifecyclePoint =
 
 ## CLI commands
 
-### `sandbox init [--bare]`
+### `biodome init [--bare]`
 
-Create a `sandbox/` directory with a starter config and a generated `sandbox/features/auto-detect.mjs` feature. The auto-detect feature inspects project files (`package.json`, `bun.lockb`, `requirements.txt`, `go.mod`, `Cargo.toml`, `pom.xml`, etc.) and calls `ctx.addLanguage` for each detected language. Pass `--bare` to skip auto-detection and create a minimal scaffold.
+Create a `biodome/` directory with a starter config and a generated `biodome/features/auto-detect.mjs` feature. The auto-detect feature inspects project files (`package.json`, `bun.lockb`, `requirements.txt`, `go.mod`, `Cargo.toml`, `pom.xml`, etc.) and calls `ctx.addLanguage` for each detected language. Pass `--bare` to skip auto-detection and create a minimal scaffold.
 
-### `sandbox build`
+### `biodome build`
 
-Generate `.sandbox/Dockerfile`, `.sandbox/docker-compose.yaml`, `.sandbox/supervisord.conf` (when there are daemon processes), `.sandbox/healthchecks/*.sh` (when there are daemon processes with health checks), `.dockerignore`, and build the dev image.
+Generate `.biodome/Dockerfile`, `.biodome/docker-compose.yaml`, `.biodome/supervisord.conf` (when there are daemon processes), `.biodome/healthchecks/*.sh` (when there are daemon processes with health checks), `.dockerignore`, and build the dev image.
 
-### `sandbox up [--build] [--wait]`
+### `biodome up [--build] [--wait]`
 
 Start the dev container and backing services with Docker Compose. Use `--build` to force a rebuild. Use `--wait` to keep the CLI alive until Ctrl+C.
 
-### `sandbox down`
+### `biodome down`
 
 Stop and remove the dev container and backing services.
 
-### `sandbox exec <command...>`
+### `biodome exec <command...>`
 
 Run a command inside the dev container.
 
 ```bash
-sandbox exec npm test
+biodome exec npm test
 ```
 
-### `sandbox info`
+### `biodome info`
 
 Print a summary of the project: base image, services, ports, connection strings, processes, and hooks.
 
-### `sandbox config validate`
+### `biodome config validate`
 
-Validate the `sandbox/` configuration and feature modules without building. This checks the config schema, validates feature/service module exports, builds the plan in dry-run mode, and runs `validatePlan` to catch port conflicts and other plan-level errors.
+Validate the `biodome/` configuration and feature modules without building. This checks the config schema, validates feature/service module exports, builds the plan in dry-run mode, and runs `validatePlan` to catch port conflicts and other plan-level errors.
 
-### `sandbox generate agents.md`
+### `biodome generate agents.md`
 
 Generate an `AGENTS.md` file with connection info and available commands for AI coding agents.
 
-### `sandbox logs [process]`
+### `biodome logs [process]`
 
 Tail logs from a managed process. Omit the process name to see the `supervisord` log.
 
-### `sandbox ps`
+### `biodome ps`
 
 Show running containers for the project.
 
-### `sandbox status`
+### `biodome status`
 
 Report container health and the status of managed processes. This runs `docker compose ps` for container health and `supervisorctl status` inside the dev container for running processes.
 
-### `sandbox restart [process]`
+### `biodome restart [process]`
 
 Restart a managed process or all daemon processes.

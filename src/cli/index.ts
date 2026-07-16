@@ -29,24 +29,24 @@ import {
   runSafe,
 } from "./helpers.js"
 
-const SANDBOX_DIR = ".sandbox"
+const BIODOME_DIR = ".biodome"
 
-function ensureSandboxDir(rootDir: string): void {
-  mkdirSync(join(rootDir, SANDBOX_DIR), { recursive: true })
+function ensureBiodomeDir(rootDir: string): void {
+  mkdirSync(join(rootDir, BIODOME_DIR), { recursive: true })
 }
 
 function writeGeneratedFiles(rootDir: string, plan: Plan): void {
-  ensureSandboxDir(rootDir)
-  writeFileSync(join(rootDir, SANDBOX_DIR, "Dockerfile"), generateDockerfile(plan))
+  ensureBiodomeDir(rootDir)
+  writeFileSync(join(rootDir, BIODOME_DIR, "Dockerfile"), generateDockerfile(plan))
 
   const supervisord = generateSupervisordConf(plan)
   if (supervisord) {
-    writeFileSync(join(rootDir, SANDBOX_DIR, "supervisord.conf"), supervisord)
+    writeFileSync(join(rootDir, BIODOME_DIR, "supervisord.conf"), supervisord)
   }
 
-  writeFileSync(join(rootDir, SANDBOX_DIR, "docker-compose.yaml"), generateCompose(plan))
+  writeFileSync(join(rootDir, BIODOME_DIR, "docker-compose.yaml"), generateCompose(plan))
 
-  const healthcheckDir = join(rootDir, SANDBOX_DIR, "healthchecks")
+  const healthcheckDir = join(rootDir, BIODOME_DIR, "healthchecks")
   rmSync(healthcheckDir, { recursive: true, force: true })
   mkdirSync(healthcheckDir, { recursive: true })
   const healthchecks = generateHealthcheckScripts(plan)
@@ -71,41 +71,41 @@ function withNodeRuntime<E>(
 }
 
 const program = new Command()
-program.name("sandbox").description("Development environment manager").version("0.1.0")
+program.name("biodome").description("Self-contained development environment manager").version("0.1.0")
 
 program
   .command("init")
-  .description("Initialize a sandbox/ directory with language auto-detection")
-  .option("--bare", "Skip language auto-detection and create a minimal sandbox")
+  .description("Initialize a biodome/ directory with language auto-detection")
+  .option("--bare", "Skip language auto-detection and create a minimal biodome")
   .action((options) => {
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
-      const sandboxDir = join(rootDir, "sandbox")
+      const biodomeDir = join(rootDir, "biodome")
       const projectName = rootDir.split("/").pop() || "project"
 
-      if (existsSync(sandboxDir)) {
-        return yield* new PlanError({ message: "Sandbox directory already exists" })
+      if (existsSync(biodomeDir)) {
+        return yield* new PlanError({ message: "Biodome directory already exists" })
       }
 
       yield* Effect.try({
         try: () => {
-          mkdirSync(sandboxDir, { recursive: true })
+          mkdirSync(biodomeDir, { recursive: true })
           writeFileSync(
-            join(sandboxDir, "config.json"),
+            join(biodomeDir, "config.json"),
             JSON.stringify({ project: { name: projectName } }, null, 2) + "\n"
           )
           writeFileSync(
-            join(sandboxDir, "services.mjs"),
+            join(biodomeDir, "services.mjs"),
             "export default function services(ctx) {\n  // Define backing services here\n}\n"
           )
-          mkdirSync(join(sandboxDir, "features"), { recursive: true })
+          mkdirSync(join(biodomeDir, "features"), { recursive: true })
 
           if (options.bare) {
-            writeFileSync(join(sandboxDir, "features", ".gitkeep"), "")
+            writeFileSync(join(biodomeDir, "features", ".gitkeep"), "")
           } else {
             const languages = detectStarterLanguages(rootDir)
             writeFileSync(
-              join(sandboxDir, "features", "auto-detect.mjs"),
+              join(biodomeDir, "features", "auto-detect.mjs"),
               generateStarterFeature(languages)
             )
           }
@@ -116,7 +116,7 @@ program
           }),
       })
 
-      console.log(`Initialized sandbox for ${projectName}`)
+      console.log(`Initialized biodome for ${projectName}`)
     })
 
     runSafe(cliProgram)
@@ -269,7 +269,7 @@ program
       yield* runtime.exec([
         "supervisorctl",
         "-c",
-        "/workspace/.sandbox/supervisord.conf",
+        "/workspace/.biodome/supervisord.conf",
         "status",
       ])
     }).pipe(Effect.scoped)

@@ -166,7 +166,7 @@ export function createPlan(project: string): Plan {
     },
     runtime: {
       services: [],
-      networks: [{ name: "sandbox", driver: "bridge" }],
+      networks: [{ name: "biodome", driver: "bridge" }],
       volumes: [],
       ports: [],
       environment: {},

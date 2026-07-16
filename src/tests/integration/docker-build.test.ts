@@ -35,9 +35,9 @@ describeIntegration("docker build integration", () => {
   it("builds a generated Dockerfile for a Python project with a usable venv", async () => {
     const dir = join("/tmp", "sandbox-integration-" + Date.now());
     createProject(dir, {
-      "sandbox/config.json": JSON.stringify({ project: { name: "py-fixture" } }),
-      "sandbox/services.mjs": "export default function services() {}\n",
-      "sandbox/features/python.mjs": `
+      "biodome/config.json": JSON.stringify({ project: { name: "py-fixture" } }),
+      "biodome/services.mjs": "export default function services() {}\n",
+      "biodome/features/python.mjs": `
         export default function python(ctx) {
           ctx.addLanguage("python", { version: "3.12" });
         }
@@ -45,7 +45,7 @@ describeIntegration("docker build integration", () => {
       "requirements.txt": "requests==2.32.3\n",
     });
 
-    const imageTag = `sandbox-manager-test-${Date.now()}`;
+    const imageTag = `biodome-test-${Date.now()}`;
     try {
       mkdirSync(join(dir, ".sandbox"), { recursive: true });
       const plan = await buildPlan(dir);
@@ -77,9 +77,9 @@ describeIntegration("docker build integration", () => {
   it("builds a generated Dockerfile for a node project", async () => {
     const dir = join("/tmp", "sandbox-integration-" + Date.now());
     createProject(dir, {
-      "sandbox/config.json": JSON.stringify({ project: { name: "node-fixture" } }),
-      "sandbox/services.mjs": "export default function services() {}\n",
-      "sandbox/features/node.mjs": `
+      "biodome/config.json": JSON.stringify({ project: { name: "node-fixture" } }),
+      "biodome/services.mjs": "export default function services() {}\n",
+      "biodome/features/node.mjs": `
         export default function node(ctx) {
           ctx.addLanguage("node", { version: "20" });
         }
@@ -87,7 +87,7 @@ describeIntegration("docker build integration", () => {
       "package.json": JSON.stringify({ name: "node-fixture" }),
     });
 
-    const imageTag = `sandbox-manager-test-${Date.now()}`;
+    const imageTag = `biodome-test-${Date.now()}`;
     try {
       mkdirSync(join(dir, ".sandbox"), { recursive: true });
       const plan = await buildPlan(dir);
@@ -112,13 +112,13 @@ describeIntegration("docker build integration", () => {
   it("generates a compose file with a healthy postgres service", async () => {
     const dir = join("/tmp", "sandbox-integration-" + Date.now());
     createProject(dir, {
-      "sandbox/config.json": JSON.stringify({ project: { name: "pg-fixture" } }),
-      "sandbox/services.mjs": `
+      "biodome/config.json": JSON.stringify({ project: { name: "pg-fixture" } }),
+      "biodome/services.mjs": `
         export default function services(ctx) {
           ctx.addService("postgres", { port: 5432 });
         }
       `,
-      "sandbox/features/node.mjs": `
+      "biodome/features/node.mjs": `
         export default function node(ctx) {
           ctx.addLanguage("node", { version: "20" });
         }
@@ -126,7 +126,7 @@ describeIntegration("docker build integration", () => {
       "package.json": JSON.stringify({ name: "pg-fixture" }),
     });
 
-    const project = `sandbox-manager-test-${Date.now()}`;
+    const project = `biodome-test-${Date.now()}`;
     try {
       mkdirSync(join(dir, ".sandbox"), { recursive: true });
       const plan = await buildPlan(dir);
@@ -181,9 +181,9 @@ describeIntegration("docker build integration", () => {
   it("builds a generated Dockerfile for a go project", async () => {
     const dir = join("/tmp", "sandbox-integration-" + Date.now());
     createProject(dir, {
-      "sandbox/config.json": JSON.stringify({ project: { name: "go-fixture" } }),
-      "sandbox/services.mjs": "export default function services() {}\n",
-      "sandbox/features/go.mjs": `
+      "biodome/config.json": JSON.stringify({ project: { name: "go-fixture" } }),
+      "biodome/services.mjs": "export default function services() {}\n",
+      "biodome/features/go.mjs": `
         export default function go(ctx) {
           ctx.addLanguage("go", { version: "1.22" });
         }
@@ -192,7 +192,7 @@ describeIntegration("docker build integration", () => {
       "go.sum": "",
     });
 
-    const imageTag = `sandbox-manager-test-${Date.now()}`;
+    const imageTag = `biodome-test-${Date.now()}`;
     try {
       mkdirSync(join(dir, ".sandbox"), { recursive: true });
       const plan = await buildPlan(dir);
@@ -225,14 +225,14 @@ describeIntegration("docker build integration", () => {
   it("builds a generated Dockerfile with Python and Node runtimes", async () => {
     const dir = join("/tmp", "sandbox-integration-" + Date.now());
     createProject(dir, {
-      "sandbox/config.json": JSON.stringify({ project: { name: "py-node-fixture" } }),
-      "sandbox/services.mjs": "export default function services() {}\n",
-      "sandbox/features/python.mjs": `
+      "biodome/config.json": JSON.stringify({ project: { name: "py-node-fixture" } }),
+      "biodome/services.mjs": "export default function services() {}\n",
+      "biodome/features/python.mjs": `
         export default function python(ctx) {
           ctx.addLanguage("python", { version: "3.12" });
         }
       `,
-      "sandbox/features/node.mjs": `
+      "biodome/features/node.mjs": `
         export default function node(ctx) {
           ctx.addLanguage("node", { version: "20" });
         }
@@ -241,7 +241,7 @@ describeIntegration("docker build integration", () => {
       "package.json": JSON.stringify({ name: "py-node-fixture" }),
     });
 
-    const imageTag = `sandbox-manager-test-${Date.now()}`;
+    const imageTag = `biodome-test-${Date.now()}`;
     try {
       mkdirSync(join(dir, ".sandbox"), { recursive: true });
       const plan = await buildPlan(dir);
@@ -294,14 +294,14 @@ class Handler(BaseHTTPRequestHandler):
 HTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
 `;
     createProject(dir, {
-      "sandbox/config.json": JSON.stringify({ project: { name: projectName } }),
-      "sandbox/services.mjs": "export default function services() {}\n",
-      "sandbox/features/python.mjs": `
+      "biodome/config.json": JSON.stringify({ project: { name: projectName } }),
+      "biodome/services.mjs": "export default function services() {}\n",
+      "biodome/features/python.mjs": `
         export default function python(ctx) {
           ctx.addLanguage("python", { version: "3.12" });
         }
       `,
-      "sandbox/features/web.mjs": `
+      "biodome/features/web.mjs": `
         export default function web(ctx) {
           ctx.addProcess({
             name: "web",
@@ -314,7 +314,7 @@ HTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
       "server.py": serverPy,
     });
 
-    const project = `sandbox-manager-test-${Date.now()}`;
+    const project = `biodome-test-${Date.now()}`;
     try {
       mkdirSync(join(dir, ".sandbox"), { recursive: true });
       const plan = await buildPlan(dir);

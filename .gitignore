@@ -1,6 +1,6 @@
-/sandbox
-/sandbox.exe
-.sandbox/
+/biodome
+/biodome.exe
+.biodome/
 node_modules
 dist
 

@@ -2,7 +2,7 @@
 
 ## Context
 
-sandbox-manager needs to handle secrets in two contexts:
+biodome needs to handle secrets in two contexts:
 - **Build-time secrets**: SSH keys, Docker credentials, API keys needed during image builds
 - **Runtime secrets**: Database URLs, API keys, service tokens needed when sandboxes run
 
@@ -37,7 +37,7 @@ Build an internal secret manager with a consistent interface. The manager stores
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                  sandbox-manager                 │
+│                  biodome                 │
 │  ┌───────────────────────────────────────────┐  │
 │  │           Secret Manager (core)            │  │
 │  │  - Encrypt at rest (age/AES-GCM)          │  │
@@ -66,12 +66,12 @@ Build an internal secret manager with a consistent interface. The manager stores
 - The manager caches secrets locally during a sandbox session, avoiding repeated network calls
 
 **Pros:**
-- Single API surface — all secrets look the same to sandbox-manager regardless of origin
+- Single API surface — all secrets look the same to biodome regardless of origin
 - Users configure *one* backend, not multiple provider-specific config blocks
 - Easy to test — the local encrypted file backend works offline with no credentials
 - Future-proof — adding a new cloud provider is just implementing the backend interface
 - Secrets can be migrated between backends without changing `sandbox/secrets.yaml`
-- The local backend serves as the "batteries-included" default — sandbox-manager works out of the box
+- The local backend serves as the "batteries-included" default — biodome works out of the box
 
 **Cons:**
 - Does not directly use platform-native secret systems (e.g., GitHub Codespaces secrets would need a sync bridge)
@@ -100,7 +100,7 @@ Rationale:
 1. The project is greenfield — no legacy integrations to support
 2. The multi-provider approach multiplies complexity without proportional benefit
 3. A unified interface with pluggable backends gives the same flexibility with lower maintenance
-4. The local encrypted backend means sandbox-manager works offline and out of the box
+4. The local encrypted backend means biodome works offline and out of the box
 5. The backend interface is a natural extension point for community contributions (AWS, GCP, Azure, HashiCorp Vault, etc.)
 
 ### Backend Interface (Proposed)
@@ -118,7 +118,7 @@ type SecretBackend interface {
     Set(ctx context.Context, key, value string) error
 }
 
-// SecretManager is the core abstraction used by sandbox-manager.
+// SecretManager is the core abstraction used by biodome.
 type SecretManager struct {
     backend SecretBackend
     cache   map[string]string
@@ -191,7 +191,7 @@ secrets:
       vault: "engineering/sandboxes"
     aws:
       region: "us-east-1"
-      profile: "sandbox-manager"
+      profile: "biodome"
     local:
       path: "~/.sandbox/secrets"
 ```
@@ -331,7 +331,7 @@ sandbox secrets set aws_access_key_id "AKIA..."
 sandbox secrets set aws_secret_access_key "..."
 ```
 
-**Why this works for sandbox-manager:**
+**Why this works for biodome:**
 - Phase 1 (local only): no credentials needed, works out of the box
 - Phase 2 (1Password / cloud): set up once via `sandbox secrets login`, then forget
 - CI/CD: env vars are the universal carrier — backends check them first
@@ -389,7 +389,7 @@ func (b *AWSBackend) Set(ctx context.Context, key, value string) error {
 }
 ```
 
-The only difference from `Resolve` is IAM permissions — the principal needs `secretsmanager:PutSecretValue` instead of just `secretsmanager:GetSecretValue`. This is handled at the cloud layer, not in sandbox-manager.
+The only difference from `Resolve` is IAM permissions — the principal needs `secretsmanager:PutSecretValue` instead of just `secretsmanager:GetSecretValue`. This is handled at the cloud layer, not in biodome.
 
 ### Sync Command
 
@@ -432,7 +432,7 @@ Making cloud backends writable raises the stakes on local backend security. Miti
 
 1. **The local backend encrypts at rest** — `~/.sandbox/secrets` is an encrypted blob, not plaintext
 2. **OS keychain integration** — the local encryption key can live in the OS keychain (macOS Keychain, GNOME Keyring, Windows Credential Manager) rather than a file
-3. **IAM permissions are external** — sandbox-manager never escalates privileges; it inherits whatever policy the caller has. A read-only IAM principal can only `Resolve`, never `Set`.
+3. **IAM permissions are external** — biodome never escalates privileges; it inherits whatever policy the caller has. A read-only IAM principal can only `Resolve`, never `Set`.
 4. **Audit logging is provider-native** — AWS CloudTrail, 1Password audit log, etc. all track `Set` calls automatically
 5. **Optional read-only mode** — `sandbox secrets set --backend aws` can be gated behind a config flag or the IAM policy itself
 

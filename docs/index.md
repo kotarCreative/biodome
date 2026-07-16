@@ -1,6 +1,6 @@
-# sandbox-manager
+# Biodome
 
-`sandbox-manager` is a development environment manager built around composable primitives. Instead of writing YAML or JSON, you describe your environment with small JavaScript files inside a `sandbox/` directory. Each file contributes capabilities — languages, services, packages, tools, processes, hooks — to a shared plan that the CLI turns into Docker images, containers, and compose files.
+Biodome is a development environment manager built around composable primitives. Instead of writing YAML or JSON, you describe your environment with small JavaScript files inside a `biodome/` directory. Each file contributes capabilities — languages, services, packages, tools, processes, hooks — to a shared plan that the CLI turns into Docker images, containers, and compose files.
 
 ## Why code-based configuration?
 
@@ -12,19 +12,19 @@
 ## Quick start
 
 ```bash
-npx sandbox-manager init
-npx sandbox-manager build
-npx sandbox-manager up
+npx @kotarcreative/biodome init
+npx @kotarcreative/biodome build
+npx @kotarcreative/biodome up
 ```
 
-`init` auto-detects languages from project files (`package.json`, `bun.lockb`, `requirements.txt`, `go.mod`, etc.) and generates a starter `sandbox/features/auto-detect.mjs` feature. To skip this and create a minimal scaffold, pass `--bare`.
+`init` auto-detects languages from project files (`package.json`, `bun.lockb`, `requirements.txt`, `go.mod`, etc.) and generates a starter `biodome/features/auto-detect.mjs` feature. To skip this and create a minimal scaffold, pass `--bare`.
 
 ## Concepts
 
-- **Primitives:** The building blocks you add to a sandbox. `process`, `hook`, `language`, `package`, `tool`, `service`.
+- **Primitives:** The building blocks you add to a biodome. `process`, `hook`, `language`, `package`, `tool`, `service`.
 - **Plan:** The intermediate representation of your environment. Each feature contributes to it.
-- **Features:** JavaScript modules in `sandbox/features/` that export a default function receiving the sandbox context.
-- **Services:** Backing containers like Postgres or Redis, declared in `sandbox/services.mjs`.
+- **Features:** JavaScript modules in `biodome/features/` that export a default function receiving the biodome context.
+- **Services:** Backing containers like Postgres or Redis, declared in `biodome/services.mjs`.
 
 ## Documentation
 

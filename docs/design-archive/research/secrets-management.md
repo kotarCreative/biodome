@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document summarizes research findings on secrets management strategies for container-based development environments, focusing on approaches that work for AI sandbox tools like sandbox-manager.
+This document summarizes research findings on secrets management strategies for container-based development environments, focusing on approaches that work for AI sandbox tools like biodome.
 
 ---
 

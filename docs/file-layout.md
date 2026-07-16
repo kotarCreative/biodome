@@ -1,10 +1,10 @@
 # File layout
 
-Every sandbox project has a `sandbox/` directory at the repository root. The directory contains metadata, services, and feature files.
+Every biodome project has a `biodome/` directory at the repository root. The directory contains metadata, services, and feature files.
 
 ```
 my-project/
-├── sandbox/
+├── biodome/
 │   ├── config.json          # project metadata
 │   ├── services.mjs         # backing services
 │   └── features/
@@ -12,7 +12,7 @@ my-project/
 │       ├── migrate.mjs      # one-shot hook
 │       ├── python.mjs       # language runtime
 │       └── npm-tools.mjs    # tools and packages
-├── .sandbox/
+├── .biodome/
 │   ├── Dockerfile           # generated
 │   ├── supervisord.conf     # generated
 │   ├── docker-compose.yaml  # generated
@@ -23,7 +23,7 @@ my-project/
 └── .dockerignore            # generated
 ```
 
-## `sandbox/config.json`
+## `biodome/config.json`
 
 Static metadata for the project. Currently only the project name is required.
 
@@ -35,11 +35,11 @@ Static metadata for the project. Currently only the project name is required.
 }
 ```
 
-## `sandbox/services.mjs`
+## `biodome/services.mjs`
 
 Backing services run as separate containers. Use `ctx.addService()` for each service.
 
-> Legacy `.js` extensions are also supported (`sandbox/services.js`).
+> Legacy `.js` extensions are also supported (`biodome/services.js`).
 
 ```javascript
 export default function services(ctx) {
@@ -53,14 +53,14 @@ export default function services(ctx) {
 }
 ```
 
-## `sandbox/features/*.mjs`
+## `biodome/features/*.mjs`
 
 Feature files declare languages, packages, tools, processes, and hooks. They are loaded in sorted order and each receives the shared context.
 
-> Legacy `.js` extensions are also supported (`sandbox/features/*.js`).
+> Legacy `.js` extensions are also supported (`biodome/features/*.js`).
 
 ```javascript
-// sandbox/features/python.mjs
+// biodome/features/python.mjs
 export default function python(ctx) {
   ctx.addLanguage("python", { version: "3.12" });
   ctx.addTool("libpq-dev");
@@ -70,12 +70,12 @@ export default function python(ctx) {
 
 ## Generated files
 
-After running `sandbox build` or `sandbox up`, the CLI writes:
+After running `biodome build` or `biodome up`, the CLI writes:
 
-- `.sandbox/Dockerfile` — multi-stage image for the dev container.
-- `.sandbox/supervisord.conf` — process manager config for daemon processes.
-- `.sandbox/docker-compose.yaml` — backing services and dev service.
-- `.sandbox/healthchecks/*.sh` — per-process health check and monitor scripts, plus an aggregate `all.sh`.
+- `.biodome/Dockerfile` — multi-stage image for the dev container.
+- `.biodome/supervisord.conf` — process manager config for daemon processes.
+- `.biodome/docker-compose.yaml` — backing services and dev service.
+- `.biodome/healthchecks/*.sh` — per-process health check and monitor scripts, plus an aggregate `all.sh`.
 - `.dockerignore` — build context exclusions.
 
 Do not edit these files directly. They are regenerated each time.

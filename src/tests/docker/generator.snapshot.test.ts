@@ -16,7 +16,7 @@ describe("Docker generator snapshots", () => {
       environment: { POSTGRES_USER: "app", POSTGRES_PASSWORD: "dev", POSTGRES_DB: "myapp" },
       ports: [{ host: 5432, container: 5432 }],
       volumes: [{ host: "postgres_data", container: "/var/lib/postgresql/data" }],
-      networks: ["sandbox"],
+      networks: ["biodome"],
       healthCheck: {
         test: ["CMD-SHELL", "pg_isready -U app -d myapp"],
         interval: "5s",
@@ -67,7 +67,7 @@ describe("Docker generator snapshots", () => {
       environment: {},
       ports: [{ host: 6379, container: 6379 }],
       volumes: [{ host: "redis_data", container: "/data" }],
-      networks: ["sandbox"],
+      networks: ["biodome"],
       healthCheck: {
         test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"],
         interval: "5s",

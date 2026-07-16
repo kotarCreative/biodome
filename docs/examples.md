@@ -3,7 +3,7 @@
 ## Django + Postgres + Redis
 
 ```javascript
-// sandbox/services.mjs
+// biodome/services.mjs
 export default function services(ctx) {
   ctx.addService("postgres", {
     port: 5432,
@@ -16,7 +16,7 @@ export default function services(ctx) {
 ```
 
 ```javascript
-// sandbox/features/python.mjs
+// biodome/features/python.mjs
 export default function python(ctx) {
   ctx.addLanguage("python", { version: "3.12" });
   ctx.addPackage("pip", "django", { version: "5.0" });
@@ -27,7 +27,7 @@ export default function python(ctx) {
 ```
 
 ```javascript
-// sandbox/features/django.mjs
+// biodome/features/django.mjs
 export default function django(ctx) {
   ctx.addProcess({
     name: "django",
@@ -45,7 +45,7 @@ export default function django(ctx) {
 ```
 
 ```javascript
-// sandbox/features/migrate.mjs
+// biodome/features/migrate.mjs
 export default function migrate(ctx) {
   ctx.addHook({
     name: "migrate",
@@ -58,14 +58,14 @@ export default function migrate(ctx) {
 ## Node.js monorepo with pnpm
 
 ```javascript
-// sandbox/features/node.mjs
+// biodome/features/node.mjs
 export default function node(ctx) {
   ctx.addLanguage("node", { version: "20", packageManager: "pnpm" });
 }
 ```
 
 ```javascript
-// sandbox/features/web.mjs
+// biodome/features/web.mjs
 export default function web(ctx) {
   ctx.addProcess({
     name: "web",
@@ -80,14 +80,14 @@ export default function web(ctx) {
 ## Go API server
 
 ```javascript
-// sandbox/features/go.mjs
+// biodome/features/go.mjs
 export default function go(ctx) {
   ctx.addLanguage("go", { version: "1.22" });
 }
 ```
 
 ```javascript
-// sandbox/features/api.mjs
+// biodome/features/api.mjs
 export default function api(ctx) {
   ctx.addProcess({
     name: "api",
@@ -101,14 +101,14 @@ export default function api(ctx) {
 ## Rust + Postgres
 
 ```javascript
-// sandbox/features/rust.mjs
+// biodome/features/rust.mjs
 export default function rust(ctx) {
   ctx.addLanguage("rust", { version: "1.75" });
 }
 ```
 
 ```javascript
-// sandbox/features/server.mjs
+// biodome/features/server.mjs
 export default function server(ctx) {
   ctx.addProcess({
     name: "server",
@@ -122,7 +122,7 @@ export default function server(ctx) {
 ## Django API + Angular frontend in one container
 
 ```javascript
-// sandbox/services.mjs
+// biodome/services.mjs
 export default function services(ctx) {
   ctx.addService("postgres", {
     port: 5432,
@@ -133,7 +133,7 @@ export default function services(ctx) {
 ```
 
 ```javascript
-// sandbox/features/python.mjs
+// biodome/features/python.mjs
 export default function python(ctx) {
   ctx.addLanguage("python", { version: "3.12" });
   ctx.addPackage("pip", "django", { version: "5.0" });
@@ -142,14 +142,14 @@ export default function python(ctx) {
 ```
 
 ```javascript
-// sandbox/features/node.mjs
+// biodome/features/node.mjs
 export default function node(ctx) {
   ctx.addLanguage("node", { version: "20" });
 }
 ```
 
 ```javascript
-// sandbox/features/app.mjs
+// biodome/features/app.mjs
 export default function app(ctx) {
   ctx.addProcess({
     name: "django",
@@ -179,7 +179,7 @@ Because both `python` and `node` are declared, the generated image uses `debian:
 ## Custom MCP server
 
 ```javascript
-// sandbox/features/opencode-mcp.mjs
+// biodome/features/opencode-mcp.mjs
 export default function opencodeMcp(ctx) {
   ctx.addProcess({
     name: "opencode-mcp",
@@ -193,7 +193,7 @@ export default function opencodeMcp(ctx) {
 ## Conditional setup based on files
 
 ```javascript
-// sandbox/features/setup.mjs
+// biodome/features/setup.mjs
 export default function setup(ctx) {
   if (ctx.fileExists("pyproject.toml")) {
     ctx.addLanguage("python", { version: "3.12", packageManager: "poetry" });
@@ -213,7 +213,7 @@ export default function setup(ctx) {
 ## Branch-based environment
 
 ```javascript
-// sandbox/features/env.mjs
+// biodome/features/env.mjs
 export default function branchEnv(ctx) {
   const result = ctx.exec("git branch --show-current");
   const branch = result.stdout.trim();
@@ -231,7 +231,7 @@ export default function branchEnv(ctx) {
 ## Multi-process project
 
 ```javascript
-// sandbox/features/app.mjs
+// biodome/features/app.mjs
 export default function app(ctx) {
   ctx.addProcess({
     name: "backend",

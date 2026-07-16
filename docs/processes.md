@@ -66,8 +66,8 @@ This runs after the dev container starts. The command executes inside the dev co
 | `start.post` | After the dev container starts | Inside the dev container |
 | `stop.pre` | Before `docker compose down` | Inside the dev container |
 | `stop.post` | After `docker compose down` | Host |
-| `exec.pre` | Before `sandbox exec <command>` | Inside the dev container |
-| `exec.post` | After `sandbox exec <command>` | Inside the dev container |
+| `exec.pre` | Before `biodome exec <command>` | Inside the dev container |
+| `exec.post` | After `biodome exec <command>` | Inside the dev container |
 
 ## Writing custom processes
 
@@ -197,7 +197,7 @@ This runs every time you execute a command inside the dev container.
 
 ## Process environment
 
-Process env vars are also merged into the runtime environment, so they are available to other processes and to commands you run with `sandbox exec`.
+Process env vars are also merged into the runtime environment, so they are available to other processes and to commands you run with `biodome exec`.
 
 ```javascript
 export default function apiEnv(ctx) {
@@ -218,16 +218,16 @@ export default function apiEnv(ctx) {
 - Commands are arrays of strings. If you need shell features, use `sh -c` as the first argument.
 - Health checks with `type: "http"` automatically add `curl` to the image.
 - Health checks with `type: "tcp"` automatically add `netcat-openbsd` to the image.
-- Each daemon process with a health check gets a generated script in `.sandbox/healthchecks/<name>.sh` and a `supervisord` monitor program (`<name>-healthcheck`) that restarts the process after repeated failures.
-- The dev service health check in `docker-compose.yaml` runs all daemon health checks via `.sandbox/healthchecks/all.sh`.
+- Each daemon process with a health check gets a generated script in `.biodome/healthchecks/<name>.sh` and a `supervisord` monitor program (`<name>-healthcheck`) that restarts the process after repeated failures.
+- The dev service health check in `docker-compose.yaml` runs all daemon health checks via `.biodome/healthchecks/all.sh`.
 
 ## Viewing process logs
 
 Use the CLI to tail `supervisord` managed logs:
 
 ```bash
-sandbox logs django
-sandbox logs
+biodome logs django
+biodome logs
 ```
 
 Without a process name, the command tails the `supervisord` log. Logs are stored at `/tmp/<process>.log` inside the dev container by default.

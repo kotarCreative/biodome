@@ -26,7 +26,7 @@ describe("formatInfo", () => {
       },
       ports: [{ host: 5432, container: 5432 }],
       volumes: [],
-      networks: ["sandbox"],
+      networks: ["biodome"],
     });
 
     const info = formatInfo(plan);
@@ -68,7 +68,7 @@ describe("formatAgentsMd", () => {
       },
       ports: [{ host: 5432, container: 5432 }],
       volumes: [],
-      networks: ["sandbox"],
+      networks: ["biodome"],
     });
 
     const md = formatAgentsMd(plan);
@@ -76,6 +76,6 @@ describe("formatAgentsMd", () => {
     expect(md).toContain("node:20-slim");
     expect(md).toContain("### postgres");
     expect(md).toContain("postgresql://app:dev@postgres:5432/myapp");
-    expect(md).toContain("sandbox up");
+    expect(md).toContain("biodome up");
   });
 });

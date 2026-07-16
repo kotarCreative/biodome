@@ -1,32 +1,32 @@
-# sandbox-manager
+# Biodome
 
-Development environment manager powered by composable JavaScript primitives.
+Self-contained development environments powered by composable JavaScript primitives.
 
 See the [docs](docs/index.md) for full documentation.
 
 ## Quick start
 
 ```bash
-npx sandbox-manager init
-npx sandbox-manager build
-npx sandbox-manager up
-npx sandbox-manager info
+npx @kotarcreative/biodome init
+npx @kotarcreative/biodome build
+npx @kotarcreative/biodome up
+npx @kotarcreative/biodome info
 ```
 
 ## Commands
 
-- `sandbox init [--bare]` — create a `sandbox/` directory with language auto-detection; `--bare` creates a minimal scaffold.
-- `sandbox build` — generate Docker files and build the dev image.
-- `sandbox up` — start the dev container and backing services.
-- `sandbox down` — stop the environment.
-- `sandbox exec <command>` — run a command inside the dev container.
-- `sandbox info` — show services, ports, and connection strings.
-- `sandbox config validate` — validate `sandbox/`, feature/service module exports, and the computed plan (including port conflicts) without building.
-- `sandbox generate agents.md` — create `AGENTS.md` for AI context.
-- `sandbox logs [process]` — tail logs from a managed process.
-- `sandbox ps` — show running containers for the project.
-- `sandbox status` — report container health and running managed processes.
-- `sandbox restart [process]` — restart a managed process or all daemons.
+- `biodome init [--bare]` — create a `biodome/` directory with language auto-detection; `--bare` creates a minimal scaffold.
+- `biodome build` — generate Docker files and build the dev image.
+- `biodome up` — start the dev container and backing services.
+- `biodome down` — stop the environment.
+- `biodome exec <command>` — run a command inside the dev container.
+- `biodome info` — show services, ports, and connection strings.
+- `biodome config validate` — validate `biodome/`, feature/service module exports, and the computed plan (including port conflicts) without building.
+- `biodome generate agents.md` — create `AGENTS.md` for AI context.
+- `biodome logs [process]` — tail logs from a managed process.
+- `biodome ps` — show running containers for the project.
+- `biodome status` — report container health and running managed processes.
+- `biodome restart [process]` — restart a managed process or all daemons.
 
 ## Documentation
 

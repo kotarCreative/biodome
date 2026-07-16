@@ -6,7 +6,7 @@ import { SandboxContext } from "../core/context.js"
 import { Plan, Port, ConfigSchema } from "../core/plan.js"
 import { ConfigError, FeatureError, PlanError, SandboxError, ValidationError } from "../core/errors.js"
 
-const SANDBOX_DIR = "sandbox"
+const BIODOME_DIR = "biodome"
 
 export interface BuildPlanOptions {
   dryRun?: boolean
@@ -48,19 +48,19 @@ export const validateFeaturesEffect = Effect.fnUntraced(function*(rootDir: strin
 
   // Validate the services module the same way loadServices will resolve it:
   // prefer services.mjs, fall back to services.js, but never both.
-  const servicesMjsPath = join(rootDir, SANDBOX_DIR, "services.mjs")
+  const servicesMjsPath = join(rootDir, BIODOME_DIR, "services.mjs")
   const servicesMjsExists = yield* Effect.sync(() => existsSync(servicesMjsPath))
   if (servicesMjsExists) {
     yield* checkModuleExports(servicesMjsPath)
   } else {
-    const servicesJsPath = join(rootDir, SANDBOX_DIR, "services.js")
+    const servicesJsPath = join(rootDir, BIODOME_DIR, "services.js")
     const servicesJsExists = yield* Effect.sync(() => existsSync(servicesJsPath))
     if (servicesJsExists) {
       yield* checkModuleExports(servicesJsPath)
     }
   }
 
-  const featuresDir = join(rootDir, SANDBOX_DIR, "features")
+  const featuresDir = join(rootDir, BIODOME_DIR, "features")
   const featuresDirExists = yield* Effect.sync(() => existsSync(featuresDir))
   if (featuresDirExists) {
     const files = yield* Effect.sync(() =>
@@ -95,7 +95,7 @@ const checkModuleExports = Effect.fnUntraced(function*(path: string) {
 
   if (typeof mod.default !== "function") {
     return yield* new FeatureError({
-      message: "Module must export a default function that accepts the sandbox context",
+      message: "Module must export a default function that accepts the biodome context",
       path,
     })
   }
@@ -110,10 +110,10 @@ export function validateFeatures(rootDir: string): Promise<Config> {
 }
 
 const readConfig = Effect.fnUntraced(function*(rootDir: string) {
-  const path = join(rootDir, SANDBOX_DIR, "config.json")
+  const path = join(rootDir, BIODOME_DIR, "config.json")
   const exists = yield* Effect.sync(() => existsSync(path))
   if (!exists) {
-    return yield* new ConfigError({ message: "Missing sandbox config file", path })
+    return yield* new ConfigError({ message: "Missing biodome config file", path })
   }
 
   const raw = yield* Effect.try({
@@ -177,7 +177,7 @@ export function validatePlan(plan: Plan): Effect.Effect<void, SandboxError, neve
 
 const loadServices = Effect.fnUntraced(function*(rootDir: string, ctx: SandboxContext) {
   for (const name of ["services.mjs", "services.js"]) {
-    const path = join(rootDir, SANDBOX_DIR, name)
+    const path = join(rootDir, BIODOME_DIR, name)
     const exists = yield* Effect.sync(() => existsSync(path))
     if (exists) {
       yield* executeFeatureModule(path, ctx)
@@ -187,7 +187,7 @@ const loadServices = Effect.fnUntraced(function*(rootDir: string, ctx: SandboxCo
 })
 
 const loadFeatures = Effect.fnUntraced(function*(rootDir: string, ctx: SandboxContext) {
-  const featuresDir = join(rootDir, SANDBOX_DIR, "features")
+  const featuresDir = join(rootDir, BIODOME_DIR, "features")
   const exists = yield* Effect.sync(() => existsSync(featuresDir))
   if (!exists) {
     return
@@ -218,7 +218,7 @@ const executeFeatureModule = Effect.fnUntraced(function*(path: string, ctx: Sand
 
   if (typeof mod.default !== "function") {
     return yield* new FeatureError({
-      message: "Feature module must export a default function that accepts the sandbox context",
+      message: "Feature module must export a default function that accepts the biodome context",
       path,
     })
   }

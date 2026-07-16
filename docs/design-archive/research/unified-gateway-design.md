@@ -526,7 +526,7 @@ Both MCP and TCP paths use the same secret resolution pipeline:
 ```go
 // Gateway initialization
 type Gateway struct {
-    secrets *secret.Manager           // from sandbox-manager
+    secrets *secret.Manager           // from biodome
     mcp     *MCPToolEngine
     tcp     *TCPProxyEngine
     policy  *PolicyEngine
@@ -715,7 +715,7 @@ policy:
     aws.staging.s3.delete_object: block
     aws.prod.*:                   require_approval
 
-# ── Secret backends (same as sandbox-manager) ──
+# ── Secret backends (same as biodome) ──
 secrets:
   backend: local
 ```
