@@ -38,7 +38,7 @@ export function generateDockerfile(plan: Plan): string {
     "# The dev stage starts from base and copies only the installed artifacts from",
     "# deps, so the final image does not include package manager caches or manifests.",
     "",
-    `FROM ${plan.build.baseImage || "ubuntu:22.04"} AS base`,
+    `FROM ${plan.build.baseImage || "debian:12-slim"} AS base`,
     "",
   ];
 
@@ -59,6 +59,13 @@ export function generateDockerfile(plan: Plan): string {
       lines.push(`    ${pkg} \\`);
     }
     lines.push("    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*");
+    lines.push("");
+  }
+
+  for (const snippet of plan.build.runtimeInstalls) {
+    lines.push(snippet);
+  }
+  if (plan.build.runtimeInstalls.length > 0) {
     lines.push("");
   }
 
@@ -121,6 +128,22 @@ export function generateDockerfile(plan: Plan): string {
   return lines.join("\n") + "\n";
 }
 
+export function generateHealthcheckScripts(plan: Plan): Record<string, string> {
+  const scripts: Record<string, string> = {};
+  const daemonProcesses = plan.runtime.processes.filter((p) => p.mode === "daemon");
+  for (const proc of daemonProcesses) {
+    if (proc.healthCheck) {
+      scripts[`${proc.name}.sh`] = processHealthCheckScript(proc);
+      scripts[`${proc.name}-monitor.sh`] = processHealthMonitorScript(proc);
+    }
+  }
+  const all = aggregateHealthCheckScript(plan.runtime.processes);
+  if (all) {
+    scripts["all.sh"] = all;
+  }
+  return scripts;
+}
+
 export function generateSupervisordConf(plan: Plan): string {
   const daemonProcesses = plan.runtime.processes.filter((p) => p.mode === "daemon");
   if (daemonProcesses.length === 0) {
@@ -135,6 +158,15 @@ export function generateSupervisordConf(plan: Plan): string {
     "logfile=/tmp/supervisord.log",
     "pidfile=/tmp/supervisord.pid",
     "user=root",
+    "",
+    "[unix_http_server]",
+    "file=/tmp/supervisor.sock",
+    "",
+    "[supervisorctl]",
+    "serverurl=unix:///tmp/supervisor.sock",
+    "",
+    "[rpcinterface:supervisor]",
+    "supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface",
     "",
   ];
 
@@ -157,6 +189,20 @@ export function generateSupervisordConf(plan: Plan): string {
       );
     }
     lines.push("");
+
+    if (proc.healthCheck) {
+      const startPeriod = proc.healthCheck.startPeriod || "5s";
+      lines.push(`[program:${proc.name}-healthcheck]`);
+      lines.push(
+        `command=sh /workspace/.sandbox/healthchecks/${proc.name}-monitor.sh`
+      );
+      lines.push("autostart=true");
+      lines.push("autorestart=true");
+      lines.push(`startsecs=${Math.ceil(parseDuration(startPeriod, 5))}`);
+      lines.push(`stdout_logfile=/tmp/${proc.name}-healthcheck.log`);
+      lines.push(`stderr_logfile=/tmp/${proc.name}-healthcheck.log`);
+      lines.push("");
+    }
   }
 
   return lines.join("\n") + "\n";
@@ -283,9 +329,26 @@ function devService(plan: Plan): ComposeService {
       service.ports = ports;
     }
 
-    const hc = firstProcessHealthCheck(daemonProcesses);
-    if (hc) {
-      service.healthcheck = processHealthCheckMap(hc);
+    const healthCheckedDaemons = daemonProcesses.filter((p) => p.healthCheck);
+    if (healthCheckedDaemons.length > 0) {
+      const intervals = healthCheckedDaemons.map((p) =>
+        parseDuration(p.healthCheck?.interval, 5)
+      );
+      const timeouts = healthCheckedDaemons.map((p) =>
+        parseDuration(p.healthCheck?.timeout, 3)
+      );
+      const retries = healthCheckedDaemons.map((p) => p.healthCheck?.retries ?? 3);
+      const startPeriods = healthCheckedDaemons.map((p) =>
+        parseDuration(p.healthCheck?.startPeriod, 10)
+      );
+
+      service.healthcheck = {
+        test: ["CMD-SHELL", "sh /workspace/.sandbox/healthchecks/all.sh"],
+        interval: formatDuration(Math.min(...intervals)),
+        timeout: formatDuration(Math.max(1, timeouts.reduce((a, b) => a + b, 0))),
+        retries: Math.min(...retries),
+        start_period: formatDuration(Math.max(...startPeriods)),
+      };
     }
   } else {
     service.command = ["sleep", "infinity"];
@@ -339,30 +402,90 @@ function isNamedVolume(host: string): boolean {
   return !host.startsWith("/") && !host.startsWith("./") && !host.startsWith("~");
 }
 
-function firstProcessHealthCheck(processes: Process[]): ProcessHealthCheck | undefined {
-  for (const proc of processes) {
-    if (proc.healthCheck) return proc.healthCheck;
-  }
-  return undefined;
+function processHealthCheckScript(proc: Process): string {
+  if (!proc.healthCheck) return "";
+  const check = shellHealthCheck(proc.healthCheck);
+  return [
+    "#!/bin/sh",
+    `# Auto-generated health check for ${proc.name}`,
+    "set -e",
+    check,
+  ].join("\n") + "\n";
 }
 
-function processHealthCheckMap(hc: ProcessHealthCheck): ComposeService["healthcheck"] {
-  const out: ComposeService["healthcheck"] = { test: [] };
+function processHealthMonitorScript(proc: Process): string {
+  if (!proc.healthCheck) return "";
+  const interval = proc.healthCheck.interval || "5s";
+  const retries = proc.healthCheck.retries ?? 3;
+  const startPeriod = proc.healthCheck.startPeriod || "5s";
+  return [
+    "#!/bin/sh",
+    `# Auto-generated health monitor for ${proc.name}`,
+    `sleep ${startPeriod}`,
+    "failures=0",
+    "while true; do",
+    `  if sh /workspace/.sandbox/healthchecks/${proc.name}.sh >/dev/null 2>&1; then`,
+    "    failures=0",
+    "  else",
+    "    failures=$((failures + 1))",
+    `    if [ $failures -ge ${retries} ]; then`,
+    `      supervisorctl -c /workspace/.sandbox/supervisord.conf restart ${proc.name}`,
+    "      failures=0",
+    "    fi",
+    "  fi",
+    `  sleep ${interval}`,
+    "done",
+  ].join("\n") + "\n";
+}
+
+function aggregateHealthCheckScript(processes: Process[]): string {
+  const daemonProcesses = processes.filter((p) => p.mode === "daemon");
+  const checks = daemonProcesses
+    .filter((p) => p.healthCheck)
+    .map((p) => `sh /workspace/.sandbox/healthchecks/${p.name}.sh`);
+  if (checks.length === 0) {
+    return ["#!/bin/sh", "# Auto-generated aggregate health check", "exit 0"].join("\n") + "\n";
+  }
+  return [
+    "#!/bin/sh",
+    "# Auto-generated aggregate health check",
+    "set -e",
+    ...checks,
+  ].join("\n") + "\n";
+}
+
+function shellHealthCheck(hc: ProcessHealthCheck): string {
+  const timeoutSeconds = parseDuration(hc.timeout, 3);
   switch (hc.type) {
     case "exec":
       if (hc.command && hc.command.length > 0) {
-        out.test = hc.command;
+        return hc.command.map(shellQuote).join(" ");
       }
-      break;
+      return "true";
     case "tcp":
-      out.test = ["CMD-SHELL", `nc -z localhost ${hc.port || 80}`];
-      break;
+      return `nc -z -w ${timeoutSeconds} localhost ${hc.port || 80}`;
     default:
-      out.test = ["CMD-SHELL", "curl -fsS " + (hc.url || `http://localhost:${hc.port || 80}`)];
+      return `curl -fsS --max-time ${timeoutSeconds} ${hc.url || `http://localhost:${hc.port || 80}`}`;
   }
-  if (hc.interval) out.interval = hc.interval;
-  if (hc.timeout) out.timeout = hc.timeout;
-  if (hc.retries) out.retries = hc.retries;
-  if (hc.startPeriod) out.start_period = hc.startPeriod;
-  return out;
+}
+
+function shellQuote(arg: string): string {
+  if (/^[a-zA-Z0-9_.\-/]+$/.test(arg)) return arg;
+  return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
+function parseDuration(value: string | undefined, defaultSeconds: number): number {
+  if (!value) return defaultSeconds;
+  const match = value.match(/^(\d+(?:\.\d+)?)([smhd]?)$/);
+  if (!match) return defaultSeconds;
+  const num = parseFloat(match[1]);
+  const unit = match[2] || "s";
+  const multipliers: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400 };
+  return num * (multipliers[unit] || 1);
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds % 3600 === 0) return `${seconds / 3600}h`;
+  if (seconds % 60 === 0) return `${seconds / 60}m`;
+  return `${seconds}s`;
 }

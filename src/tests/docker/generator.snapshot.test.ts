@@ -115,4 +115,41 @@ describe("Docker generator snapshots", () => {
     expect(generateSupervisordConf(plan)).toMatchSnapshot();
     expect(generateCompose(plan)).toMatchSnapshot();
   });
+
+  it("matches for multi-language runtime installs", () => {
+    const plan = createPlan("multi-lang");
+    plan.build.baseImage = "debian:12-slim";
+    plan.build.runtimeInstalls = [
+      'RUN apt-get update && curl -fsSL https://pyenv.run | bash',
+      'RUN apt-get update && curl -fsSL https://deb.nodesource.com/setup_20.x | bash',
+    ];
+    plan.build.languageSnippets = ['RUN corepack enable'];
+    plan.build.dependencyFiles = ["requirements.txt", "package.json", "package-lock.json"];
+    plan.build.dependencyInstalls.push(
+      {
+        files: ["requirements.txt"],
+        command: "RUN python -m venv /workspace/.venv && /workspace/.venv/bin/pip install -r requirements.txt",
+      },
+      {
+        files: ["package.json", "package-lock.json"],
+        command: "RUN npm ci",
+      }
+    );
+    plan.build.copyArtifacts.push(
+      {
+        files: ["requirements.txt"],
+        lines: ["COPY --from=deps /workspace/.venv /workspace/.venv", "ENV PATH=/workspace/.venv/bin:$PATH"],
+      },
+      {
+        files: ["package.json"],
+        lines: ["COPY --from=deps /workspace/node_modules /workspace/node_modules"],
+      }
+    );
+    plan.build.venvVolume = true;
+    plan.build.nodeModulesVolume = true;
+
+    expect(generateDockerfile(plan)).toMatchSnapshot();
+    expect(generateSupervisordConf(plan)).toMatchSnapshot();
+    expect(generateCompose(plan)).toMatchSnapshot();
+  });
 });

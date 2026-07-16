@@ -1,5 +1,5 @@
 import { Command } from "commander"
-import { existsSync, mkdirSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { Effect, Layer } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -7,12 +7,13 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 import * as NodeChildProcessSpawner from "@effect/platform-node-shared/NodeChildProcessSpawner"
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
 import * as NodePath from "@effect/platform-node-shared/NodePath"
-import { buildPlanEffect, validateConfigEffect } from "../builder/index.js"
+import { buildPlanEffect, validateConfigEffect, validateFeaturesEffect } from "../builder/index.js"
 import {
   generateDockerfile,
   generateSupervisordConf,
   generateCompose,
   generateDockerignore,
+  generateHealthcheckScripts,
 } from "../docker/generator.js"
 import { Runner, assertDockerAvailable } from "../docker/runner.js"
 import { formatInfo, formatAgentsMd } from "../core/info.js"
@@ -40,6 +41,14 @@ function writeGeneratedFiles(rootDir: string, plan: Plan): void {
   }
 
   writeFileSync(join(rootDir, SANDBOX_DIR, "docker-compose.yaml"), generateCompose(plan))
+
+  const healthcheckDir = join(rootDir, SANDBOX_DIR, "healthchecks")
+  rmSync(healthcheckDir, { recursive: true, force: true })
+  mkdirSync(healthcheckDir, { recursive: true })
+  const healthchecks = generateHealthcheckScripts(plan)
+  for (const [name, content] of Object.entries(healthchecks)) {
+    writeFileSync(join(healthcheckDir, name), content)
+  }
 
   const dockerignorePath = join(rootDir, ".dockerignore")
   if (!existsSync(dockerignorePath)) {
@@ -284,11 +293,11 @@ const configCmd = program.command("config").description("Manage sandbox configur
 
 configCmd
   .command("validate")
-  .description("Validate sandbox/ configuration without building")
+  .description("Validate sandbox/ configuration and feature module exports without building")
   .action(() => {
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
-      yield* validateConfigEffect(rootDir)
+      yield* validateFeaturesEffect(rootDir)
       console.log("Configuration is valid")
     })
 

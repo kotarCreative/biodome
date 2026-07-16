@@ -26,7 +26,7 @@ Add a language runtime.
 - `options.version`: version string
 - `options.packageManager`: for Python `"poetry"`; for Node `"pnpm"`, `"yarn"`, or `"npm"`
 
-Only one base image is supported; a second language is ignored with a warning.
+When multiple languages are requested, the CLI uses a neutral base image and installs each runtime on top of it.
 
 ### `addPackage(manager, name, options)`
 
@@ -145,7 +145,7 @@ Create a `sandbox/` directory with a starter config.
 
 ### `sandbox build`
 
-Generate `.sandbox/Dockerfile`, `.sandbox/docker-compose.yaml`, `.sandbox/supervisord.conf` (when there are daemon processes), `.dockerignore`, and build the dev image.
+Generate `.sandbox/Dockerfile`, `.sandbox/docker-compose.yaml`, `.sandbox/supervisord.conf` (when there are daemon processes), `.sandbox/healthchecks/*.sh` (when there are daemon processes with health checks), `.dockerignore`, and build the dev image.
 
 ### `sandbox up [--build] [--wait]`
 

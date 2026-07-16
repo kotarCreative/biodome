@@ -41,7 +41,19 @@ function serviceConnection(svc: Service): ServiceConnection | undefined {
 export function formatInfo(plan: Plan): string {
   const lines: string[] = [];
   lines.push(`Project: ${plan.project}`);
-  lines.push(`Base image: ${plan.build.baseImage || "(default ubuntu:22.04)"}`);
+  lines.push(`Base image: ${plan.build.baseImage || "(default debian:12-slim)"}`);
+
+  if (plan.build.languageRequests.length > 0) {
+    lines.push("");
+    lines.push("Languages:");
+    for (const request of plan.build.languageRequests) {
+      const opts = [];
+      if (request.options.version) opts.push(`version ${request.options.version}`);
+      if (request.options.packageManager) opts.push(request.options.packageManager);
+      const suffix = opts.length > 0 ? ` (${opts.join(", ")})` : "";
+      lines.push(`  - ${request.name}${suffix}`);
+    }
+  }
 
   if (plan.build.aptPackages.length > 0) {
     lines.push("");
@@ -98,8 +110,21 @@ export function formatAgentsMd(plan: Plan): string {
   lines.push("");
   lines.push("## Base image");
   lines.push("");
-  lines.push(`- ${plan.build.baseImage || "ubuntu:22.04"}`);
+  lines.push(`- ${plan.build.baseImage || "debian:12-slim"}`);
   lines.push("");
+
+  if (plan.build.languageRequests.length > 0) {
+    lines.push("## Languages");
+    lines.push("");
+    for (const request of plan.build.languageRequests) {
+      const opts = [];
+      if (request.options.version) opts.push(`version ${request.options.version}`);
+      if (request.options.packageManager) opts.push(request.options.packageManager);
+      const suffix = opts.length > 0 ? ` (${opts.join(", ")})` : "";
+      lines.push(`- ${request.name}${suffix}`);
+    }
+    lines.push("");
+  }
 
   if (plan.build.aptPackages.length > 0) {
     lines.push("## System packages");

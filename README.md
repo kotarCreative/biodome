@@ -21,7 +21,7 @@ npx sandbox-manager info
 - `sandbox down` — stop the environment.
 - `sandbox exec <command>` — run a command inside the dev container.
 - `sandbox info` — show services, ports, and connection strings.
-- `sandbox config validate` — validate `sandbox/` without building.
+- `sandbox config validate` — validate `sandbox/` and feature/service module exports without building.
 - `sandbox generate agents.md` — create `AGENTS.md` for AI context.
 - `sandbox logs [process]` — tail logs from a managed process.
 - `sandbox ps` — show running containers for the project.

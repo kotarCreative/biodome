@@ -92,7 +92,15 @@ export class Runner implements Provider {
   restart = Effect.fnUntraced(function*(this: Runner, processName: string) {
     return yield* execDocker({
       project: this.project,
-      args: ["exec", `${this.project}-dev`, "supervisorctl", "restart", processName],
+      args: [
+        "exec",
+        `${this.project}-dev`,
+        "supervisorctl",
+        "-c",
+        "/workspace/.sandbox/supervisord.conf",
+        "restart",
+        processName,
+      ],
     })
   })
 }

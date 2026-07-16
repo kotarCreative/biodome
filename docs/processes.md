@@ -218,7 +218,8 @@ export default function apiEnv(ctx) {
 - Commands are arrays of strings. If you need shell features, use `sh -c` as the first argument.
 - Health checks with `type: "http"` automatically add `curl` to the image.
 - Health checks with `type: "tcp"` automatically add `netcat-openbsd` to the image.
-- The first daemon process with a health check is used for the dev service health check in `docker-compose.yaml`.
+- Each daemon process with a health check gets a generated script in `.sandbox/healthchecks/<name>.sh` and a `supervisord` monitor program (`<name>-healthcheck`) that restarts the process after repeated failures.
+- The dev service health check in `docker-compose.yaml` runs all daemon health checks via `.sandbox/healthchecks/all.sh`.
 
 ## Viewing process logs
 

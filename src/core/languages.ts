@@ -1,10 +1,77 @@
 import { BuildContext } from "./build-context.js"
 import { LanguageOptions } from "./feature.js"
 
-export function setupPython(ctx: BuildContext, options: LanguageOptions): void {
-  const version = options.version || "3.12"
-  ctx.setBaseImage(`python:${version}-slim`)
+const DEFAULT_BASE_IMAGE = "debian:12-slim"
 
+export interface LanguageHandler {
+  baseImage(options: LanguageOptions): string
+  installRuntime(ctx: BuildContext, options: LanguageOptions): void
+  installDependencies(ctx: BuildContext, options: LanguageOptions): void
+}
+
+function aptCacheMounts(): string {
+  return [
+    "--mount=type=cache,target=/var/cache/apt,sharing=locked",
+    "--mount=type=cache,target=/var/lib/apt/lists,sharing=locked",
+  ].join(" ")
+}
+
+function aptInstall(packages: string[]): string {
+  return `apt-get update && apt-get install -y --no-install-recommends ${packages.join(" ")}`
+}
+
+function shell(lines: string[]): string {
+  return "RUN " + lines.join(" ")
+}
+
+// Python
+// -----
+// In single-language mode we use the official python slim image.
+// In multi-language mode we install Python via pyenv on the neutral base.
+// Pyenv can resolve `3.12` to the latest patch release, so users may pass
+// either a major.minor or major.minor.patch version.
+
+function pythonBaseImage(options: LanguageOptions): string {
+  const version = options.version || "3.12"
+  return `python:${version}-slim`
+}
+
+function pythonRuntimeInstall(ctx: BuildContext, options: LanguageOptions): void {
+  const version = options.version || "3.12"
+  const buildDeps = [
+    "ca-certificates",
+    "curl",
+    "git",
+    "make",
+    "build-essential",
+    "libssl-dev",
+    "zlib1g-dev",
+    "libbz2-dev",
+    "libreadline-dev",
+    "libsqlite3-dev",
+    "libncursesw5-dev",
+    "libncurses5-dev",
+    "libffi-dev",
+    "liblzma-dev",
+  ]
+  ctx.addRuntimeInstall(
+    shell([
+      aptCacheMounts(),
+      aptInstall(buildDeps),
+      '&& curl -fsSL https://pyenv.run | bash',
+      '&& export PYENV_ROOT="$HOME/.pyenv"',
+      '&& export PATH="$PYENV_ROOT/bin:$PATH"',
+      `&& pyenv install -s ${version}`,
+      `&& pyenv global ${version}`,
+      '&& ln -sf "$PYENV_ROOT/shims/python" /usr/local/bin/python',
+      '&& ln -sf "$PYENV_ROOT/shims/python3" /usr/local/bin/python3',
+      '&& ln -sf "$PYENV_ROOT/shims/pip" /usr/local/bin/pip',
+      '&& ln -sf "$PYENV_ROOT/shims/pip3" /usr/local/bin/pip3',
+    ])
+  )
+}
+
+function pythonDependencies(ctx: BuildContext, options: LanguageOptions): void {
   if (options.packageManager === "poetry") {
     const files = ctx.requireDependencyFiles(["pyproject.toml", "poetry.lock"])
     if (files.length > 0) {
@@ -34,10 +101,32 @@ export function setupPython(ctx: BuildContext, options: LanguageOptions): void {
   }
 }
 
-export function setupNode(ctx: BuildContext, options: LanguageOptions): void {
-  const version = options.version || "20"
-  ctx.setBaseImage(`node:${version}-slim`)
+// Node
+// ----
+// In single-language mode we use the official node slim image.
+// In multi-language mode we install Node via NodeSource.
 
+function nodeBaseImage(options: LanguageOptions): string {
+  const version = options.version || "20"
+  return `node:${version}-slim`
+}
+
+function nodeRuntimeInstall(ctx: BuildContext, options: LanguageOptions): void {
+  const version = options.version || "20"
+  ctx.addRuntimeInstall(
+    shell([
+      aptCacheMounts(),
+      aptInstall(["ca-certificates", "curl", "gnupg"]),
+      "&& mkdir -p /etc/apt/keyrings",
+      '&& curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg',
+      `&& echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${version}.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list`,
+      "&& apt-get update",
+      "&& apt-get install -y --no-install-recommends nodejs",
+    ])
+  )
+}
+
+function nodeDependencies(ctx: BuildContext, options: LanguageOptions): void {
   if (options.packageManager === "pnpm") {
     ctx.addLanguageSnippet("RUN corepack enable && corepack prepare pnpm@latest --activate")
     const lockFile = "pnpm-lock.yaml"
@@ -89,9 +178,43 @@ export function setupNode(ctx: BuildContext, options: LanguageOptions): void {
   ctx.enableNodeModulesVolume()
 }
 
-export function setupGo(ctx: BuildContext, options: LanguageOptions): void {
+// Go
+// --
+// In single-language mode we use the official golang alpine image.
+// In multi-language mode we download the official tarball on the neutral base.
+
+function goBaseImage(options: LanguageOptions): string {
   const version = options.version || "1.22"
-  ctx.setBaseImage(`golang:${version}-alpine`)
+  return `golang:${version}-alpine`
+}
+
+function normalizeGoVersion(version: string): string {
+  // The Go download URL requires a full semver tag. Accept `1.22` and expand
+  // it to `1.22.0` so users do not have to remember the patch version.
+  if (/^\d+\.\d+$/.test(version)) {
+    return `${version}.0`
+  }
+  return version
+}
+
+function goRuntimeInstall(ctx: BuildContext, options: LanguageOptions): void {
+  const version = normalizeGoVersion(options.version || "1.22")
+  ctx.addRuntimeInstall(
+    shell([
+      aptCacheMounts(),
+      aptInstall(["ca-certificates", "curl"]),
+      '&& ARCH=$(dpkg --print-architecture)',
+      `&& curl -fsSL https://go.dev/dl/go${version}.linux-\${ARCH}.tar.gz | tar -C /usr/local -xz`,
+      '&& ln -sf /usr/local/go/bin/go /usr/local/bin/go',
+      '&& ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt',
+    ])
+  )
+  // Match the module cache path used by goDependencies so dependencies are
+  // found at runtime in multi-language mode.
+  ctx.addLanguageSnippet("ENV GOPATH=/go")
+}
+
+function goDependencies(ctx: BuildContext, _options: LanguageOptions): void {
   const files = ctx.requireDependencyFiles(["go.mod", "go.sum"])
   if (files.length > 0) {
     ctx.addDependencyInstall({
@@ -105,9 +228,33 @@ export function setupGo(ctx: BuildContext, options: LanguageOptions): void {
   }
 }
 
-export function setupRust(ctx: BuildContext, options: LanguageOptions): void {
+// Rust
+// ----
+// In single-language mode we use the official rust slim image.
+// In multi-language mode we install rustup on the neutral base.
+
+function rustBaseImage(options: LanguageOptions): string {
   const version = options.version || "1.75"
-  ctx.setBaseImage(`rust:${version}-slim`)
+  return `rust:${version}-slim`
+}
+
+function rustRuntimeInstall(ctx: BuildContext, options: LanguageOptions): void {
+  const version = options.version || "1.75"
+  ctx.addRuntimeInstall(
+    shell([
+      aptCacheMounts(),
+      aptInstall(["ca-certificates", "curl", "build-essential"]),
+      `&& curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${version}`,
+      '&& ln -sf "$HOME/.cargo/bin/rustc" /usr/local/bin/rustc',
+      '&& ln -sf "$HOME/.cargo/bin/cargo" /usr/local/bin/cargo',
+    ])
+  )
+  // Match the registry path used by rustDependencies so dependencies are
+  // found at runtime in multi-language mode.
+  ctx.addLanguageSnippet("ENV CARGO_HOME=/usr/local/cargo")
+}
+
+function rustDependencies(ctx: BuildContext, _options: LanguageOptions): void {
   const files = ctx.requireDependencyFiles(["Cargo.toml", "Cargo.lock"])
   if (files.length > 0) {
     ctx.addDependencyInstall({
@@ -121,15 +268,63 @@ export function setupRust(ctx: BuildContext, options: LanguageOptions): void {
   }
 }
 
-export function setupJava(ctx: BuildContext, options: LanguageOptions): void {
+// Java
+// ----
+// In single-language mode we use the Eclipse Temurin JDK image.
+// In multi-language mode we install Temurin via the Adoptium apt repository.
+
+function javaBaseImage(options: LanguageOptions): string {
   const version = options.version || "21"
-  ctx.setBaseImage(`eclipse-temurin:${version}-jdk`)
+  return `eclipse-temurin:${version}-jdk`
 }
 
-export const languageHandlers: Record<string, (ctx: BuildContext, options: LanguageOptions) => void> = {
-  python: setupPython,
-  node: setupNode,
-  go: setupGo,
-  rust: setupRust,
-  java: setupJava,
+function javaRuntimeInstall(ctx: BuildContext, options: LanguageOptions): void {
+  const version = options.version || "21"
+  ctx.addRuntimeInstall(
+    shell([
+      aptCacheMounts(),
+      aptInstall(["ca-certificates", "curl", "gnupg", "wget"]),
+      "&& mkdir -p /etc/apt/keyrings",
+      '&& curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public | gpg --dearmor -o /etc/apt/keyrings/adoptium.gpg',
+      '&& echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(awk -F= \'/^VERSION_CODENAME/{print$2}\' /etc/os-release) main" | tee /etc/apt/sources.list.d/adoptium.list',
+      "&& apt-get update",
+      `&& apt-get install -y --no-install-recommends temurin-${version}-jdk`,
+    ])
+  )
+}
+
+function javaDependencies(_ctx: BuildContext, _options: LanguageOptions): void {
+  // Maven and Gradle dependency handling are not implemented yet.
+}
+
+export const languageHandlers: Record<string, LanguageHandler> = {
+  python: {
+    baseImage: pythonBaseImage,
+    installRuntime: pythonRuntimeInstall,
+    installDependencies: pythonDependencies,
+  },
+  node: {
+    baseImage: nodeBaseImage,
+    installRuntime: nodeRuntimeInstall,
+    installDependencies: nodeDependencies,
+  },
+  go: {
+    baseImage: goBaseImage,
+    installRuntime: goRuntimeInstall,
+    installDependencies: goDependencies,
+  },
+  rust: {
+    baseImage: rustBaseImage,
+    installRuntime: rustRuntimeInstall,
+    installDependencies: rustDependencies,
+  },
+  java: {
+    baseImage: javaBaseImage,
+    installRuntime: javaRuntimeInstall,
+    installDependencies: javaDependencies,
+  },
+}
+
+export function getDefaultBaseImage(): string {
+  return DEFAULT_BASE_IMAGE
 }

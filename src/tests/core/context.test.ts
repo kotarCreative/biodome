@@ -50,6 +50,7 @@ describe("SandboxContext", () => {
     try {
       const ctx = new SandboxContext(dir, "test");
       ctx.addLanguage("python", { version: "3.12" });
+      ctx.finalizeBuildPlan();
 
       expect(ctx.plan.build.baseImage).toBe("python:3.12-slim");
       expect(ctx.plan.build.dependencyFiles).toContain("requirements.txt");
@@ -59,14 +60,19 @@ describe("SandboxContext", () => {
     }
   });
 
-  it("warns when a second language would override the base image", () => {
-    const dir = makeProject(["package.json"]);
+  it("installs multiple languages on the neutral base image", () => {
+    const dir = makeProject(["package.json", "requirements.txt"]);
     try {
       const ctx = new SandboxContext(dir, "test");
       ctx.addLanguage("python", { version: "3.12" });
       ctx.addLanguage("node", { version: "20" });
+      ctx.finalizeBuildPlan();
 
-      expect(ctx.plan.build.baseImage).toBe("python:3.12-slim");
+      expect(ctx.plan.build.baseImage).toBe("debian:12-slim");
+      expect(ctx.plan.build.runtimeInstalls).toHaveLength(2);
+      expect(ctx.plan.build.dependencyFiles).toContain("package.json");
+      expect(ctx.plan.build.dependencyFiles).toContain("requirements.txt");
+      expect(ctx.plan.build.dependencyInstalls).toHaveLength(2);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -77,6 +83,7 @@ describe("SandboxContext", () => {
     try {
       const ctx = new SandboxContext(dir, "test");
       ctx.addLanguage("python", { version: "3.12" });
+      ctx.finalizeBuildPlan();
 
       expect(ctx.plan.build.baseImage).toBe("python:3.12-slim");
       expect(ctx.plan.build.dependencyFiles).toHaveLength(0);
@@ -91,6 +98,7 @@ describe("SandboxContext", () => {
     try {
       const ctx = new SandboxContext(dir, "test");
       ctx.addLanguage("node", { version: "20" });
+      ctx.finalizeBuildPlan();
 
       expect(ctx.plan.build.dependencyFiles).toEqual(["package.json", "package-lock.json"]);
       expect(ctx.plan.build.dependencyInstalls).toHaveLength(1);
@@ -106,6 +114,7 @@ describe("SandboxContext", () => {
     try {
       const ctx = new SandboxContext(dir, "test");
       ctx.addLanguage("node", { version: "20" });
+      ctx.finalizeBuildPlan();
 
       expect(ctx.plan.build.dependencyFiles).toEqual(["package.json"]);
       expect(ctx.plan.build.dependencyInstalls).toHaveLength(1);
@@ -122,6 +131,7 @@ describe("SandboxContext", () => {
     try {
       const ctx = new SandboxContext(dir, "test");
       ctx.addLanguage("node", { version: "20" });
+      ctx.finalizeBuildPlan();
 
       expect(ctx.plan.build.dependencyFiles).toHaveLength(0);
       expect(ctx.plan.build.dependencyInstalls).toHaveLength(0);
@@ -135,6 +145,7 @@ describe("SandboxContext", () => {
     try {
       const ctx = new SandboxContext(dir, "test");
       ctx.addLanguage("node", { version: "20", packageManager: "pnpm" });
+      ctx.finalizeBuildPlan();
 
       expect(ctx.plan.build.dependencyFiles).toEqual(["package.json", "pnpm-lock.yaml"]);
       expect(ctx.plan.build.dependencyInstalls).toHaveLength(1);
@@ -149,10 +160,66 @@ describe("SandboxContext", () => {
     try {
       const ctx = new SandboxContext(dir, "test");
       ctx.addLanguage("node", { version: "20", packageManager: "yarn" });
+      ctx.finalizeBuildPlan();
 
       expect(ctx.plan.build.dependencyFiles).toEqual(["package.json", "yarn.lock"]);
       expect(ctx.plan.build.dependencyInstalls).toHaveLength(1);
       expect(ctx.plan.build.dependencyInstalls[0].command).toContain("yarn install --frozen-lockfile");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("deduplicates repeated addLanguage calls and keeps the last options", () => {
+    const dir = makeProject();
+    try {
+      const ctx = new SandboxContext(dir, "test");
+      ctx.addLanguage("python", { version: "3.11" });
+      ctx.addLanguage("python", { version: "3.12" });
+      ctx.finalizeBuildPlan();
+
+      expect(ctx.plan.build.languageRequests).toHaveLength(1);
+      expect(ctx.plan.build.baseImage).toBe("python:3.12-slim");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    [["python", "node"]],
+    [["python", "node", "go"]],
+    [["node", "go", "rust"]],
+    [["python", "java"]],
+    [["python", "node", "go", "rust", "java"]],
+  ])("uses the neutral base image and installs %j runtimes", (languages) => {
+    const dir = makeProject();
+    try {
+      const ctx = new SandboxContext(dir, "test");
+      for (const name of languages) {
+        ctx.addLanguage(name);
+      }
+      ctx.finalizeBuildPlan();
+
+      expect(ctx.plan.build.baseImage).toBe("debian:12-slim");
+      expect(ctx.plan.build.languageRequests).toHaveLength(languages.length);
+      expect(ctx.plan.build.runtimeInstalls.length).toBeGreaterThanOrEqual(languages.length);
+      const markers: Record<string, string> = {
+        python: "pyenv",
+        node: "nodesource",
+        go: "go.dev",
+        rust: "rustup",
+        java: "temurin",
+      };
+      for (const name of languages) {
+        expect(ctx.plan.build.runtimeInstalls.some((snippet) => snippet.toLowerCase().includes(markers[name]))).toBe(true);
+      }
+
+      if (languages.includes("go")) {
+        expect(ctx.plan.build.languageSnippets).toContain("ENV GOPATH=/go");
+      }
+      if (languages.includes("rust")) {
+        expect(ctx.plan.build.languageSnippets).toContain("ENV CARGO_HOME=/usr/local/cargo");
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

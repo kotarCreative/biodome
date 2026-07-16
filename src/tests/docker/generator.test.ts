@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { generateDockerfile, generateSupervisordConf, generateCompose, generateDockerignore } from "../../docker/generator.js";
+import {
+  generateDockerfile,
+  generateSupervisordConf,
+  generateCompose,
+  generateDockerignore,
+  generateHealthcheckScripts,
+} from "../../docker/generator.js";
 import { createPlan } from "../../core/plan.js";
 
 describe("Docker generators", () => {
@@ -40,6 +46,32 @@ describe("Docker generators", () => {
     expect(conf).toContain("[supervisord]");
   });
 
+  it("generates supervisord healthcheck programs and RPC config", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "django",
+      command: ["python", "manage.py", "runserver", "0.0.0.0:8000"],
+      ports: [{ host: 8000, container: 8000 }],
+      environment: {},
+      mode: "daemon",
+      startOn: "start.post",
+      healthCheck: {
+        type: "http",
+        url: "http://localhost:8000/admin/login/",
+        interval: "5s",
+        timeout: "3s",
+        retries: 10,
+      },
+    });
+
+    const conf = generateSupervisordConf(plan);
+    expect(conf).toContain("[unix_http_server]");
+    expect(conf).toContain("[supervisorctl]");
+    expect(conf).toContain("[rpcinterface:supervisor]");
+    expect(conf).toContain("[program:django-healthcheck]");
+    expect(conf).toContain("sh /workspace/.sandbox/healthchecks/django-monitor.sh");
+  });
+
   it("does not include bash CMD when no daemon processes exist", () => {
     const plan = createPlan("my-app");
     const dockerfile = generateDockerfile(plan);
@@ -67,9 +99,54 @@ describe("Docker generators", () => {
     const compose = generateCompose(plan);
     expect(compose).toContain("8000:8000");
     expect(compose).toContain("healthcheck:");
-    expect(compose).toContain("curl -fsS");
+    expect(compose).toContain("sh /workspace/.sandbox/healthchecks/all.sh");
     expect(compose).not.toContain("sleep infinity");
     expect(compose).toContain("..:/workspace");
+
+    const healthchecks = generateHealthcheckScripts(plan);
+    expect(healthchecks["django.sh"]).toContain("curl -fsS");
+    expect(healthchecks["django.sh"]).toContain("http://localhost:8000/admin/login/");
+    expect(healthchecks["django-monitor.sh"]).toContain("supervisorctl");
+    expect(healthchecks["all.sh"]).toContain("sh /workspace/.sandbox/healthchecks/django.sh");
+  });
+
+  it("generates health check scripts with timeout in seconds", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "web",
+      command: ["node", "server.js"],
+      ports: [{ host: 3000, container: 3000 }],
+      environment: {},
+      mode: "daemon",
+      startOn: "start.post",
+      healthCheck: {
+        type: "http",
+        url: "http://localhost:3000/health",
+        timeout: "2s",
+      },
+    });
+
+    const healthchecks = generateHealthcheckScripts(plan);
+    expect(healthchecks["web.sh"]).toContain("curl -fsS --max-time 2");
+  });
+
+  it("quotes exec health check commands for the shell", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "custom",
+      command: ["node", "server.js"],
+      ports: [{ host: 3000, container: 3000 }],
+      environment: {},
+      mode: "daemon",
+      startOn: "start.post",
+      healthCheck: {
+        type: "exec",
+        command: ["sh", "-c", "curl -f http://localhost/"],
+      },
+    });
+
+    const healthchecks = generateHealthcheckScripts(plan);
+    expect(healthchecks["custom.sh"]).toContain("sh -c 'curl -f http://localhost/'");
   });
 
   it("generates a .dockerignore that excludes .sandbox but keeps supervisord.conf", () => {

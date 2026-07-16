@@ -3,11 +3,18 @@
 
 import { Schema } from "effect"
 
+export interface LanguageRequest {
+  name: string
+  options: { version?: string; packageManager?: string }
+}
+
 export interface BuildPlan {
   project: string
   baseImage: string
   aptPackages: string[]
+  runtimeInstalls: string[]
   languageSnippets: string[]
+  languageRequests: LanguageRequest[]
   dependencyFiles: string[]
   dependencyInstalls: DependencyInstall[]
   copyArtifacts: CopyArtifact[]
@@ -147,7 +154,9 @@ export function createPlan(project: string): Plan {
       project,
       baseImage: "",
       aptPackages: [],
+      runtimeInstalls: [],
       languageSnippets: [],
+      languageRequests: [],
       dependencyFiles: [],
       dependencyInstalls: [],
       copyArtifacts: [],
@@ -280,7 +289,14 @@ export const PlanSchema = Schema.Struct({
     project: Schema.String,
     baseImage: Schema.String,
     aptPackages: Schema.Array(Schema.String),
+    runtimeInstalls: Schema.Array(Schema.String),
     languageSnippets: Schema.Array(Schema.String),
+    languageRequests: Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        options: LanguageOptionsSchema,
+      })
+    ),
     dependencyFiles: Schema.Array(Schema.String),
     dependencyInstalls: Schema.Array(
       Schema.Struct({ files: Schema.Array(Schema.String), command: Schema.String })

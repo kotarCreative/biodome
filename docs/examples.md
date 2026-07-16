@@ -119,6 +119,63 @@ export default function server(ctx) {
 }
 ```
 
+## Django API + Angular frontend in one container
+
+```javascript
+// sandbox/services.mjs
+export default function services(ctx) {
+  ctx.addService("postgres", {
+    port: 5432,
+    databases: [{ name: "myapp" }],
+    users: [{ name: "myapp", password: "devpassword" }],
+  });
+}
+```
+
+```javascript
+// sandbox/features/python.mjs
+export default function python(ctx) {
+  ctx.addLanguage("python", { version: "3.12" });
+  ctx.addPackage("pip", "django", { version: "5.0" });
+  ctx.addPackage("pip", "psycopg");
+}
+```
+
+```javascript
+// sandbox/features/node.mjs
+export default function node(ctx) {
+  ctx.addLanguage("node", { version: "20" });
+}
+```
+
+```javascript
+// sandbox/features/app.mjs
+export default function app(ctx) {
+  ctx.addProcess({
+    name: "django",
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8000"],
+    port: 8000,
+    healthCheck: {
+      type: "http",
+      url: "http://localhost:8000/admin/login/",
+      interval: "5s",
+      retries: 10,
+    },
+    environment: { DEBUG: "1" },
+  });
+
+  ctx.addProcess({
+    name: "angular",
+    command: ["npm", "run", "start", "--", "--host", "0.0.0.0", "--port", "4200"],
+    port: 4200,
+    workingDir: "frontend",
+    healthCheck: { type: "http", url: "http://localhost:4200" },
+  });
+}
+```
+
+Because both `python` and `node` are declared, the generated image uses `debian:12-slim` as its base and installs both runtimes. Both processes run under `supervisord` in the same container.
+
 ## Custom MCP server
 
 ```javascript

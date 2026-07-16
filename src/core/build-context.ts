@@ -9,6 +9,7 @@ export interface BuildContext {
   addCopyArtifact(artifact: CopyArtifact): void
 
   addAptPackage(name: string): void
+  addRuntimeInstall(snippet: string): void
   addLanguageSnippet(snippet: string): void
   fileExists(path: string): boolean
 

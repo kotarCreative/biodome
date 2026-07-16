@@ -27,7 +27,7 @@ import {
   ServiceOptions,
 } from "./feature.js"
 import { BuildContext } from "./build-context.js"
-import { languageHandlers } from "./languages.js"
+import { languageHandlers, getDefaultBaseImage } from "./languages.js"
 import { formatPackage } from "./packages.js"
 import { serviceConfigs, defaultImage } from "./services.js"
 import { toolHandlers } from "./tools.js"
@@ -105,17 +105,43 @@ export class SandboxContext implements FeatureContext, BuildContext {
   }
 
   addLanguage(name: string, options: LanguageOptions = {}): void {
-    const handler = languageHandlers[name]
-    if (!handler) {
+    if (!languageHandlers[name]) {
       return
     }
-    if (this.plan.build.baseImage) {
-      console.warn(
-        `[warn] Language ${name} is ignored: a base image is already set by a previous language. Only one base image is supported.`
-      )
+    const existing = this.plan.build.languageRequests.findIndex((r) => r.name === name)
+    if (existing >= 0) {
+      this.plan.build.languageRequests[existing] = { name, options }
+    } else {
+      this.plan.build.languageRequests.push({ name, options })
+    }
+  }
+
+  finalizeBuildPlan(): void {
+    const requests = this.plan.build.languageRequests
+
+    if (requests.length === 0) {
+      this.setBaseImage(getDefaultBaseImage())
       return
     }
-    handler(this, options)
+
+    if (requests.length === 1) {
+      const { name, options } = requests[0]
+      const handler = languageHandlers[name]
+      if (handler) {
+        this.setBaseImage(handler.baseImage(options))
+        handler.installDependencies(this, options)
+      }
+      return
+    }
+
+    // Multiple languages: use the neutral base image and install every runtime.
+    this.setBaseImage(getDefaultBaseImage())
+    for (const { name, options } of requests) {
+      const handler = languageHandlers[name]
+      if (!handler) continue
+      handler.installRuntime(this, options)
+      handler.installDependencies(this, options)
+    }
   }
 
   addPackage(manager: string, name: string, options: PackageOptions = {}): void {
@@ -354,6 +380,12 @@ export class SandboxContext implements FeatureContext, BuildContext {
   private mergeProcessEnv(proc: Process): void {
     for (const [key, value] of Object.entries(proc.environment)) {
       this.plan.runtime.environment[key] = value
+    }
+  }
+
+  addRuntimeInstall(snippet: string): void {
+    if (!this.plan.build.runtimeInstalls.includes(snippet)) {
+      this.plan.build.runtimeInstalls.push(snippet)
     }
   }
 

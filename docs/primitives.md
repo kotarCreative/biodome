@@ -75,7 +75,7 @@ Language setup affects:
 
 Manifest files are detected from the project root. For example, Node.js uses `npm ci` when `package-lock.json` exists and falls back to `npm install` when only `package.json` exists. If no manifest is present, only the base image is configured and no dependency install step is emitted.
 
-Only one base image is supported. If a second `addLanguage` call would change the base image, it is ignored and a warning is logged.
+When multiple languages are requested, the CLI uses a neutral base image (`debian:12-slim`) and installs every runtime on top of it, so processes can use any combination of languages in the same container.
 
 ## `addPackage(manager, name, options)`
 
@@ -138,7 +138,7 @@ export default function env(ctx) {
 
 ## Health checks
 
-Health checks are attached to daemon processes. In the generated compose file, the first daemon health check is also wired to the dev service health check.
+Health checks are attached to daemon processes. Each daemon with a health check gets a generated shell script in `.sandbox/healthchecks/<name>.sh`, and `supervisord` runs a companion `<name>-healthcheck` program that restarts the process after repeated failures. The dev service health check in the generated compose file runs all daemon health checks via `.sandbox/healthchecks/all.sh`.
 
 ```javascript
 export default function api(ctx) {

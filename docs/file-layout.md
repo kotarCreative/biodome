@@ -15,7 +15,11 @@ my-project/
 ├── .sandbox/
 │   ├── Dockerfile           # generated
 │   ├── supervisord.conf     # generated
-│   └── docker-compose.yaml  # generated
+│   ├── docker-compose.yaml  # generated
+│   └── healthchecks/        # generated
+│       ├── <process>.sh
+│       ├── <process>-monitor.sh
+│       └── all.sh
 └── .dockerignore            # generated
 ```
 
@@ -71,6 +75,7 @@ After running `sandbox build` or `sandbox up`, the CLI writes:
 - `.sandbox/Dockerfile` — multi-stage image for the dev container.
 - `.sandbox/supervisord.conf` — process manager config for daemon processes.
 - `.sandbox/docker-compose.yaml` — backing services and dev service.
+- `.sandbox/healthchecks/*.sh` — per-process health check and monitor scripts, plus an aggregate `all.sh`.
 - `.dockerignore` — build context exclusions.
 
 Do not edit these files directly. They are regenerated each time.

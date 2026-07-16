@@ -28,6 +28,8 @@ export const buildPlanEffect = Effect.fnUntraced(function*(
   yield* loadServices(rootDir, ctx)
   yield* loadFeatures(rootDir, ctx)
 
+  ctx.finalizeBuildPlan()
+
   yield* validatePlan(ctx.plan)
 
   return ctx.plan
@@ -41,8 +43,70 @@ export const validateConfigEffect = Effect.fnUntraced(function*(rootDir: string)
   return yield* readConfig(rootDir)
 })
 
+export const validateFeaturesEffect = Effect.fnUntraced(function*(rootDir: string) {
+  const config = yield* readConfig(rootDir)
+
+  // Validate the services module the same way loadServices will resolve it:
+  // prefer services.mjs, fall back to services.js, but never both.
+  const servicesMjsPath = join(rootDir, SANDBOX_DIR, "services.mjs")
+  const servicesMjsExists = yield* Effect.sync(() => existsSync(servicesMjsPath))
+  if (servicesMjsExists) {
+    yield* checkModuleExports(servicesMjsPath)
+  } else {
+    const servicesJsPath = join(rootDir, SANDBOX_DIR, "services.js")
+    const servicesJsExists = yield* Effect.sync(() => existsSync(servicesJsPath))
+    if (servicesJsExists) {
+      yield* checkModuleExports(servicesJsPath)
+    }
+  }
+
+  const featuresDir = join(rootDir, SANDBOX_DIR, "features")
+  const featuresDirExists = yield* Effect.sync(() => existsSync(featuresDir))
+  if (featuresDirExists) {
+    const files = yield* Effect.sync(() =>
+      readdirSync(featuresDir)
+        .filter((f) => f.endsWith(".mjs") || f.endsWith(".js"))
+        .sort()
+    )
+    for (const file of files) {
+      yield* checkModuleExports(join(featuresDir, file))
+    }
+  }
+
+  return config
+})
+
+const checkModuleExports = Effect.fnUntraced(function*(path: string) {
+  const exists = yield* Effect.sync(() => existsSync(path))
+  if (!exists) {
+    return
+  }
+  const url = pathToFileURL(path).href
+  // Note: ESM import() evaluates top-level module code. This only guarantees
+  // the exported default function is not invoked.
+  const mod = (yield* Effect.tryPromise<unknown, FeatureError>({
+    try: () => import(url),
+    catch: (error) =>
+      new FeatureError({
+        message: error instanceof Error ? error.message : String(error),
+        path,
+      }),
+  })) as { default?: (ctx: SandboxContext) => void | Promise<void> }
+
+  if (typeof mod.default !== "function") {
+    return yield* new FeatureError({
+      message: "Module must export a default function that accepts the sandbox context",
+      path,
+    })
+  }
+})
+
 export function validateConfig(rootDir: string): Config {
   return Effect.runSync(readConfig(rootDir))
+}
+
+export function validateFeatures(rootDir: string): Promise<Config> {
+  return Effect.runPromise(validateFeaturesEffect(rootDir))
 }
 
 const readConfig = Effect.fnUntraced(function*(rootDir: string) {

@@ -3,7 +3,12 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildPlan } from "../../builder/index.js";
-import { generateDockerfile, generateCompose, generateSupervisordConf } from "../../docker/generator.js";
+import {
+  generateDockerfile,
+  generateCompose,
+  generateSupervisordConf,
+  generateHealthcheckScripts,
+} from "../../docker/generator.js";
 
 function hasDocker(): boolean {
   try {
@@ -137,6 +142,225 @@ describeIntegration("docker build integration", () => {
         ["compose", "-f", ".sandbox/docker-compose.yaml", "-p", project, "up", "-d", "--build"],
         { cwd: dir, stdio: "inherit" }
       );
+
+      // Postgres must become healthy and accept connections.
+      execFileSync(
+        "docker",
+        ["compose", "-f", ".sandbox/docker-compose.yaml", "-p", project, "exec", "-T", "postgres",
+          "pg_isready", "-U", "postgres", "-d", "postgres"],
+        { cwd: dir, stdio: "inherit" }
+      );
+
+      const ps = execFileSync(
+        "docker",
+        ["compose", "-f", ".sandbox/docker-compose.yaml", "-p", project, "ps", "--format", "json"],
+        { cwd: dir, encoding: "utf-8" }
+      );
+      const services = ps
+        .split("\n")
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as { Service: string; Health?: string; State: string });
+      const postgres = services.find((s) => s.Service === "postgres");
+      expect(postgres).toBeDefined();
+      expect(postgres!.State).toBe("running");
+      expect(postgres!.Health).toBe("healthy");
+    } finally {
+      try {
+        execFileSync(
+          "docker",
+          ["compose", "-f", ".sandbox/docker-compose.yaml", "-p", project, "down", "-v"],
+          { cwd: dir, stdio: "ignore" }
+        );
+      } catch {
+        // Ignore cleanup errors.
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 300000);
+
+  it("builds a generated Dockerfile for a go project", async () => {
+    const dir = join("/tmp", "sandbox-integration-" + Date.now());
+    createProject(dir, {
+      "sandbox/config.json": JSON.stringify({ project: { name: "go-fixture" } }),
+      "sandbox/services.mjs": "export default function services() {}\n",
+      "sandbox/features/go.mjs": `
+        export default function go(ctx) {
+          ctx.addLanguage("go", { version: "1.22" });
+        }
+      `,
+      "go.mod": "module go-fixture\n\ngo 1.22\n",
+      "go.sum": "",
+    });
+
+    const imageTag = `sandbox-manager-test-${Date.now()}`;
+    try {
+      mkdirSync(join(dir, ".sandbox"), { recursive: true });
+      const plan = await buildPlan(dir);
+      writeFileSync(join(dir, ".sandbox", "Dockerfile"), generateDockerfile(plan));
+      writeFileSync(join(dir, ".dockerignore"), "");
+
+      execFileSync(
+        "docker",
+        ["buildx", "build", "-f", ".sandbox/Dockerfile", "-t", imageTag, "."],
+        { cwd: dir, stdio: "inherit" }
+      );
+
+      // The Go module cache must have been populated.
+      const output = execFileSync(
+        "docker",
+        ["run", "--rm", imageTag, "go", "env", "GOMODCACHE"],
+        { cwd: dir, encoding: "utf-8" }
+      );
+      expect(output.trim().length).toBeGreaterThan(0);
+    } finally {
+      try {
+        execFileSync("docker", ["rmi", "-f", imageTag], { stdio: "ignore" });
+      } catch {
+        // Ignore cleanup errors.
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 300000);
+
+  it("builds a generated Dockerfile with Python and Node runtimes", async () => {
+    const dir = join("/tmp", "sandbox-integration-" + Date.now());
+    createProject(dir, {
+      "sandbox/config.json": JSON.stringify({ project: { name: "py-node-fixture" } }),
+      "sandbox/services.mjs": "export default function services() {}\n",
+      "sandbox/features/python.mjs": `
+        export default function python(ctx) {
+          ctx.addLanguage("python", { version: "3.12" });
+        }
+      `,
+      "sandbox/features/node.mjs": `
+        export default function node(ctx) {
+          ctx.addLanguage("node", { version: "20" });
+        }
+      `,
+      "requirements.txt": "requests==2.32.3\n",
+      "package.json": JSON.stringify({ name: "py-node-fixture" }),
+    });
+
+    const imageTag = `sandbox-manager-test-${Date.now()}`;
+    try {
+      mkdirSync(join(dir, ".sandbox"), { recursive: true });
+      const plan = await buildPlan(dir);
+      writeFileSync(join(dir, ".sandbox", "Dockerfile"), generateDockerfile(plan));
+      writeFileSync(join(dir, ".dockerignore"), "");
+
+      execFileSync(
+        "docker",
+        ["buildx", "build", "-f", ".sandbox/Dockerfile", "-t", imageTag, "."],
+        { cwd: dir, stdio: "inherit" }
+      );
+
+      const pythonOutput = execFileSync(
+        "docker",
+        ["run", "--rm", imageTag, "python", "--version"],
+        { cwd: dir, encoding: "utf-8" }
+      );
+      expect(pythonOutput.trim()).toContain("Python 3.12");
+
+      const nodeOutput = execFileSync(
+        "docker",
+        ["run", "--rm", imageTag, "node", "--version"],
+        { cwd: dir, encoding: "utf-8" }
+      );
+      expect(nodeOutput.trim()).toContain("v20");
+    } finally {
+      try {
+        execFileSync("docker", ["rmi", "-f", imageTag], { stdio: "ignore" });
+      } catch {
+        // Ignore cleanup errors.
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 600000);
+
+  it("starts a daemon process and reports the dev service as healthy", async () => {
+    const dir = join("/tmp", "sandbox-integration-" + Date.now());
+    const projectName = `daemon-fixture-${Date.now()}`;
+    const serverPy = `from http.server import BaseHTTPRequestHandler, HTTPServer
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, format, *args):
+        pass
+
+HTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
+`;
+    createProject(dir, {
+      "sandbox/config.json": JSON.stringify({ project: { name: projectName } }),
+      "sandbox/services.mjs": "export default function services() {}\n",
+      "sandbox/features/python.mjs": `
+        export default function python(ctx) {
+          ctx.addLanguage("python", { version: "3.12" });
+        }
+      `,
+      "sandbox/features/web.mjs": `
+        export default function web(ctx) {
+          ctx.addProcess({
+            name: "web",
+            command: ["python", "server.py"],
+            port: 8000,
+            healthCheck: { type: "http", url: "http://localhost:8000/" },
+          });
+        }
+      `,
+      "server.py": serverPy,
+    });
+
+    const project = `sandbox-manager-test-${Date.now()}`;
+    try {
+      mkdirSync(join(dir, ".sandbox"), { recursive: true });
+      const plan = await buildPlan(dir);
+      writeFileSync(join(dir, ".sandbox", "Dockerfile"), generateDockerfile(plan));
+      const supervisord = generateSupervisordConf(plan);
+      if (supervisord) {
+        writeFileSync(join(dir, ".sandbox", "supervisord.conf"), supervisord);
+      }
+      writeFileSync(join(dir, ".sandbox", "docker-compose.yaml"), generateCompose(plan));
+
+      const healthchecks = generateHealthcheckScripts(plan);
+      mkdirSync(join(dir, ".sandbox", "healthchecks"), { recursive: true });
+      for (const [name, content] of Object.entries(healthchecks)) {
+        writeFileSync(join(dir, ".sandbox", "healthchecks", name), content);
+      }
+
+      execFileSync(
+        "docker",
+        ["compose", "-f", ".sandbox/docker-compose.yaml", "-p", project, "up", "-d", "--build", "--wait"],
+        { cwd: dir, stdio: "inherit" }
+      );
+
+      // The dev service must be healthy, meaning the daemon passed its health check.
+      const ps = execFileSync(
+        "docker",
+        ["compose", "-f", ".sandbox/docker-compose.yaml", "-p", project, "ps", "--format", "json"],
+        { cwd: dir, encoding: "utf-8" }
+      );
+      const services = ps
+        .split("\n")
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as { Service: string; Health?: string; State: string });
+      const dev = services.find((s) => s.Service === "dev");
+      expect(dev).toBeDefined();
+      expect(dev!.State).toBe("running");
+      expect(dev!.Health).toBe("healthy");
+
+      // The healthcheck monitor program should also be running under supervisord.
+      const status = execFileSync(
+        "docker",
+        ["compose", "-f", ".sandbox/docker-compose.yaml", "-p", project, "exec", "-T", "dev",
+          "supervisorctl", "-c", "/workspace/.sandbox/supervisord.conf", "status"],
+        { cwd: dir, encoding: "utf-8" }
+      );
+      expect(status).toContain("web");
+      expect(status).toContain("web-healthcheck");
     } finally {
       try {
         execFileSync(
