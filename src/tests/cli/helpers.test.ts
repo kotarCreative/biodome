@@ -5,7 +5,13 @@ import { Effect, Layer } from "effect";
 import * as NodeChildProcessSpawner from "@effect/platform-node-shared/NodeChildProcessSpawner";
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem";
 import * as NodePath from "@effect/platform-node-shared/NodePath";
-import { runHooks, resolveProjectName, runSafe } from "../../cli/helpers.js";
+import {
+  detectStarterLanguages,
+  generateStarterFeature,
+  runHooks,
+  resolveProjectName,
+  runSafe,
+} from "../../cli/helpers.js";
 import { createPlan } from "../../core/plan.js";
 import type { SandboxRuntime } from "../../core/runtime.js";
 import { PlanError } from "../../core/errors.js";
@@ -109,5 +115,91 @@ describe("runSafe", () => {
 
     expect(console.error).toHaveBeenCalledWith("Error: boom");
     expect(process.exit).toHaveBeenCalledWith(1);
+  });
+});
+
+describe("detectStarterLanguages", () => {
+  it("detects node from package.json", () => {
+    const dir = tmpDir("node-lang");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "app" }));
+    try {
+      expect(detectStarterLanguages(dir)).toEqual([
+        { name: "node", options: { version: "20" } },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects node from bun lock files", () => {
+    const dir = tmpDir("bun-lang");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "bun.lockb"), "");
+    try {
+      expect(detectStarterLanguages(dir)).toEqual([
+        { name: "node", options: { version: "20" } },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects python from requirements.txt", () => {
+    const dir = tmpDir("python-lang");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "requirements.txt"), "django\n");
+    try {
+      expect(detectStarterLanguages(dir)).toEqual([
+        { name: "python", options: { version: "3.12" } },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects multiple languages", () => {
+    const dir = tmpDir("multi-lang");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "app" }));
+    writeFileSync(join(dir, "requirements.txt"), "django\n");
+    writeFileSync(join(dir, "go.mod"), "module example\n");
+    try {
+      expect(detectStarterLanguages(dir)).toEqual([
+        { name: "node", options: { version: "20" } },
+        { name: "python", options: { version: "3.12" } },
+        { name: "go", options: { version: "1.22" } },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns an empty array when no project files are found", () => {
+    const dir = tmpDir("no-lang");
+    mkdirSync(dir, { recursive: true });
+    try {
+      expect(detectStarterLanguages(dir)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("generateStarterFeature", () => {
+  it("generates a no-op feature when no languages are detected", () => {
+    const feature = generateStarterFeature([]);
+    expect(feature).toContain("export default function autoDetect(_ctx)");
+    expect(feature).toContain("No languages detected");
+  });
+
+  it("generates addLanguage calls for detected languages", () => {
+    const feature = generateStarterFeature([
+      { name: "node", options: { version: "20" } },
+      { name: "python", options: { version: "3.12" } },
+    ]);
+    expect(feature).toContain('export default function autoDetect(ctx) {');
+    expect(feature).toContain('ctx.addLanguage("node", {"version":"20"})');
+    expect(feature).toContain('ctx.addLanguage("python", {"version":"3.12"})');
   });
 });

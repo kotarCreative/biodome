@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
+import { Effect } from "effect";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { buildPlan, validateConfig, validateFeatures } from "../../builder/index.js";
+import {
+  buildPlan,
+  validateConfig,
+  validateFeatures,
+  validatePlan,
+} from "../../builder/index.js";
 import { generateDockerfile, generateCompose } from "../../docker/generator.js";
 
 function createProject(dir: string, files: Record<string, string>): void {
@@ -230,6 +236,21 @@ describe("validatePlan", () => {
     await expect(buildPlan(dir)).rejects.toThrow(
       /Host port 5432 is used by both process "pg" and service "postgres"/
     );
+  });
+
+  it("can be called directly on a valid plan", async () => {
+    const dir = join("/tmp", "sandbox-test-" + Date.now());
+    createProject(dir, {
+      "sandbox/config.json": JSON.stringify({ project: { name: "valid-plan" } }),
+      "sandbox/features/web.mjs": `
+        export default function web(ctx) {
+          ctx.addProcess({ name: "app", command: ["node"], port: 3000 });
+        }
+      `,
+    });
+
+    const plan = await buildPlan(dir);
+    await expect(Effect.runPromise(validatePlan(plan))).resolves.toBeUndefined();
   });
 });
 

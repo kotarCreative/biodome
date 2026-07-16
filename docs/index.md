@@ -17,6 +17,8 @@ npx sandbox-manager build
 npx sandbox-manager up
 ```
 
+`init` auto-detects languages from project files (`package.json`, `bun.lockb`, `requirements.txt`, `go.mod`, etc.) and generates a starter `sandbox/features/auto-detect.mjs` feature. To skip this and create a minimal scaffold, pass `--bare`.
+
 ## Concepts
 
 - **Primitives:** The building blocks you add to a sandbox. `process`, `hook`, `language`, `package`, `tool`, `service`.

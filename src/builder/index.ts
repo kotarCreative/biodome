@@ -144,7 +144,7 @@ function formatSchemaIssue(issue: unknown): string {
   return String(issue)
 }
 
-function validatePlan(plan: Plan): Effect.Effect<void, SandboxError, never> {
+export function validatePlan(plan: Plan): Effect.Effect<void, SandboxError, never> {
   return Effect.try({
     try: () => {
       const seen = new Map<number, string>()

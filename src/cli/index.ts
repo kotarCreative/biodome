@@ -3,7 +3,12 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { Effect } from "effect"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
-import { buildPlanEffect, validateConfigEffect, validateFeaturesEffect } from "../builder/index.js"
+import {
+  buildPlanEffect,
+  validateConfigEffect,
+  validateFeaturesEffect,
+  validatePlan,
+} from "../builder/index.js"
 import {
   generateDockerfile,
   generateSupervisordConf,
@@ -17,7 +22,12 @@ import { Plan } from "../core/plan.js"
 import type { SandboxRuntime } from "../core/runtime.js"
 import { PlanError } from "../core/errors.js"
 import { NodeRuntime } from "../core/runtime-node.js"
-import { runHooks, runSafe } from "./helpers.js"
+import {
+  detectStarterLanguages,
+  generateStarterFeature,
+  runHooks,
+  runSafe,
+} from "./helpers.js"
 
 const SANDBOX_DIR = ".sandbox"
 
@@ -65,8 +75,9 @@ program.name("sandbox").description("Development environment manager").version("
 
 program
   .command("init")
-  .description("Initialize a sandbox/ directory")
-  .action(() => {
+  .description("Initialize a sandbox/ directory with language auto-detection")
+  .option("--bare", "Skip language auto-detection and create a minimal sandbox")
+  .action((options) => {
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
       const sandboxDir = join(rootDir, "sandbox")
@@ -88,7 +99,16 @@ program
             "export default function services(ctx) {\n  // Define backing services here\n}\n"
           )
           mkdirSync(join(sandboxDir, "features"), { recursive: true })
-          writeFileSync(join(sandboxDir, "features", ".gitkeep"), "")
+
+          if (options.bare) {
+            writeFileSync(join(sandboxDir, "features", ".gitkeep"), "")
+          } else {
+            const languages = detectStarterLanguages(rootDir)
+            writeFileSync(
+              join(sandboxDir, "features", "auto-detect.mjs"),
+              generateStarterFeature(languages)
+            )
+          }
         },
         catch: (error) =>
           new PlanError({
@@ -235,6 +255,29 @@ program
   })
 
 program
+  .command("status")
+  .description("Report container health and running processes")
+  .action(() => {
+    const cliProgram = Effect.gen(function* () {
+      const rootDir = process.cwd()
+      const config = yield* validateConfigEffect(rootDir)
+      const runtime = createRuntime(config.project.name)
+      yield* runtime.ensureAvailable()
+      console.log("Container status")
+      yield* runtime.status()
+      console.log("\nProcess status")
+      yield* runtime.exec([
+        "supervisorctl",
+        "-c",
+        "/workspace/.sandbox/supervisord.conf",
+        "status",
+      ])
+    }).pipe(Effect.scoped)
+
+    runSafe(withNodeRuntime(cliProgram))
+  })
+
+program
   .command("restart [process]")
   .description("Restart a managed process or all daemon processes")
   .action((processName?: string) => {
@@ -259,11 +302,13 @@ const configCmd = program.command("config").description("Manage sandbox configur
 
 configCmd
   .command("validate")
-  .description("Validate sandbox/ configuration and feature module exports without building")
+  .description("Validate sandbox/ configuration and feature modules without building")
   .action(() => {
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
       yield* validateFeaturesEffect(rootDir)
+      const plan = yield* buildPlanEffect(rootDir, { dryRun: true })
+      yield* validatePlan(plan)
       console.log("Configuration is valid")
     })
 

@@ -27,6 +27,7 @@
 3. ~~Document the feature module API and the available language handlers.~~ Done — `docs/primitives.md`, `docs/api.md`, `docs/examples.md`, and `docs/file-layout.md` cover the API, primitives, file layout, and examples.
 4. ~~Per-process health checks in `supervisord`.~~ Done — each daemon process with a health check now gets a generated check script and a `supervisord` monitor program that restarts the process after repeated failures. The dev service health check now aggregates all daemon checks, and `supervisorctl` is configured to use the generated `supervisord.conf`.
 5. ~~Multi-language / multi-base-image support.~~ Done — multiple `addLanguage` calls now install all requested runtimes on a shared `debian:12-slim` base image, enabling Python + Node, Go + Rust, or any other combination in a single container.
+6. ~~CLI polish.~~ Done — `sandbox init` now auto-detects languages and generates a starter `sandbox/features/auto-detect.mjs` feature by default, `sandbox status` reports container health and running processes, and `sandbox config validate` runs `validatePlan` to catch port conflicts without building.
 
 ## Next steps
 
@@ -40,9 +41,4 @@
 
 5. **Volumes, bind mounts, and secrets** — Add primitives for named volumes, bind mounts, tmpfs mounts, and `.env`/secret injection so feature files can declare data directories and sensitive configuration.
 
-6. **CLI polish** —
-   - Make `sandbox init` optionally generate a starter feature (e.g. language auto-detection).
-   - Add a `sandbox status` command that reports container health and running processes.
-   - Run `validatePlan` during `sandbox config validate` so port conflicts are caught without building.
-
-7. **Documentation** — Add a troubleshooting guide and a "creating custom services" guide once the service-handler interface stabilizes.
+6. **Documentation** — Add a troubleshooting guide and a "creating custom services" guide once the service-handler interface stabilizes.

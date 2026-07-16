@@ -139,9 +139,9 @@ type LifecyclePoint =
 
 ## CLI commands
 
-### `sandbox init`
+### `sandbox init [--bare]`
 
-Create a `sandbox/` directory with a starter config.
+Create a `sandbox/` directory with a starter config and a generated `sandbox/features/auto-detect.mjs` feature. The auto-detect feature inspects project files (`package.json`, `bun.lockb`, `requirements.txt`, `go.mod`, `Cargo.toml`, `pom.xml`, etc.) and calls `ctx.addLanguage` for each detected language. Pass `--bare` to skip auto-detection and create a minimal scaffold.
 
 ### `sandbox build`
 
@@ -169,7 +169,7 @@ Print a summary of the project: base image, services, ports, connection strings,
 
 ### `sandbox config validate`
 
-Validate the `sandbox/` configuration without building.
+Validate the `sandbox/` configuration and feature modules without building. This checks the config schema, validates feature/service module exports, builds the plan in dry-run mode, and runs `validatePlan` to catch port conflicts and other plan-level errors.
 
 ### `sandbox generate agents.md`
 
@@ -182,6 +182,10 @@ Tail logs from a managed process. Omit the process name to see the `supervisord`
 ### `sandbox ps`
 
 Show running containers for the project.
+
+### `sandbox status`
+
+Report container health and the status of managed processes. This runs `docker compose ps` for container health and `supervisorctl status` inside the dev container for running processes.
 
 ### `sandbox restart [process]`
 

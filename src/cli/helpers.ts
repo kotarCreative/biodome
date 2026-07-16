@@ -1,6 +1,8 @@
 import { Effect } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { existsSync } from "node:fs"
+import { join } from "node:path"
 import { validateConfigEffect } from "../builder/index.js"
 import { Plan } from "../core/plan.js"
 import type { SandboxRuntime } from "../core/runtime.js"
@@ -93,3 +95,63 @@ export const runHooks = Effect.fnUntraced(
       })
     )
 )
+
+export interface StarterLanguage {
+  name: string
+  options: { version: string }
+}
+
+export function detectStarterLanguages(rootDir: string): StarterLanguage[] {
+  const languages: StarterLanguage[] = []
+
+  const hasNode =
+    existsSync(join(rootDir, "package.json")) ||
+    existsSync(join(rootDir, "package-lock.json")) ||
+    existsSync(join(rootDir, "pnpm-lock.yaml")) ||
+    existsSync(join(rootDir, "yarn.lock")) ||
+    existsSync(join(rootDir, "bun.lockb")) ||
+    existsSync(join(rootDir, "bun.lock"))
+  if (hasNode) {
+    languages.push({ name: "node", options: { version: "20" } })
+  }
+
+  const hasPython =
+    existsSync(join(rootDir, "requirements.txt")) ||
+    existsSync(join(rootDir, "pyproject.toml")) ||
+    existsSync(join(rootDir, "poetry.lock"))
+  if (hasPython) {
+    languages.push({ name: "python", options: { version: "3.12" } })
+  }
+
+  if (existsSync(join(rootDir, "go.mod"))) {
+    languages.push({ name: "go", options: { version: "1.22" } })
+  }
+
+  const hasRust =
+    existsSync(join(rootDir, "Cargo.toml")) ||
+    existsSync(join(rootDir, "Cargo.lock"))
+  if (hasRust) {
+    languages.push({ name: "rust", options: { version: "1.75" } })
+  }
+
+  const hasJava =
+    existsSync(join(rootDir, "pom.xml")) ||
+    existsSync(join(rootDir, "build.gradle")) ||
+    existsSync(join(rootDir, "build.gradle.kts"))
+  if (hasJava) {
+    languages.push({ name: "java", options: { version: "21" } })
+  }
+
+  return languages
+}
+
+export function generateStarterFeature(languages: StarterLanguage[]): string {
+  if (languages.length === 0) {
+    return "export default function autoDetect(_ctx) {\n  // No languages detected in the project root\n}\n"
+  }
+
+  const lines = languages.map(
+    (lang) => `  ctx.addLanguage("${lang.name}", ${JSON.stringify(lang.options)})`
+  )
+  return `export default function autoDetect(ctx) {\n${lines.join("\n")}\n}\n`
+}

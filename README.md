@@ -15,16 +15,17 @@ npx sandbox-manager info
 
 ## Commands
 
-- `sandbox init` — create a `sandbox/` directory in the current project.
+- `sandbox init [--bare]` — create a `sandbox/` directory with language auto-detection; `--bare` creates a minimal scaffold.
 - `sandbox build` — generate Docker files and build the dev image.
 - `sandbox up` — start the dev container and backing services.
 - `sandbox down` — stop the environment.
 - `sandbox exec <command>` — run a command inside the dev container.
 - `sandbox info` — show services, ports, and connection strings.
-- `sandbox config validate` — validate `sandbox/` and feature/service module exports without building.
+- `sandbox config validate` — validate `sandbox/`, feature/service module exports, and the computed plan (including port conflicts) without building.
 - `sandbox generate agents.md` — create `AGENTS.md` for AI context.
 - `sandbox logs [process]` — tail logs from a managed process.
 - `sandbox ps` — show running containers for the project.
+- `sandbox status` — report container health and running managed processes.
 - `sandbox restart [process]` — restart a managed process or all daemons.
 
 ## Documentation
