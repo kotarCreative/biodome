@@ -15,7 +15,7 @@ export class FeatureError extends Schema.TaggedErrorClass<FeatureError>()("Featu
   path: Schema.optionalKey(Schema.String),
 }) {}
 
-export class DockerError extends Schema.TaggedErrorClass<DockerError>()("DockerError", {
+export class RuntimeError extends Schema.TaggedErrorClass<RuntimeError>()("RuntimeError", {
   message: Schema.String,
   command: Schema.optionalKey(Schema.String),
 }) {}
@@ -24,14 +24,14 @@ export class PlanError extends Schema.TaggedErrorClass<PlanError>()("PlanError",
   message: Schema.String,
 }) {}
 
-export type SandboxError = ConfigError | ValidationError | FeatureError | DockerError | PlanError
+export type SandboxError = ConfigError | ValidationError | FeatureError | RuntimeError | PlanError
 
 export function isSandboxError(error: unknown): error is SandboxError {
   return (
     error instanceof ConfigError ||
     error instanceof ValidationError ||
     error instanceof FeatureError ||
-    error instanceof DockerError ||
+    error instanceof RuntimeError ||
     error instanceof PlanError
   )
 }
@@ -44,9 +44,9 @@ export function sandboxErrorMessage(error: SandboxError): string {
       return error.field ? `${error.field}: ${error.message}` : error.message
     case "FeatureError":
       return error.path ? `Failed to load feature ${error.path}: ${error.message}` : error.message
-    case "DockerError":
+    case "RuntimeError":
       return error.command
-        ? `Docker command failed (${error.command}): ${error.message}`
+        ? `Runtime operation failed (${error.command}): ${error.message}`
         : error.message
     case "PlanError":
       return error.message

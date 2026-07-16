@@ -1,8 +1,9 @@
 import { Effect } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import type { Provider } from "../core/provider.js"
-import { DockerError } from "../core/errors.js"
+import { NodeRuntime } from "../core/runtime-node.js"
+import type { SandboxRuntime } from "../core/runtime.js"
+import { RuntimeError } from "../core/errors.js"
 
 const COMPOSE_FILE = ".sandbox/docker-compose.yaml"
 
@@ -22,7 +23,7 @@ const execDocker = Effect.fnUntraced(
     })
     const exitCode = (yield* handle.exitCode) as number
     if (exitCode !== 0) {
-      return yield* new DockerError({
+      return yield* new RuntimeError({
         message: `exited with code ${exitCode}`,
         command: `docker ${options.args.join(" ")}`,
       })
@@ -30,12 +31,13 @@ const execDocker = Effect.fnUntraced(
   },
   (effect, options) =>
     effect.pipe(
+      Effect.provide(NodeRuntime),
       Effect.scoped,
       Effect.catch((error) =>
         Effect.fail(
-          error instanceof DockerError
+          error instanceof RuntimeError
             ? error
-            : new DockerError({
+            : new RuntimeError({
                 message: platformErrorMessage(error as PlatformError),
                 command: `docker ${options.args.join(" ")}`,
               })
@@ -44,53 +46,92 @@ const execDocker = Effect.fnUntraced(
     )
 )
 
-export class Runner implements Provider {
+export class DockerRuntime implements SandboxRuntime {
   project: string
 
   constructor(project: string) {
     this.project = project
   }
 
-  build = Effect.fnUntraced(function*(this: Runner, rootDir: string) {
-    return yield* execDocker({
+  ensureAvailable = Effect.fnUntraced(
+    function*(this: DockerRuntime) {
+      const handle = yield* ChildProcess.make("docker", ["version"], {
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore",
+      })
+      const exitCode = (yield* handle.exitCode) as number
+      if (exitCode !== 0) {
+        return yield* new RuntimeError({
+          message:
+            "Docker is not available or the daemon is not running. " +
+            "Make sure Docker is installed and started, or run a command that does not need Docker (e.g. 'sandbox config validate').",
+        })
+      }
+    },
+    (effect) =>
+      effect.pipe(
+        Effect.provide(NodeRuntime),
+        Effect.scoped,
+        Effect.catch((error) =>
+          Effect.fail(
+            error instanceof RuntimeError
+              ? error
+              : new RuntimeError({
+                  message: platformErrorMessage(error as PlatformError),
+                })
+          )
+        )
+      )
+  )
+
+  build(rootDir: string): Effect.Effect<void, RuntimeError, never> {
+    return execDocker({
       project: this.project,
       args: ["compose", "-f", COMPOSE_FILE, "-p", this.project, "build"],
       cwd: rootDir,
     })
-  })
+  }
 
-  up = Effect.fnUntraced(function*(this: Runner, rootDir: string, build = false) {
+  start(rootDir: string, build = false): Effect.Effect<void, RuntimeError, never> {
     const args = ["compose", "-f", COMPOSE_FILE, "-p", this.project, "up", "-d"]
     if (build) {
       args.push("--build")
     }
-    return yield* execDocker({ project: this.project, args, cwd: rootDir })
-  })
+    return execDocker({ project: this.project, args, cwd: rootDir })
+  }
 
-  down = Effect.fnUntraced(function*(this: Runner, rootDir?: string) {
-    return yield* execDocker({
+  stop(rootDir?: string): Effect.Effect<void, RuntimeError, never> {
+    return execDocker({
       project: this.project,
       args: ["compose", "-f", COMPOSE_FILE, "-p", this.project, "down"],
       cwd: rootDir,
     })
-  })
+  }
 
-  execInDev = Effect.fnUntraced(function*(this: Runner, command: string[]) {
-    return yield* execDocker({
+  exec(command: string[]): Effect.Effect<void, RuntimeError, never> {
+    return execDocker({
       project: this.project,
       args: ["exec", `${this.project}-dev`, ...command],
     })
-  })
+  }
 
-  ps = Effect.fnUntraced(function*(this: Runner) {
-    return yield* execDocker({
+  status(): Effect.Effect<void, RuntimeError, never> {
+    return execDocker({
       project: this.project,
       args: ["compose", "-f", COMPOSE_FILE, "-p", this.project, "ps"],
     })
-  })
+  }
 
-  restart = Effect.fnUntraced(function*(this: Runner, processName: string) {
-    return yield* execDocker({
+  logs(processName?: string): Effect.Effect<void, RuntimeError, never> {
+    const args = processName
+      ? ["exec", `${this.project}-dev`, "tail", "-f", `/tmp/${processName}.log`]
+      : ["exec", `${this.project}-dev`, "tail", "-f", "/tmp/supervisord.log"]
+    return execDocker({ project: this.project, args })
+  }
+
+  restart(processName: string): Effect.Effect<void, RuntimeError, never> {
+    return execDocker({
       project: this.project,
       args: [
         "exec",
@@ -102,36 +143,5 @@ export class Runner implements Provider {
         processName,
       ],
     })
-  })
+  }
 }
-
-export const assertDockerAvailable = Effect.fnUntraced(
-  function*() {
-    const handle = yield* ChildProcess.make("docker", ["version"], {
-      stdin: "ignore",
-      stdout: "ignore",
-      stderr: "ignore",
-    })
-    const exitCode = (yield* handle.exitCode) as number
-    if (exitCode !== 0) {
-      return yield* new DockerError({
-        message:
-          "Docker is not available or the daemon is not running. " +
-          "Make sure Docker is installed and started, or run a command that does not need Docker (e.g. 'sandbox config validate').",
-      })
-    }
-  },
-  (effect) =>
-    effect.pipe(
-      Effect.scoped,
-      Effect.catch((error) =>
-        Effect.fail(
-          error instanceof DockerError
-            ? error
-            : new DockerError({
-                message: platformErrorMessage(error as PlatformError),
-              })
-        )
-      )
-    )
-)

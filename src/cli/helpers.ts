@@ -3,9 +3,9 @@ import type { PlatformError } from "effect/PlatformError"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { validateConfigEffect } from "../builder/index.js"
 import { Plan } from "../core/plan.js"
-import { Provider } from "../core/provider.js"
+import type { SandboxRuntime } from "../core/runtime.js"
 import {
-  DockerError,
+  RuntimeError,
   PlanError,
   SandboxError,
   sandboxErrorMessage,
@@ -25,8 +25,8 @@ function platformErrorMessage(error: PlatformError): string {
     : String(error)
 }
 
-function isKnownSandboxError(error: unknown): error is DockerError | PlanError {
-  return error instanceof DockerError || error instanceof PlanError
+function isKnownSandboxError(error: unknown): error is RuntimeError | PlanError {
+  return error instanceof RuntimeError || error instanceof PlanError
 }
 
 export function resolveProjectName(rootDir: string): string {
@@ -51,7 +51,7 @@ export const runHooks = Effect.fnUntraced(
   function*(
     plan: Plan,
     point: string,
-    runner: Provider,
+    runner: SandboxRuntime,
     rootDir: string
   ) {
     const hooks = plan.runtime.processes.filter(
@@ -76,7 +76,7 @@ export const runHooks = Effect.fnUntraced(
           })
         }
       } else {
-        yield* runner.execInDev(hook.command)
+        yield* runner.exec(hook.command)
       }
     }
   },

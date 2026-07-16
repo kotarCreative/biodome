@@ -1,12 +1,8 @@
 import { Command } from "commander"
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { Effect, Layer } from "effect"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { Effect } from "effect"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
-import * as NodeChildProcessSpawner from "@effect/platform-node-shared/NodeChildProcessSpawner"
-import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
-import * as NodePath from "@effect/platform-node-shared/NodePath"
 import { buildPlanEffect, validateConfigEffect, validateFeaturesEffect } from "../builder/index.js"
 import {
   generateDockerfile,
@@ -15,17 +11,15 @@ import {
   generateDockerignore,
   generateHealthcheckScripts,
 } from "../docker/generator.js"
-import { Runner, assertDockerAvailable } from "../docker/runner.js"
+import { DockerRuntime } from "../docker/runner.js"
 import { formatInfo, formatAgentsMd } from "../core/info.js"
 import { Plan } from "../core/plan.js"
-import { DockerError, PlanError, SandboxError, isSandboxError } from "../core/errors.js"
+import type { SandboxRuntime } from "../core/runtime.js"
+import { PlanError } from "../core/errors.js"
+import { NodeRuntime } from "../core/runtime-node.js"
 import { runHooks, runSafe } from "./helpers.js"
 
 const SANDBOX_DIR = ".sandbox"
-
-const NodeRuntime = NodeChildProcessSpawner.layer.pipe(
-  Layer.provide(Layer.merge(NodeFileSystem.layer, NodePath.layer))
-)
 
 function ensureSandboxDir(rootDir: string): void {
   mkdirSync(join(rootDir, SANDBOX_DIR), { recursive: true })
@@ -56,7 +50,11 @@ function writeGeneratedFiles(rootDir: string, plan: Plan): void {
   }
 }
 
-function withDocker<E>(
+function createRuntime(project: string): SandboxRuntime {
+  return new DockerRuntime(project)
+}
+
+function withNodeRuntime<E>(
   program: Effect.Effect<void, E, ChildProcessSpawner.ChildProcessSpawner>
 ): Effect.Effect<void, E, never> {
   return program.pipe(Effect.provide(NodeRuntime)) as Effect.Effect<void, E, never>
@@ -109,18 +107,18 @@ program
   .description("Prepare the development environment")
   .action(() => {
     const cliProgram = Effect.gen(function* () {
-      yield* assertDockerAvailable()
       const rootDir = process.cwd()
       const plan = yield* buildPlanEffect(rootDir)
       writeGeneratedFiles(rootDir, plan)
-      const runner = new Runner(plan.project)
-      yield* runHooks(plan, "build.pre", runner, rootDir)
-      yield* runner.build(rootDir)
-      yield* runHooks(plan, "build.post", runner, rootDir)
+      const runtime = createRuntime(plan.project)
+      yield* runtime.ensureAvailable()
+      yield* runHooks(plan, "build.pre", runtime, rootDir)
+      yield* runtime.build(rootDir)
+      yield* runHooks(plan, "build.post", runtime, rootDir)
       console.log(`Environment ready for ${plan.project}`)
     }).pipe(Effect.scoped)
 
-    runSafe(withDocker(cliProgram))
+    runSafe(withNodeRuntime(cliProgram))
   })
 
 program
@@ -130,15 +128,15 @@ program
   .option("--wait", "Block until Ctrl+C is pressed")
   .action((options) => {
     const cliProgram = Effect.gen(function* () {
-      yield* assertDockerAvailable()
       const rootDir = process.cwd()
       const plan = yield* buildPlanEffect(rootDir)
       writeGeneratedFiles(rootDir, plan)
 
-      const runner = new Runner(plan.project)
-      yield* runHooks(plan, "start.pre", runner, rootDir)
-      yield* runner.up(rootDir, options.build)
-      yield* runHooks(plan, "start.post", runner, rootDir)
+      const runtime = createRuntime(plan.project)
+      yield* runtime.ensureAvailable()
+      yield* runHooks(plan, "start.pre", runtime, rootDir)
+      yield* runtime.start(rootDir, options.build)
+      yield* runHooks(plan, "start.post", runtime, rootDir)
 
       console.log(`Workspace ${plan.project} is running`)
 
@@ -150,11 +148,11 @@ program
             resume(Effect.void)
           })
         })
-        yield* runner.down(rootDir)
+        yield* runtime.stop(rootDir)
       }
     }).pipe(Effect.scoped)
 
-    runSafe(withDocker(cliProgram))
+    runSafe(withNodeRuntime(cliProgram))
   })
 
 program
@@ -162,17 +160,17 @@ program
   .description("Stop the development environment")
   .action(() => {
     const cliProgram = Effect.gen(function* () {
-      yield* assertDockerAvailable()
       const rootDir = process.cwd()
       const plan = yield* buildPlanEffect(rootDir)
-      const runner = new Runner(plan.project)
-      yield* runHooks(plan, "stop.pre", runner, rootDir)
-      yield* runner.down(rootDir)
-      yield* runHooks(plan, "stop.post", runner, rootDir)
+      const runtime = createRuntime(plan.project)
+      yield* runtime.ensureAvailable()
+      yield* runHooks(plan, "stop.pre", runtime, rootDir)
+      yield* runtime.stop(rootDir)
+      yield* runHooks(plan, "stop.post", runtime, rootDir)
       console.log("Stopped")
     }).pipe(Effect.scoped)
 
-    runSafe(withDocker(cliProgram))
+    runSafe(withNodeRuntime(cliProgram))
   })
 
 program
@@ -181,16 +179,16 @@ program
   .allowUnknownOption()
   .action((cmd: string[]) => {
     const cliProgram = Effect.gen(function* () {
-      yield* assertDockerAvailable()
       const rootDir = process.cwd()
       const plan = yield* buildPlanEffect(rootDir)
-      const runner = new Runner(plan.project)
-      yield* runHooks(plan, "exec.pre", runner, rootDir)
-      yield* runner.execInDev(cmd)
-      yield* runHooks(plan, "exec.post", runner, rootDir)
+      const runtime = createRuntime(plan.project)
+      yield* runtime.ensureAvailable()
+      yield* runHooks(plan, "exec.pre", runtime, rootDir)
+      yield* runtime.exec(cmd)
+      yield* runHooks(plan, "exec.post", runtime, rootDir)
     }).pipe(Effect.scoped)
 
-    runSafe(withDocker(cliProgram))
+    runSafe(withNodeRuntime(cliProgram))
   })
 
 program
@@ -210,62 +208,30 @@ program
   .command("logs [process]")
   .description("Tail logs from a managed process")
   .action((processName?: string) => {
-    let args: Array<string> = []
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
       const config = yield* validateConfigEffect(rootDir)
-      const project = config.project.name
-      args = processName
-        ? ["exec", `${project}-dev`, "tail", "-f", `/tmp/${processName}.log`]
-        : ["exec", `${project}-dev`, "tail", "-f", "/tmp/supervisord.log"]
+      const runtime = createRuntime(config.project.name)
+      yield* runtime.ensureAvailable()
+      yield* runtime.logs(processName)
+    }).pipe(Effect.scoped)
 
-      yield* assertDockerAvailable()
-      const handle = yield* ChildProcess.make("docker", args, {
-        stdin: "inherit",
-        stdout: "inherit",
-        stderr: "inherit",
-      })
-      const exitCode = (yield* handle.exitCode) as number
-      if (exitCode !== 0) {
-        return yield* new DockerError({
-          message: `exited with code ${exitCode}`,
-          command: `docker ${args.join(" ")}`,
-        })
-      }
-    }).pipe(
-      Effect.scoped,
-      Effect.catch((error): Effect.Effect<never, SandboxError, never> => {
-        if (error instanceof DockerError) {
-          return Effect.fail(error)
-        }
-        if (isSandboxError(error)) {
-          return Effect.fail(error)
-        }
-        return Effect.fail(
-          new DockerError({
-            message: error instanceof Error ? error.message : String(error),
-            command: `docker ${args.join(" ")}`,
-          })
-        )
-      })
-    )
-
-    runSafe(withDocker(cliProgram))
+    runSafe(withNodeRuntime(cliProgram))
   })
 
 program
   .command("ps")
   .description("Show running containers for the project")
   .action(() => {
-    const cliProgram: Effect.Effect<void, SandboxError, ChildProcessSpawner.ChildProcessSpawner> = Effect.gen(function* () {
-      yield* assertDockerAvailable()
+    const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
       const config = yield* validateConfigEffect(rootDir)
-      const runner = new Runner(config.project.name)
-      yield* runner.ps()
+      const runtime = createRuntime(config.project.name)
+      yield* runtime.ensureAvailable()
+      yield* runtime.status()
     }).pipe(Effect.scoped)
 
-    runSafe(withDocker(cliProgram))
+    runSafe(withNodeRuntime(cliProgram))
   })
 
 program
@@ -273,20 +239,20 @@ program
   .description("Restart a managed process or all daemon processes")
   .action((processName?: string) => {
     const cliProgram = Effect.gen(function* () {
-      yield* assertDockerAvailable()
       const rootDir = process.cwd()
       const plan = yield* buildPlanEffect(rootDir)
-      const runner = new Runner(plan.project)
+      const runtime = createRuntime(plan.project)
+      yield* runtime.ensureAvailable()
       if (processName) {
-        yield* runner.restart(processName)
+        yield* runtime.restart(processName)
       } else {
         for (const proc of plan.runtime.processes.filter((p) => p.mode === "daemon")) {
-          yield* runner.restart(proc.name)
+          yield* runtime.restart(proc.name)
         }
       }
     }).pipe(Effect.scoped)
 
-    runSafe(withDocker(cliProgram))
+    runSafe(withNodeRuntime(cliProgram))
   })
 
 const configCmd = program.command("config").description("Manage sandbox configuration")

@@ -7,7 +7,7 @@ import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem";
 import * as NodePath from "@effect/platform-node-shared/NodePath";
 import { runHooks, resolveProjectName, runSafe } from "../../cli/helpers.js";
 import { createPlan } from "../../core/plan.js";
-import type { Provider } from "../../core/provider.js";
+import type { SandboxRuntime } from "../../core/runtime.js";
 import { PlanError } from "../../core/errors.js";
 
 function tmpDir(prefix: string): string {
@@ -44,13 +44,13 @@ describe("runHooks", () => {
       startOn: "start.post",
     });
 
-    const execInDev = vi.fn().mockReturnValue(Effect.void);
-    const runner = { execInDev } as unknown as Provider;
+    const exec = vi.fn().mockReturnValue(Effect.void);
+    const runner = { exec } as unknown as SandboxRuntime;
     const program = runHooks(plan, "start.post", runner, "/tmp").pipe(
       Effect.provide(NodeRuntime)
     );
     await Effect.runPromise(program);
-    expect(execInDev).toHaveBeenCalledWith(["python", "manage.py", "migrate"]);
+    expect(exec).toHaveBeenCalledWith(["python", "manage.py", "migrate"]);
   });
 
   it("does not run host hooks through the provider", async () => {
@@ -64,13 +64,13 @@ describe("runHooks", () => {
       startOn: "build.pre",
     });
 
-    const execInDev = vi.fn().mockReturnValue(Effect.void);
-    const runner = { execInDev } as unknown as Provider;
+    const exec = vi.fn().mockReturnValue(Effect.void);
+    const runner = { exec } as unknown as SandboxRuntime;
     const program = runHooks(plan, "build.pre", runner, "/tmp").pipe(
       Effect.provide(NodeRuntime)
     );
     await Effect.runPromise(program);
-    expect(execInDev).not.toHaveBeenCalled();
+    expect(exec).not.toHaveBeenCalled();
   });
 
   it("ignores hooks at unrelated lifecycle points", async () => {
@@ -84,13 +84,13 @@ describe("runHooks", () => {
       startOn: "start.post",
     });
 
-    const execInDev = vi.fn().mockReturnValue(Effect.void);
-    const runner = { execInDev } as unknown as Provider;
+    const exec = vi.fn().mockReturnValue(Effect.void);
+    const runner = { exec } as unknown as SandboxRuntime;
     const program = runHooks(plan, "stop.pre", runner, "/tmp").pipe(
       Effect.provide(NodeRuntime)
     );
     await Effect.runPromise(program);
-    expect(execInDev).not.toHaveBeenCalled();
+    expect(exec).not.toHaveBeenCalled();
   });
 });
 
