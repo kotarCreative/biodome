@@ -5,9 +5,13 @@
 
 import { Effect } from "effect"
 import { RuntimeError } from "./errors.js"
+import type { Capabilities } from "./capabilities.js"
 
 export interface SandboxRuntime {
   readonly project: string
+
+  /** Features this runtime backend supports (e.g. snapshots, PTYs, network policies). */
+  readonly capabilities: Capabilities
 
   /** Verify that the runtime backend is reachable (Docker daemon, remote API, etc.). */
   ensureAvailable(): Effect.Effect<void, RuntimeError, never>

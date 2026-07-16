@@ -1,11 +1,23 @@
 import { Effect } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { capabilitiesOf } from "../core/capabilities.js"
 import { NodeRuntime } from "../core/runtime-node.js"
 import type { SandboxRuntime } from "../core/runtime.js"
 import { RuntimeError } from "../core/errors.js"
 
 const COMPOSE_FILE = ".sandbox/docker-compose.yaml"
+
+const DOCKER_CAPABILITIES = capabilitiesOf(
+  "lifecycle.build",
+  "lifecycle.start",
+  "lifecycle.stop",
+  "lifecycle.restart",
+  "exec.command",
+  "logs.stream",
+  "status.read",
+  "process.signal"
+)
 
 function platformErrorMessage(error: PlatformError): string {
   return error && typeof error === "object" && "message" in error
@@ -48,6 +60,7 @@ const execDocker = Effect.fnUntraced(
 
 export class DockerRuntime implements SandboxRuntime {
   project: string
+  readonly capabilities = DOCKER_CAPABILITIES
 
   constructor(project: string) {
     this.project = project
