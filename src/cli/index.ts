@@ -20,6 +20,7 @@ import {
 import { DockerRuntime } from "../docker/runner.js"
 import { formatInfo, formatAgentsMd } from "../core/info.js"
 import { Plan } from "../core/plan.js"
+import { generatePlanJson, generateMcpServerContent } from "../mcp/generator.js"
 import type { SandboxRuntime } from "../core/runtime.js"
 import { PlanError, SandboxError } from "../core/errors.js"
 import { NodeRuntime } from "../core/runtime-node.js"
@@ -59,6 +60,11 @@ function writeGeneratedFiles(rootDir: string, plan: Plan): string[] {
   const dockerignorePath = join(rootDir, ".dockerignore")
   if (!existsSync(dockerignorePath)) {
     writeFileSync(dockerignorePath, generateDockerignore())
+  }
+
+  if (plan.build.mcpEnabled) {
+    writeFileSync(join(rootDir, BIODOME_DIR, "plan.json"), generatePlanJson(plan))
+    writeFileSync(join(rootDir, BIODOME_DIR, "mcp-server.js"), generateMcpServerContent())
   }
 
   return [

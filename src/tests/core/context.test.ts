@@ -368,4 +368,26 @@ describe("SandboxContext", () => {
       { name: "debug", host: 9229, container: 9229 },
     ]);
   });
+
+  it("configureMcp adds the MCP process and sets flags", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.configureMcp(3005);
+
+    expect(ctx.plan.build.mcpEnabled).toBe(true);
+    expect(ctx.plan.build.mcpPort).toBe(3005);
+
+    const procs = ctx.plan.runtime.processes;
+    expect(procs).toHaveLength(1);
+    const mcp = procs[0];
+    expect(mcp.name).toBe("biodome-mcp");
+    expect(mcp.command[0]).toBe("node");
+    expect(mcp.command).toContain("/workspace/.biodome/mcp-server.js");
+    expect(mcp.command).toContain("--port");
+    expect(mcp.command).toContain("3005");
+    expect(mcp.ports).toHaveLength(1);
+    expect(mcp.ports[0].host).toBe(3005);
+    expect(mcp.ports[0].container).toBe(3005);
+    expect(mcp.healthCheck).toBeDefined();
+    expect(mcp.healthCheck!.url).toContain("localhost:3005");
+  });
 });

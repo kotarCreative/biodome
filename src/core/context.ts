@@ -402,4 +402,28 @@ export class SandboxContext implements FeatureContext, BuildContext {
   enableVenvVolume(): void {
     this.plan.build.venvVolume = true
   }
+
+  configureMcp(port: number): void {
+    this.plan.build.mcpEnabled = true
+    this.plan.build.mcpPort = port
+
+    // The MCP server is a Node script. Ensure a Node runtime is present without
+    // clobbering an explicit node request the user may already have made.
+    const hasNode = this.plan.build.languageRequests.some((r) => r.name === "node")
+    if (!hasNode) {
+      this.addLanguage("node", { version: "20" })
+    }
+
+    this.addProcess({
+      name: "biodome-mcp",
+      command: [
+        "node",
+        "/workspace/.biodome/mcp-server.js",
+        "--port", String(port),
+        "--plan", "/workspace/.biodome/plan.json",
+      ],
+      port,
+      healthCheck: { type: "http", url: `http://localhost:${port}/health` },
+    })
+  }
 }

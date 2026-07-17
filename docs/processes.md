@@ -90,7 +90,52 @@ export default function vite(ctx) {
 }
 ```
 
+### Built-in MCP server
+
+Biodome ships a built-in MCP (Model Context Protocol) server that exposes sandbox status, logs, and actions to AI agents. When enabled, the server runs inside the dev container as a `supervisord`-managed daemon and listens on a configurable port (default `3001`).
+
+To enable, add `mcp` to your `biodome/config.json`:
+
+```json
+{
+  "project": { "name": "my-project" },
+  "mcp": { "enabled": true, "port": 3001 }
+}
+```
+
+The server provides these tools:
+
+| Tool | Description | Scope |
+|------|-------------|-------|
+| `get_sandbox_info` | Returns the full sandbox plan: project name, languages, services with connection strings, processes, and environment | Read-only |
+| `get_process_status` | Runs `supervisorctl status` to show running/stopped managed processes | Read-only |
+| `get_service_health` | Attempts a TCP connection to each backing service port and reports reachability | Read-only |
+| `get_logs` | Returns recent lines from `/tmp/<process>.log` for any managed process or `supervisord` | Read-only |
+| `restart_process` | Runs `supervisorctl restart` for a named daemon process | Action |
+| `exec_command` | Runs an arbitrary shell command inside the container (logged to the MCP audit trail) | Action |
+
+Every tool invocation is logged as a JSON line to the MCP server's `stdout`, which `supervisord` captures at `/tmp/biodome-mcp.log`. Use `biodome logs biodome-mcp` to tail the audit trail from the host.
+
+**Agent configuration example (OpenCode / Cursor):**
+
+```json
+{
+  "mcpServers": {
+    "biodome": {
+      "url": "http://localhost:3001"
+    }
+  }
+}
+```
+
+Notes:
+
+- Enabling MCP automatically provisions a Node runtime if your features do not already request `node`. An explicit `ctx.addLanguage("node", ...)` is preserved.
+- The port is published on host loopback only (`127.0.0.1:<port>:<port>`), so the endpoint — including the `exec_command` and `restart_process` action tools — is reachable from the host but not from other machines on the network.
+
 ### Custom MCP server
+
+If you need a custom MCP server instead of the built-in one, you can declare it as a process:
 
 ```javascript
 // sandbox/features/opencode-mcp.mjs

@@ -5,13 +5,13 @@ function formatPort(p: Port): string {
   return `${label}${p.host}:${p.container}`;
 }
 
-interface ServiceConnection {
+export interface ServiceConnection {
   label: string;
   internal: string;
   external: string;
 }
 
-function serviceConnection(svc: Service): ServiceConnection | undefined {
+export function serviceConnection(svc: Service): ServiceConnection | undefined {
   if (svc.type === "postgres") {
     const user = svc.environment.POSTGRES_USER || "postgres";
     const password = svc.environment.POSTGRES_PASSWORD || "postgres";

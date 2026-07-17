@@ -331,4 +331,56 @@ describe("validateFeatures", () => {
 
     await expect(validateFeatures(dir)).resolves.toBeDefined();
   });
+
+  it("enables MCP when config has mcp.enabled", async () => {
+    const dir = join("/tmp", "sandbox-test-" + Date.now());
+    createProject(dir, {
+      "biodome/config.json": JSON.stringify({
+        project: { name: "mcp-app" },
+        mcp: { enabled: true, port: 3100 },
+      }),
+      "biodome/features/.gitkeep": "",
+    });
+
+    const plan = await buildPlan(dir);
+    expect(plan.build.mcpEnabled).toBe(true);
+    expect(plan.build.mcpPort).toBe(3100);
+
+    const mcpProcess = plan.runtime.processes.find((p) => p.name === "biodome-mcp");
+    expect(mcpProcess).toBeDefined();
+    expect(mcpProcess!.ports[0].host).toBe(3100);
+
+    // A Node runtime must be provisioned for the MCP server to run.
+    expect(plan.build.languageRequests.some((r) => r.name === "node")).toBe(true);
+    expect(plan.build.baseImage).toContain("node");
+
+    // Dockerfile installs the SDK where the ESM server can resolve it.
+    const dockerfile = generateDockerfile(plan);
+    expect(dockerfile).toContain("npm install --prefix / @modelcontextprotocol/sdk");
+
+    // The MCP port is published on host loopback only.
+    const compose = generateCompose(plan);
+    expect(compose).toContain("127.0.0.1:3100:3100");
+  });
+
+  it("does not override an explicit node language request when MCP is enabled", async () => {
+    const dir = join("/tmp", "sandbox-test-" + Date.now());
+    createProject(dir, {
+      "biodome/config.json": JSON.stringify({
+        project: { name: "mcp-node-app" },
+        mcp: { enabled: true },
+      }),
+      "biodome/features/node.mjs": `
+        export default function node(ctx) {
+          ctx.addLanguage("node", { version: "22", packageManager: "pnpm" });
+        }
+      `,
+    });
+
+    const plan = await buildPlan(dir);
+    const node = plan.build.languageRequests.filter((r) => r.name === "node");
+    expect(node).toHaveLength(1);
+    expect(node[0].options.version).toBe("22");
+    expect(node[0].options.packageManager).toBe("pnpm");
+  });
 });

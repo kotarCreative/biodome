@@ -62,6 +62,15 @@ export function generateDockerfile(plan: Plan): string {
     lines.push("");
   }
 
+  if (plan.build.mcpEnabled) {
+    lines.push("# Install the MCP SDK for the biodome-mcp server.");
+    lines.push("# Installed under /node_modules so the ESM server at");
+    lines.push("# /workspace/.biodome/mcp-server.js can resolve it. /node_modules is on");
+    lines.push("# the module resolution path and is not shadowed by the /workspace mount.");
+    lines.push("RUN npm install --prefix / @modelcontextprotocol/sdk");
+    lines.push("");
+  }
+
   for (const snippet of plan.build.runtimeInstalls) {
     lines.push(snippet);
   }
@@ -319,7 +328,12 @@ function devService(plan: Plan): ComposeService {
     const seen = new Set<string>();
     for (const proc of daemonProcesses) {
       for (const p of proc.ports) {
-        const mapping = `${p.host}:${p.container}`;
+        // The MCP server exposes action tools (exec_command, restart_process),
+        // so publish it only on host loopback rather than all interfaces.
+        const isMcpPort = plan.build.mcpEnabled && p.host === plan.build.mcpPort;
+        const mapping = isMcpPort
+          ? `127.0.0.1:${p.host}:${p.container}`
+          : `${p.host}:${p.container}`;
         if (seen.has(mapping)) continue;
         seen.add(mapping);
         ports.push(mapping);

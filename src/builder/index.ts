@@ -12,10 +12,16 @@ export interface BuildPlanOptions {
   dryRun?: boolean
 }
 
+export interface McpConfig {
+  enabled: boolean
+  port?: number
+}
+
 export interface Config {
   project: {
     name: string
   }
+  mcp?: McpConfig
 }
 
 export const buildPlanEffect = Effect.fnUntraced(function*(
@@ -27,6 +33,11 @@ export const buildPlanEffect = Effect.fnUntraced(function*(
 
   yield* loadServices(rootDir, ctx)
   yield* loadFeatures(rootDir, ctx)
+
+  if (config.mcp?.enabled) {
+    const port = config.mcp.port ?? 3001
+    ctx.configureMcp(port)
+  }
 
   ctx.finalizeBuildPlan()
 

@@ -21,6 +21,8 @@ export interface BuildPlan {
   environment: Record<string, string>
   nodeModulesVolume: boolean
   venvVolume: boolean
+  mcpEnabled: boolean
+  mcpPort: number
 }
 
 export interface DependencyInstall {
@@ -163,6 +165,8 @@ export function createPlan(project: string): Plan {
       environment: {},
       nodeModulesVolume: false,
       venvVolume: false,
+      mcpEnabled: false,
+      mcpPort: 3001,
     },
     runtime: {
       services: [],
@@ -240,10 +244,16 @@ export const ServiceOptionsSchema = Schema.Struct({
   password: Schema.optional(Schema.String),
 })
 
+export const McpConfigSchema = Schema.Struct({
+  enabled: Schema.Boolean,
+  port: Schema.optional(Schema.Number),
+})
+
 export const ConfigSchema = Schema.Struct({
   project: Schema.Struct({
     name: Schema.String.check(Schema.isMinLength(1)),
   }),
+  mcp: Schema.optional(McpConfigSchema),
 })
 
 export const PortSchema = Schema.Struct({
@@ -307,6 +317,8 @@ export const PlanSchema = Schema.Struct({
     environment: Schema.Record(Schema.String, Schema.String),
     nodeModulesVolume: Schema.Boolean,
     venvVolume: Schema.Boolean,
+    mcpEnabled: Schema.Boolean,
+    mcpPort: Schema.Number,
   }),
   runtime: Schema.Struct({
     services: Schema.Array(ServiceSchema),
