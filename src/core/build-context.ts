@@ -15,4 +15,5 @@ export interface BuildContext {
 
   enableNodeModulesVolume(): void
   enableVenvVolume(): void
+  enableVendorVolume(): void
 }

@@ -185,12 +185,44 @@ describe("SandboxContext", () => {
     }
   });
 
+  it("adds PHP and sets the base image", () => {
+    const dir = makeProject();
+    try {
+      const ctx = new SandboxContext(dir, "test");
+      ctx.addLanguage("php", { version: "8.3" });
+      ctx.finalizeBuildPlan();
+
+      expect(ctx.plan.build.baseImage).toBe("php:8.3-cli");
+      expect(ctx.plan.build.languageSnippets.some((s) => s.includes("getcomposer.org"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("installs PHP dependencies from composer.json", () => {
+    const dir = makeProject(["composer.json"]);
+    try {
+      const ctx = new SandboxContext(dir, "test");
+      ctx.addLanguage("php", { version: "8.3" });
+      ctx.finalizeBuildPlan();
+
+      expect(ctx.plan.build.dependencyFiles).toEqual(["composer.json"]);
+      expect(ctx.plan.build.dependencyInstalls).toHaveLength(1);
+      expect(ctx.plan.build.dependencyInstalls[0].command).toContain("composer install");
+      expect(ctx.plan.build.copyArtifacts[0].lines).toContain("COPY --from=deps /workspace/vendor /workspace/vendor");
+      expect(ctx.plan.build.vendorVolume).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     [["python", "node"]],
     [["python", "node", "go"]],
     [["node", "go", "rust"]],
     [["python", "java"]],
     [["python", "node", "go", "rust", "java"]],
+    [["php", "node"]],
   ])("uses the neutral base image and installs %j runtimes", (languages) => {
     const dir = makeProject();
     try {
@@ -209,6 +241,7 @@ describe("SandboxContext", () => {
         go: "go.dev",
         rust: "rustup",
         java: "temurin",
+        php: "sury",
       };
       for (const name of languages) {
         expect(ctx.plan.build.runtimeInstalls.some((snippet) => snippet.toLowerCase().includes(markers[name]))).toBe(true);

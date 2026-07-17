@@ -152,4 +152,39 @@ describe("Docker generator snapshots", () => {
     expect(generateSupervisordConf(plan)).toMatchSnapshot();
     expect(generateCompose(plan)).toMatchSnapshot();
   });
+
+  it("matches for php + composer + vendor volume", () => {
+    const plan = createPlan("php-app");
+    plan.build.baseImage = "php:8.3-cli";
+    plan.build.aptPackages = ["supervisor", "curl"];
+    plan.build.vendorVolume = true;
+    plan.build.dependencyFiles = ["composer.json", "composer.lock"];
+    plan.build.dependencyInstalls.push({
+      files: ["composer.json", "composer.lock"],
+      command: "RUN --mount=type=cache,target=/root/.composer/cache composer install --no-interaction --no-progress --optimize-autoloader && rm -rf /root/.composer/cache/*",
+    });
+    plan.build.copyArtifacts.push({
+      files: ["composer.json"],
+      lines: ["COPY --from=deps /workspace/vendor /workspace/vendor"],
+    });
+    plan.runtime.processes.push({
+      name: "laravel",
+      command: ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"],
+      ports: [{ host: 8000, container: 8000 }],
+      environment: {},
+      mode: "daemon",
+      startOn: "start.post",
+      healthCheck: {
+        type: "http",
+        url: "http://localhost:8000",
+        interval: "5s",
+        timeout: "3s",
+        retries: 10,
+      },
+    });
+
+    expect(generateDockerfile(plan)).toMatchSnapshot();
+    expect(generateSupervisordConf(plan)).toMatchSnapshot();
+    expect(generateCompose(plan)).toMatchSnapshot();
+  });
 });
