@@ -47,9 +47,13 @@ Install a CLI tool or system package. Well-known tools use custom install script
 
 Add a backing service. See [File layout](file-layout.md).
 
-### `setEnv(key, value)`
+### `addEndpoint(spec)`
 
-Set an environment variable for both build and runtime.
+Declare an agent-discoverable endpoint with a name, optional URL/port, credentials (plain or env-referenced), and free-form metadata. Endpoints are surfaced in `biodome info`, `AGENTS.md`, `.biodome/plan.json`, and the MCP `get_endpoints` tool. See [Primitives](primitives.md#addendpointspec).
+
+### `addEnv(key, spec)`
+
+Declare an environment variable. Provide exactly one of `value` (literal) or `from: { env }` (host passthrough). Optional: `scope` (`"build" | "runtime" | "both"`, default `"runtime"`), and for passthrough vars `required` and `default`. Passthrough values are resolved from the host at `up` time and never written to the image or `plan.json`. See [Primitives](primitives.md#addenvkey-spec).
 
 ### `fileExists(path)`
 
@@ -165,7 +169,7 @@ biodome exec npm test
 
 ### `biodome info`
 
-Print a summary of the project: base image, services, ports, connection strings, processes, and hooks.
+Print a summary of the project: base image, languages, services, endpoints, environment, connection strings, processes, and hooks.
 
 ### `biodome config validate`
 
@@ -173,7 +177,7 @@ Validate the `biodome/` configuration and feature modules without building. This
 
 ### `biodome generate agents.md`
 
-Generate an `AGENTS.md` file with connection info and available commands for AI coding agents.
+Generate an `AGENTS.md` file with base image, languages, services, endpoints, environment, connection info, processes, and available commands for AI coding agents.
 
 ### `biodome logs [process]`
 

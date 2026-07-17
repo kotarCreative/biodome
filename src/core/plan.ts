@@ -42,6 +42,43 @@ export interface RuntimePlan {
   ports: Port[]
   environment: Record<string, string>
   processes: Process[]
+  endpoints: Endpoint[]
+  envVars: EnvVar[]
+}
+
+export type EnvScope = "build" | "runtime" | "both"
+
+// A declared environment variable. Its value is EITHER a literal (baked into the
+// image / plan) OR a passthrough reference that is resolved from the host at
+// `up` time and never written to the Dockerfile or plan.json. Passthrough is the
+// safe way to inject secrets.
+export interface EnvVar {
+  key: string
+  scope: EnvScope
+  // Present when the value is a literal (non-secret config).
+  value?: string
+  // Present when the value is passed through from the host environment.
+  from?: { env: string }
+  // Only meaningful for passthrough vars.
+  required?: boolean
+  default?: string
+}
+
+// A SecretValue is either a plain literal string or a reference to an
+// environment variable resolved at runtime. Env references are never baked into
+// plan.json, keeping secrets out of on-disk artifacts.
+export type SecretValue = string | { env: string }
+
+// A user-declared, agent-discoverable resource — e.g. a custom API a feature
+// stands up. Captures how to reach it (url/port) plus optional credentials and
+// free-form metadata.
+export interface Endpoint {
+  name: string
+  description?: string
+  url?: string
+  port?: number
+  credentials?: Record<string, SecretValue>
+  metadata?: Record<string, string>
 }
 
 export interface Service {
@@ -175,6 +212,8 @@ export function createPlan(project: string): Plan {
       ports: [],
       environment: {},
       processes: [],
+      endpoints: [],
+      envVars: [],
     },
   }
 }
@@ -242,6 +281,62 @@ export const ServiceOptionsSchema = Schema.Struct({
   databases: Schema.optional(Schema.Array(ServiceDatabaseSchema)),
   users: Schema.optional(Schema.Array(ServiceUserSchema)),
   password: Schema.optional(Schema.String),
+})
+
+const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+// A credential value is either a plain string or an { env: "VAR" } reference
+// that resolves from the container's environment at runtime.
+export const SecretValueSchema = Schema.Union([
+  Schema.String,
+  Schema.Struct({
+    env: Schema.String.check(Schema.isMinLength(1)).check(
+      Schema.makeFilter((value) =>
+        ENV_VAR_NAME_PATTERN.test(value) ? undefined : "must be a valid environment variable name"
+      )
+    ),
+  }),
+])
+
+export const EndpointCredentialsSchema = Schema.Record(Schema.String, SecretValueSchema)
+
+export const EndpointSpecSchema = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1)),
+  description: Schema.optional(Schema.String),
+  url: Schema.optional(Schema.String),
+  port: Schema.optional(Schema.Number),
+  credentials: Schema.optional(EndpointCredentialsSchema),
+  metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+})
+
+export const EnvScopeSchema = Schema.Literals(["build", "runtime", "both"])
+
+// Input spec for addEnv. Exactly one of `value` (literal) or `from` (host
+// passthrough) must be provided; addEnv enforces that XOR at runtime.
+export const EnvSpecSchema = Schema.Struct({
+  value: Schema.optional(Schema.String),
+  from: Schema.optional(
+    Schema.Struct({
+      env: Schema.String.check(Schema.isMinLength(1)).check(
+        Schema.makeFilter((value) =>
+          ENV_VAR_NAME_PATTERN.test(value) ? undefined : "must be a valid environment variable name"
+        )
+      ),
+    })
+  ),
+  scope: Schema.optional(EnvScopeSchema),
+  required: Schema.optional(Schema.Boolean),
+  default: Schema.optional(Schema.String),
+})
+
+// Normalized EnvVar as stored on the plan (round-trippable in plan.json).
+export const EnvVarSchema = Schema.Struct({
+  key: Schema.String.check(Schema.isMinLength(1)),
+  scope: EnvScopeSchema,
+  value: Schema.optional(Schema.String),
+  from: Schema.optional(Schema.Struct({ env: Schema.String })),
+  required: Schema.optional(Schema.Boolean),
+  default: Schema.optional(Schema.String),
 })
 
 export const McpConfigSchema = Schema.Struct({
@@ -327,5 +422,7 @@ export const PlanSchema = Schema.Struct({
     ports: Schema.Array(PortSchema),
     environment: Schema.Record(Schema.String, Schema.String),
     processes: Schema.Array(ProcessSchema),
+    endpoints: Schema.Array(EndpointSpecSchema),
+    envVars: Schema.Array(EnvVarSchema),
   }),
 })

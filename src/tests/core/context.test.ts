@@ -249,12 +249,116 @@ describe("SandboxContext", () => {
     expect(svc.healthCheck?.test[0]).toBe("CMD-SHELL");
   });
 
-  it("sets env in both build and runtime", () => {
+  it("adds a literal env var scoped to runtime by default", () => {
     const ctx = new SandboxContext("/tmp", "test");
-    ctx.setEnv("DEBUG", "1");
+    ctx.addEnv("DEBUG", { value: "1" });
+
+    expect(ctx.plan.build.environment.DEBUG).toBeUndefined();
+    expect(ctx.plan.runtime.environment.DEBUG).toBe("1");
+    expect(ctx.plan.runtime.envVars).toEqual([
+      { key: "DEBUG", scope: "runtime", value: "1" },
+    ]);
+  });
+
+  it("adds a literal env var to both build and runtime with scope 'both'", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addEnv("DEBUG", { value: "1", scope: "both" });
 
     expect(ctx.plan.build.environment.DEBUG).toBe("1");
     expect(ctx.plan.runtime.environment.DEBUG).toBe("1");
+  });
+
+  it("scopes a literal env var to runtime only", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addEnv("RUNTIME_ONLY", { value: "yes", scope: "runtime" });
+
+    expect(ctx.plan.build.environment.RUNTIME_ONLY).toBeUndefined();
+    expect(ctx.plan.runtime.environment.RUNTIME_ONLY).toBe("yes");
+  });
+
+  it("scopes a literal env var to build only", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addEnv("BUILD_ONLY", { value: "yes", scope: "build" });
+
+    expect(ctx.plan.build.environment.BUILD_ONLY).toBe("yes");
+    expect(ctx.plan.runtime.environment.BUILD_ONLY).toBeUndefined();
+  });
+
+  it("adds a passthrough env var without baking its value into the plan", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addEnv("DATABASE_URL", { from: { env: "DATABASE_URL" }, required: true });
+
+    // Passthrough values never touch the literal env maps.
+    expect(ctx.plan.build.environment.DATABASE_URL).toBeUndefined();
+    expect(ctx.plan.runtime.environment.DATABASE_URL).toBeUndefined();
+    expect(ctx.plan.runtime.envVars[0]).toEqual({
+      key: "DATABASE_URL",
+      scope: "runtime",
+      from: { env: "DATABASE_URL" },
+      required: true,
+      default: undefined,
+    });
+  });
+
+  it("supports a default on a passthrough env var", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addEnv("PORT", { from: { env: "PORT" }, default: "8000" });
+
+    expect(ctx.plan.runtime.envVars[0].default).toBe("8000");
+  });
+
+  it("rejects an env var with both value and from", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    expect(() =>
+      ctx.addEnv("X", { value: "1", from: { env: "X" } })
+    ).toThrow(/exactly one of 'value'/);
+  });
+
+  it("rejects an env var with neither value nor from", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    expect(() => ctx.addEnv("X", {})).toThrow(/exactly one of 'value'/);
+  });
+
+  it("rejects required/default on a literal env var", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    expect(() => ctx.addEnv("X", { value: "1", required: true })).toThrow(
+      /only apply to passthrough/
+    );
+  });
+
+  it("rejects an unsafe default for compose interpolation", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    expect(() =>
+      ctx.addEnv("PORT", { from: { env: "PORT" }, default: "8:000" })
+    ).toThrow(/not safe inside a Docker Compose interpolation default/);
+  });
+
+  it("rejects an invalid env key", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    expect(() => ctx.addEnv("1BAD", { value: "1" })).toThrow(/must match/);
+    expect(() => ctx.addEnv("has-dash", { value: "1" })).toThrow(/must match/);
+  });
+
+  it("rejects duplicate env keys", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addEnv("DEBUG", { value: "1" });
+    expect(() => ctx.addEnv("DEBUG", { value: "0" })).toThrow(
+      /Duplicate env variable/
+    );
+  });
+
+  it("does not let a process environment overwrite an addEnv variable", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addEnv("DEBUG", { value: "1" });
+    ctx.addProcess({
+      name: "web",
+      command: ["node", "server.js"],
+      environment: { DEBUG: "0" },
+    });
+
+    expect(ctx.plan.runtime.environment.DEBUG).toBe("1");
+    const proc = ctx.plan.runtime.processes[0];
+    expect(proc.environment.DEBUG).toBe("0");
   });
 
   it("adds curl for http health checks", () => {
@@ -297,6 +401,67 @@ describe("SandboxContext", () => {
     expect(() => ctx.addService("postgres", { port: 5433 })).toThrow(
       /Duplicate service name/
     );
+  });
+
+  it("adds an endpoint with literal and env-referenced credentials", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addEndpoint({
+      name: "django-api",
+      description: "Django REST API",
+      url: "http://localhost:8000",
+      port: 8000,
+      credentials: {
+        username: "admin",
+        password: { env: "DJANGO_ADMIN_PASSWORD" },
+        token: { env: "DJANGO_API_TOKEN" },
+      },
+      metadata: { framework: "django" },
+    });
+
+    expect(ctx.plan.runtime.endpoints).toHaveLength(1);
+    const endpoint = ctx.plan.runtime.endpoints[0];
+    expect(endpoint.name).toBe("django-api");
+    expect(endpoint.url).toBe("http://localhost:8000");
+    expect(endpoint.port).toBe(8000);
+    expect(endpoint.credentials).toEqual({
+      username: "admin",
+      password: { env: "DJANGO_ADMIN_PASSWORD" },
+      token: { env: "DJANGO_API_TOKEN" },
+    });
+    expect(endpoint.metadata).toEqual({ framework: "django" });
+  });
+
+  it("adds a minimal endpoint with only a name", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addEndpoint({ name: "worker" });
+
+    const endpoint = ctx.plan.runtime.endpoints[0];
+    expect(endpoint.name).toBe("worker");
+    expect(endpoint.credentials).toBeUndefined();
+    expect(endpoint.metadata).toBeUndefined();
+  });
+
+  it("rejects duplicate endpoint names", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addEndpoint({ name: "api", port: 8000 });
+
+    expect(() => ctx.addEndpoint({ name: "api", port: 8001 })).toThrow(
+      /Duplicate endpoint name/
+    );
+  });
+
+  it("rejects an endpoint with an out-of-range port", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    expect(() => ctx.addEndpoint({ name: "api", port: 70000 })).toThrow(
+      /integer between 1 and 65535/
+    );
+  });
+
+  it("rejects an endpoint with an empty env reference", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    expect(() =>
+      ctx.addEndpoint({ name: "api", credentials: { token: { env: "" } } })
+    ).toThrow();
   });
 
   it("does not create orphan volumes for services with no mounts", () => {

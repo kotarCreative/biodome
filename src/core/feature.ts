@@ -6,6 +6,8 @@ import type {
   PackageOptionsSchema,
   ToolOptionsSchema,
   ServiceOptionsSchema,
+  EndpointSpecSchema,
+  EnvSpecSchema,
 } from "./plan.js"
 
 export type ProcessSpec = typeof ProcessSpecSchema.Type
@@ -14,6 +16,8 @@ export type LanguageOptions = typeof LanguageOptionsSchema.Type
 export type PackageOptions = typeof PackageOptionsSchema.Type
 export type ToolOptions = typeof ToolOptionsSchema.Type
 export type ServiceOptions = typeof ServiceOptionsSchema.Type
+export type EndpointSpec = typeof EndpointSpecSchema.Type
+export type EnvSpec = typeof EnvSpecSchema.Type
 
 export interface Feature {
   name: string
@@ -31,8 +35,9 @@ export interface FeatureContext {
   addPackage(manager: string, name: string, options?: PackageOptions): void
   addTool(name: string, options?: ToolOptions): void
   addService(name: string, options?: ServiceOptions): void
+  addEndpoint(spec: EndpointSpec): void
 
-  setEnv(key: string, value: string): void
+  addEnv(key: string, spec: EnvSpec): void
 
   fileExists(path: string): boolean
   readFile(path: string): string

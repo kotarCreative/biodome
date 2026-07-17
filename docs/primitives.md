@@ -126,15 +126,82 @@ export default function services(ctx) {
 }
 ```
 
-## `setEnv(key, value)`
+## `addEndpoint(spec)`
 
-Sets an environment variable available in both the build and runtime environments.
+Declares an agent-discoverable endpoint — a custom API or resource a feature stands up — along with how to reach it and any credentials needed to use it. Endpoints appear in `biodome info`, the generated `AGENTS.md`, `.biodome/plan.json`, and the MCP `get_endpoints` tool, so an agent can discover the port, URL, credentials, and metadata for a service you created.
+
+```javascript
+export default function djangoApi(ctx) {
+  ctx.addEndpoint({
+    name: "django-api",
+    description: "Django REST API",
+    url: "http://localhost:8000",
+    port: 8000,
+    credentials: {
+      username: "admin",
+      // Env references are resolved from the running container at request time,
+      // so the secret is never written into plan.json.
+      password: { env: "DJANGO_ADMIN_PASSWORD" },
+      token: { env: "DJANGO_API_TOKEN" },
+    },
+    metadata: { framework: "django", docsPath: "/api/schema" },
+  });
+}
+```
+
+- `name` — unique identifier.
+- `description` — optional human-readable summary.
+- `url` — optional address the endpoint is reachable at.
+- `port` — optional port the endpoint listens on.
+- `credentials` — optional map of named credentials. Each value is either a literal string or an `{ env: "VAR_NAME" }` reference.
+- `metadata` — optional map of free-form string key/value pairs for anything that doesn't fit the fields above.
+
+### Credentials and secrets
+
+Credential values can be plain strings or environment-variable references:
+
+- **Literal** (`password: "devpassword"`) — stored verbatim. Convenient for throwaway local dev values, but it is written to `.biodome/plan.json` and surfaced by every info surface.
+- **Env reference** (`password: { env: "DJANGO_ADMIN_PASSWORD" }`) — the secret stays out of `plan.json` and the generated `AGENTS.md` (they show `$DJANGO_ADMIN_PASSWORD`). The MCP `get_endpoints` tool resolves the reference from the container's live environment when an agent asks, so real secrets are never persisted on disk.
+
+Prefer env references for anything sensitive.
+
+## `addEnv(key, spec)`
+
+Declares an environment variable. A variable is either a **literal** value or a **passthrough** reference that is resolved from the host at `up` time — the safe way to inject secrets without baking them into the image or `plan.json`.
 
 ```javascript
 export default function env(ctx) {
-  ctx.setEnv("DEBUG", "1");
+  // Literal, non-secret config. Baked into the image / plan.
+  ctx.addEnv("DEBUG", { value: "1" });
+
+  // Passthrough: value is read from the host's DATABASE_URL at `up` time and is
+  // NEVER written to the Dockerfile or plan.json.
+  ctx.addEnv("DATABASE_URL", { from: { env: "DATABASE_URL" }, required: true });
+
+  // Passthrough with a fallback default.
+  ctx.addEnv("PORT", { from: { env: "PORT" }, default: "8000" });
+
+  // Build-time-only literal.
+  ctx.addEnv("PIP_INDEX_URL", { value: "https://pypi.org/simple", scope: "build" });
 }
 ```
+
+The spec accepts exactly one of:
+
+- `value` — a literal string. Stored in the plan and baked into the image `ENV` layer / compose file.
+- `from` — `{ env: "VAR_NAME" }`, passed through from the host environment via compose interpolation. The value is never persisted.
+
+Plus:
+
+- `scope` — `"runtime"` (default), `"build"`, or `"both"`. Controls whether the variable is available at image build time, container runtime, or both.
+- `required` — passthrough only. Fails `biodome up` if the host variable is unset.
+- `default` — passthrough only. Fallback used when the host variable is unset or empty.
+
+Keys must match `[A-Za-z_][A-Za-z0-9_]*`, and each key may only be declared once.
+
+### Literal vs passthrough
+
+Use `value` for non-secret configuration you're happy to see in the built image and `plan.json`. Use `from` for anything sensitive (API keys, database URLs, tokens): passthrough variables are emitted as `${VAR}` interpolations in the generated compose file and resolved from the host shell / `.env` at `up` time, so the secret never lands in a committed artifact.
 
 ## Health checks
 
@@ -194,7 +261,7 @@ export default function branchEnv(ctx) {
   const branch = result.stdout.trim();
 
   if (branch !== "main") {
-    ctx.setEnv("DEBUG", "1");
+    ctx.addEnv("DEBUG", { value: "1" });
   }
 }
 ```

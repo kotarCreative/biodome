@@ -320,7 +320,7 @@ program
 
 program
   .command("info")
-  .description("Show project summary and connection info")
+  .description("Show project summary: languages, services, endpoints, environment, processes, and connection info")
   .action(() => {
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
@@ -476,7 +476,7 @@ const generateCmd = program.command("generate").description("Generate project fi
 
 generateCmd
   .command("agents.md")
-  .description("Generate AGENTS.md for AI context")
+  .description("Generate AGENTS.md for AI context (languages, services, endpoints, environment, processes)")
   .action(() => {
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()

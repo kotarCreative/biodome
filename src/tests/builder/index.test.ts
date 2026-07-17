@@ -73,7 +73,7 @@ describe("buildPlan", () => {
       "biodome/features/env.mjs": `
         export default function env(ctx) {
           const result = ctx.exec("echo branch=main");
-          ctx.setEnv("BRANCH", result.stdout.trim().split("=")[1]);
+          ctx.addEnv("BRANCH", { value: result.stdout.trim().split("=")[1] });
         }
       `,
     });

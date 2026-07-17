@@ -15,6 +15,9 @@ import {
   ProcessSpecSchema,
   HookSpecSchema,
   ServiceOptionsSchema,
+  EndpointSpecSchema,
+  EnvSpecSchema,
+  EnvVar,
   ProcessHealthCheckSpecSchema,
 } from "./plan.js"
 import {
@@ -25,6 +28,8 @@ import {
   PackageOptions,
   ToolOptions,
   ServiceOptions,
+  EndpointSpec,
+  EnvSpec,
 } from "./feature.js"
 import { BuildContext } from "./build-context.js"
 import { languageHandlers, getDefaultBaseImage } from "./languages.js"
@@ -37,6 +42,30 @@ function validatePort(value: unknown, label: string): void {
   if (value === undefined) return
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 65535) {
     throw new ValidationError({ message: `${label} must be an integer between 1 and 65535` })
+  }
+}
+
+// POSIX-ish env var name: letters, digits, underscore; not starting with a digit.
+const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+function validateEnvKey(key: string, label: string): void {
+  if (typeof key !== "string" || !ENV_KEY_PATTERN.test(key)) {
+    throw new ValidationError({
+      message: `${label} must match ${ENV_KEY_PATTERN.source}`,
+    })
+  }
+}
+
+// Docker Compose interpolation ${VAR:-default} cannot contain characters that
+// terminate or alter the interpolation (}:, :, ?, ${) or control characters.
+const SAFE_INTERPOLATION_DEFAULT = /^[^:${}?\x00-\x1f\x7f]+$/
+
+function validateInterpolationDefault(value: string | undefined, label: string): void {
+  if (value === undefined) return
+  if (!SAFE_INTERPOLATION_DEFAULT.test(value)) {
+    throw new ValidationError({
+      message: `${label} contains characters that are not safe inside a Docker Compose interpolation default`,
+    })
   }
 }
 
@@ -229,9 +258,78 @@ export class SandboxContext implements FeatureContext, BuildContext {
     }
   }
 
-  setEnv(key: string, value: string): void {
-    this.plan.build.environment[key] = value
-    this.plan.runtime.environment[key] = value
+  addEndpoint(spec: EndpointSpec): void {
+    const validated = Schema.decodeSync(EndpointSpecSchema)(spec)
+    if (validated.port !== undefined) validatePort(validated.port, `Endpoint ${validated.name}: port`)
+    if (validated.metadata) {
+      validateEnv(validated.metadata as Record<string, unknown>, `Endpoint ${validated.name}: metadata`)
+    }
+
+    if (this.plan.runtime.endpoints.some((e) => e.name === validated.name)) {
+      throw new ValidationError({ message: `Duplicate endpoint name: ${validated.name}` })
+    }
+
+    this.plan.runtime.endpoints.push({
+      name: validated.name,
+      description: validated.description,
+      url: validated.url,
+      port: validated.port,
+      credentials: validated.credentials ? { ...validated.credentials } : undefined,
+      metadata: validated.metadata ? { ...validated.metadata } : undefined,
+    })
+  }
+
+  addEnv(key: string, spec: EnvSpec): void {
+    validateEnvKey(key, `Env ${key}: key`)
+    const validated = Schema.decodeSync(EnvSpecSchema)(spec)
+
+    const hasValue = validated.value !== undefined
+    const hasFrom = validated.from !== undefined
+    if (hasValue === hasFrom) {
+      throw new ValidationError({
+        message: `Env ${key}: provide exactly one of 'value' (literal) or 'from' (host passthrough)`,
+      })
+    }
+    if (hasFrom && validated.scope === "build") {
+      throw new ValidationError({
+        message: `Env ${key}: passthrough ('from') variables cannot be build-scoped because Docker builds cannot read the host environment. Use scope "runtime" or "both".`,
+      })
+    }
+    if (hasValue && (validated.required || validated.default !== undefined)) {
+      throw new ValidationError({
+        message: `Env ${key}: 'required' and 'default' only apply to passthrough ('from') variables`,
+      })
+    }
+    validateInterpolationDefault(validated.default, `Env ${key}: default`)
+
+    if (this.plan.runtime.envVars.some((e) => e.key === key)) {
+      throw new ValidationError({ message: `Duplicate env variable: ${key}` })
+    }
+
+    const scope = validated.scope || "runtime"
+    const envVar: EnvVar = hasValue
+      ? { key, scope, value: validated.value }
+      : {
+          key,
+          scope,
+          from: { env: validated.from!.env },
+          required: validated.required,
+          default: validated.default,
+        }
+    this.plan.runtime.envVars.push(envVar)
+
+    // Literal values are mirrored into the flat environment maps so they flow
+    // into the Dockerfile ENV layer / compose exactly as before. Passthrough
+    // references are deliberately NOT written here — they never touch the image
+    // or plan.json and are resolved from the host at `up` time.
+    if (hasValue) {
+      if (scope === "build" || scope === "both") {
+        this.plan.build.environment[key] = validated.value!
+      }
+      if (scope === "runtime" || scope === "both") {
+        this.plan.runtime.environment[key] = validated.value!
+      }
+    }
   }
 
   fileExists(path: string): boolean {
@@ -379,6 +477,10 @@ export class SandboxContext implements FeatureContext, BuildContext {
 
   private mergeProcessEnv(proc: Process): void {
     for (const [key, value] of Object.entries(proc.environment)) {
+      // Variables declared via addEnv take precedence over process-level env.
+      // This prevents a process's local environment from silently overwriting
+      // a value the user explicitly declared with addEnv.
+      if (this.plan.runtime.envVars.some((e) => e.key === key)) continue
       this.plan.runtime.environment[key] = value
     }
   }

@@ -110,6 +110,53 @@ describe("Docker generators", () => {
     expect(healthchecks["all.sh"]).toContain("sh /workspace/.biodome/healthchecks/django.sh");
   });
 
+  it("bakes literal env vars into the Dockerfile and compose", () => {
+    const plan = createPlan("my-app");
+    plan.build.environment.DEBUG = "1";
+    plan.runtime.environment.DEBUG = "1";
+    plan.runtime.envVars.push({ key: "DEBUG", scope: "both", value: "1" });
+
+    const dockerfile = generateDockerfile(plan);
+    expect(dockerfile).toContain("DEBUG=1");
+
+    const compose = generateCompose(plan);
+    expect(compose).toContain("DEBUG: \"1\"");
+  });
+
+  it("emits passthrough env vars as compose interpolations, not literals", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.envVars.push(
+      { key: "DATABASE_URL", scope: "runtime", from: { env: "DATABASE_URL" }, required: true },
+      { key: "PORT", scope: "runtime", from: { env: "PORT" }, default: "8000" },
+      { key: "API_KEY", scope: "runtime", from: { env: "API_KEY" } }
+    );
+
+    const compose = generateCompose(plan);
+    // Required -> fails compose if unset.
+    expect(compose).toContain("${DATABASE_URL:?DATABASE_URL is required by DATABASE_URL}");
+    // Default -> falls back.
+    expect(compose).toContain("${PORT:-8000}");
+    // Plain passthrough.
+    expect(compose).toContain("${API_KEY}");
+
+    // Secrets are never baked into the image.
+    const dockerfile = generateDockerfile(plan);
+    expect(dockerfile).not.toContain("DATABASE_URL");
+    expect(dockerfile).not.toContain("API_KEY");
+  });
+
+  it("keeps build-scoped passthrough vars out of the runtime compose env", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.envVars.push({
+      key: "BUILD_TOKEN",
+      scope: "build",
+      from: { env: "BUILD_TOKEN" },
+    });
+
+    const compose = generateCompose(plan);
+    expect(compose).not.toContain("BUILD_TOKEN");
+  });
+
   it("generates health check scripts with timeout in seconds", () => {
     const plan = createPlan("my-app");
     plan.runtime.processes.push({

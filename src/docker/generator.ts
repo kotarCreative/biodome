@@ -315,8 +315,28 @@ function devService(plan: Plan): ComposeService {
     networks: ["biodome"],
   };
 
-  if (Object.keys(plan.runtime.environment).length > 0) {
-    service.environment = { ...plan.runtime.environment };
+  const environment: Record<string, string> = { ...plan.runtime.environment };
+
+  // Passthrough env vars are resolved from the host at `up` time via compose
+  // interpolation (${VAR}), so their values are never written into the image or
+  // plan.json. This is the safe path for secrets.
+  for (const envVar of plan.runtime.envVars) {
+    if (!envVar.from) continue;
+    if (envVar.scope === "build") continue;
+    const ref = envVar.from.env;
+    if (envVar.default !== undefined) {
+      // Fall back to the default when the host var is unset or empty.
+      environment[envVar.key] = `\${${ref}:-${envVar.default}}`;
+    } else if (envVar.required) {
+      // Fail `docker compose` loudly when a required var is missing.
+      environment[envVar.key] = `\${${ref}:?${ref} is required by ${envVar.key}}`;
+    } else {
+      environment[envVar.key] = `\${${ref}}`;
+    }
+  }
+
+  if (Object.keys(environment).length > 0) {
+    service.environment = environment;
   }
 
   const daemonProcesses = plan.runtime.processes.filter((p) => p.mode === "daemon");

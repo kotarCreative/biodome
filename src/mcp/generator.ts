@@ -23,7 +23,28 @@ export function generatePlanJson(plan: Plan): string {
       mode: proc.mode,
       startOn: proc.startOn,
     })),
+    // Endpoints are emitted verbatim. Credential values that are { env: "VAR" }
+    // references stay as references here, so secrets are never written to disk;
+    // the MCP server resolves them from the live container env on request.
+    endpoints: plan.runtime.endpoints.map((endpoint) => ({
+      name: endpoint.name,
+      description: endpoint.description ?? null,
+      url: endpoint.url ?? null,
+      port: endpoint.port ?? null,
+      credentials: endpoint.credentials ?? null,
+      metadata: endpoint.metadata ?? null,
+    })),
+    // `environment` holds only literal values. Passthrough vars are described
+    // structurally below as references, so their secret values never touch disk.
     environment: plan.runtime.environment,
+    envVars: plan.runtime.envVars.map((envVar) => ({
+      key: envVar.key,
+      scope: envVar.scope,
+      source: envVar.from ? "passthrough" : "literal",
+      from: envVar.from ? envVar.from.env : null,
+      required: envVar.required ?? false,
+      hasDefault: envVar.default !== undefined,
+    })),
   }
   return JSON.stringify(data, null, 2)
 }
@@ -93,6 +114,45 @@ function tailFile(filePath, lines) {
   }
 }
 
+// Credential values are either plain strings or { env: "VAR" } references.
+// References are resolved from the container's live environment so secrets are
+// never persisted in plan.json. A missing env var resolves to null.
+function resolveSecret(value) {
+  if (value && typeof value === "object" && typeof value.env === "string") {
+    const resolved = process.env[value.env];
+    return resolved === undefined ? null : resolved;
+  }
+  return value;
+}
+
+function resolveEndpoint(endpoint) {
+  const credentials = endpoint.credentials
+    ? Object.fromEntries(
+        Object.entries(endpoint.credentials).map(([key, value]) => [key, resolveSecret(value)])
+      )
+    : null;
+  return {
+    name: endpoint.name,
+    description: endpoint.description ?? null,
+    url: endpoint.url ?? null,
+    port: endpoint.port ?? null,
+    credentials,
+    metadata: endpoint.metadata ?? null,
+  };
+}
+
+// Used for audit logging. Returned credential values are resolved secrets and
+// should not be written to stdout; replace them with a sentinel.
+function redactEndpointForLog(endpoint) {
+  const credentials = endpoint.credentials
+    ? Object.fromEntries(Object.keys(endpoint.credentials).map((key) => [key, "REDACTED"]))
+    : null;
+  return {
+    ...endpoint,
+    credentials,
+  };
+}
+
 function checkTcpPort(host, port, timeoutMs) {
   return new Promise((resolve) => {
     const socket = new net.Socket();
@@ -118,6 +178,12 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: "get_sandbox_info",
       description:
         "Get a description of the current sandbox setup: project, languages, services, processes, ports, and connection strings.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "get_endpoints",
+      description:
+        "List the feature-declared endpoints (custom APIs and services) with their URLs, ports, credentials, and metadata. Credential values that reference an environment variable are resolved from the live container environment.",
       inputSchema: { type: "object", properties: {} },
     },
     {
@@ -212,6 +278,24 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [{ type: "text", text: JSON.stringify(plan, null, 2) }],
         };
         logCall(name, args, result);
+        return result;
+      }
+
+      case "get_endpoints": {
+        const endpoints = (plan.endpoints || []).map(resolveEndpoint);
+        const result = {
+          content: [{ type: "text", text: JSON.stringify(endpoints, null, 2) }],
+        };
+        // Log a redacted copy so resolved credential values don't end up in stdout.
+        const redacted = {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(endpoints.map(redactEndpointForLog), null, 2),
+            },
+          ],
+        };
+        logCall(name, args, redacted);
         return result;
       }
 

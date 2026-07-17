@@ -218,12 +218,12 @@ export default function branchEnv(ctx) {
   const result = ctx.exec("git branch --show-current");
   const branch = result.stdout.trim();
 
-  ctx.setEnv("BRANCH", branch);
+  ctx.addEnv("BRANCH", { value: branch });
 
   if (branch === "main") {
-    ctx.setEnv("DEBUG", "0");
+    ctx.addEnv("DEBUG", { value: "0" });
   } else {
-    ctx.setEnv("DEBUG", "1");
+    ctx.addEnv("DEBUG", { value: "1" });
   }
 }
 ```

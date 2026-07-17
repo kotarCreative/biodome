@@ -1,8 +1,29 @@
-import { Plan, Service, Port } from "./plan.js";
+import { Plan, Service, Port, SecretValue, EnvVar } from "./plan.js";
 
 function formatPort(p: Port): string {
   const label = p.name ? `${p.name}: ` : "";
   return `${label}${p.host}:${p.container}`;
+}
+
+// Env-referenced credentials are shown as `$VAR` (never resolved on the host at
+// build time); literal values are shown as-is.
+function formatSecret(value: SecretValue): string {
+  if (typeof value === "object" && value !== null && "env" in value) {
+    return `$${value.env} (from environment)`;
+  }
+  return value;
+}
+
+// Describes a declared env var without exposing passthrough values.
+function formatEnvVar(envVar: EnvVar): string {
+  const scope = envVar.scope === "runtime" ? "" : ` [${envVar.scope}]`;
+  if (envVar.from) {
+    const parts = [`from $${envVar.from.env}`];
+    if (envVar.required) parts.push("required");
+    if (envVar.default !== undefined) parts.push(`default "${envVar.default}"`);
+    return `${envVar.key} = ${parts.join(", ")}${scope}`;
+  }
+  return `${envVar.key} = ${envVar.value}${scope}`;
 }
 
 export interface ServiceConnection {
@@ -74,6 +95,37 @@ export function formatInfo(plan: Plan): string {
         lines.push(`      internal: ${conn.internal}`);
         lines.push(`      external: ${conn.external}`);
       }
+    }
+  }
+
+  if (plan.runtime.endpoints.length > 0) {
+    lines.push("");
+    lines.push("Endpoints:");
+    for (const endpoint of plan.runtime.endpoints) {
+      const target = endpoint.url || (endpoint.port ? `port ${endpoint.port}` : "");
+      const suffix = target ? ` (${target})` : "";
+      lines.push(`  - ${endpoint.name}${suffix}`);
+      if (endpoint.description) {
+        lines.push(`      ${endpoint.description}`);
+      }
+      if (endpoint.credentials) {
+        for (const [key, value] of Object.entries(endpoint.credentials)) {
+          lines.push(`      ${key}: ${formatSecret(value)}`);
+        }
+      }
+      if (endpoint.metadata) {
+        for (const [key, value] of Object.entries(endpoint.metadata)) {
+          lines.push(`      ${key}: ${value}`);
+        }
+      }
+    }
+  }
+
+  if (plan.runtime.envVars.length > 0) {
+    lines.push("");
+    lines.push("Environment:");
+    for (const envVar of plan.runtime.envVars) {
+      lines.push(`  - ${formatEnvVar(envVar)}`);
     }
   }
 
@@ -152,6 +204,42 @@ export function formatAgentsMd(plan: Plan): string {
       }
       lines.push("");
     }
+  }
+
+  if (plan.runtime.endpoints.length > 0) {
+    lines.push("## Endpoints");
+    lines.push("");
+    for (const endpoint of plan.runtime.endpoints) {
+      lines.push(`### ${endpoint.name}`);
+      lines.push("");
+      if (endpoint.description) {
+        lines.push(endpoint.description);
+        lines.push("");
+      }
+      if (endpoint.url) lines.push(`- URL: \`${endpoint.url}\``);
+      if (endpoint.port !== undefined) lines.push(`- Port: \`${endpoint.port}\``);
+      if (endpoint.credentials) {
+        lines.push("- Credentials:");
+        for (const [key, value] of Object.entries(endpoint.credentials)) {
+          lines.push(`  - ${key}: \`${formatSecret(value)}\``);
+        }
+      }
+      if (endpoint.metadata) {
+        for (const [key, value] of Object.entries(endpoint.metadata)) {
+          lines.push(`- ${key}: \`${value}\``);
+        }
+      }
+      lines.push("");
+    }
+  }
+
+  if (plan.runtime.envVars.length > 0) {
+    lines.push("## Environment");
+    lines.push("");
+    for (const envVar of plan.runtime.envVars) {
+      lines.push(`- \`${formatEnvVar(envVar)}\``);
+    }
+    lines.push("");
   }
 
   if (plan.runtime.processes.length > 0) {

@@ -57,6 +57,37 @@ describe("generatePlanJson", () => {
     expect(json.processes[0].ports).toEqual([{ host: 3000, container: 3001 }]);
   });
 
+  it("includes endpoints and preserves env references without resolving them", () => {
+    const plan = createPlan("app");
+    plan.runtime.endpoints.push({
+      name: "django-api",
+      description: "Django REST API",
+      url: "http://localhost:8000",
+      port: 8000,
+      credentials: {
+        username: "admin",
+        password: { env: "DJANGO_ADMIN_PASSWORD" },
+      },
+      metadata: { framework: "django" },
+    });
+
+    const json = JSON.parse(generatePlanJson(plan));
+    expect(json.endpoints).toHaveLength(1);
+    expect(json.endpoints[0].name).toBe("django-api");
+    expect(json.endpoints[0].url).toBe("http://localhost:8000");
+    expect(json.endpoints[0].port).toBe(8000);
+    // Env references stay as references — the secret is never written to disk.
+    expect(json.endpoints[0].credentials.username).toBe("admin");
+    expect(json.endpoints[0].credentials.password).toEqual({ env: "DJANGO_ADMIN_PASSWORD" });
+    expect(json.endpoints[0].metadata).toEqual({ framework: "django" });
+  });
+
+  it("emits an empty endpoints array for a plan with none", () => {
+    const plan = createPlan("app");
+    const json = JSON.parse(generatePlanJson(plan));
+    expect(json.endpoints).toEqual([]);
+  });
+
   it("includes languages", () => {
     const plan = createPlan("app");
     plan.build.languageRequests.push({
@@ -79,6 +110,7 @@ describe("generateMcpServerContent", () => {
     expect(src).toContain("@modelcontextprotocol/sdk");
     expect(src).toContain("StreamableHTTPServerTransport");
     expect(src).toContain("get_sandbox_info");
+    expect(src).toContain("get_endpoints");
     expect(src).toContain("get_process_status");
     expect(src).toContain("get_service_health");
     expect(src).toContain("get_logs");
@@ -112,5 +144,20 @@ describe("generateMcpServerContent", () => {
   it("binds to 0.0.0.0 so the published port is reachable", () => {
     const src = generateMcpServerContent();
     expect(src).toContain('httpServer.listen(port, "0.0.0.0"');
+  });
+
+  it("resolves endpoint credential env references from the container env", () => {
+    const src = generateMcpServerContent();
+    expect(src).toContain("resolveSecret");
+    expect(src).toContain("resolveEndpoint");
+    expect(src).toContain("process.env[value.env]");
+  });
+
+  it("redacts endpoint credentials in the MCP audit log", () => {
+    const src = generateMcpServerContent();
+    expect(src).toContain("redactEndpointForLog");
+    expect(src).toContain("REDACTED");
+    // The log payload is redacted; the returned result still contains secrets.
+    expect(src).toContain("logCall(name, args, redacted)");
   });
 });

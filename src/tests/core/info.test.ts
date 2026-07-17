@@ -35,6 +35,31 @@ describe("formatInfo", () => {
     expect(info).toContain("postgresql://app:dev@localhost:5432/myapp");
   });
 
+  it("lists endpoints with credentials, showing env refs symbolically", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.endpoints.push({
+      name: "django-api",
+      description: "Django REST API",
+      url: "http://localhost:8000",
+      port: 8000,
+      credentials: {
+        username: "admin",
+        password: { env: "DJANGO_ADMIN_PASSWORD" },
+      },
+      metadata: { framework: "django" },
+    });
+
+    const info = formatInfo(plan);
+    expect(info).toContain("Endpoints:");
+    expect(info).toContain("django-api");
+    expect(info).toContain("http://localhost:8000");
+    expect(info).toContain("username: admin");
+    // Env-referenced secrets are shown as a reference, never resolved on the host.
+    expect(info).toContain("$DJANGO_ADMIN_PASSWORD");
+    expect(info).not.toContain("password: DJANGO_ADMIN_PASSWORD ");
+    expect(info).toContain("framework: django");
+  });
+
   it("lists hooks", () => {
     const plan = createPlan("my-app");
     plan.runtime.processes.push({
@@ -77,5 +102,28 @@ describe("formatAgentsMd", () => {
     expect(md).toContain("### postgres");
     expect(md).toContain("postgresql://app:dev@postgres:5432/myapp");
     expect(md).toContain("biodome up");
+  });
+
+  it("documents endpoints with URLs, ports, and credentials", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.endpoints.push({
+      name: "django-api",
+      description: "Django REST API",
+      url: "http://localhost:8000",
+      port: 8000,
+      credentials: {
+        username: "admin",
+        token: { env: "DJANGO_API_TOKEN" },
+      },
+    });
+
+    const md = formatAgentsMd(plan);
+    expect(md).toContain("## Endpoints");
+    expect(md).toContain("### django-api");
+    expect(md).toContain("Django REST API");
+    expect(md).toContain("- URL: `http://localhost:8000`");
+    expect(md).toContain("- Port: `8000`");
+    expect(md).toContain("username: `admin`");
+    expect(md).toContain("$DJANGO_API_TOKEN");
   });
 });
