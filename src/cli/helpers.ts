@@ -13,6 +13,7 @@ import {
   sandboxErrorMessage,
   isSandboxError,
 } from "../core/errors.js"
+import { EventStore } from "../core/events.js"
 
 const HOST_HOOK_POINTS = new Set([
   "build.pre",
@@ -56,14 +57,24 @@ export const runHooks = Effect.fnUntraced(
     runner: SandboxRuntime,
     rootDir: string
   ) {
+    const store = yield* EventStore
     const hooks = plan.runtime.processes.filter(
       (p) => p.mode === "oneshot" && p.startOn === point
     )
     if (hooks.length === 0) return
 
     for (const hook of hooks) {
+      const location = HOST_HOOK_POINTS.has(point) ? "host" : "sandbox"
+      const start = Date.now()
+      yield* store.emit("hook.started", {
+        name: hook.name,
+        point,
+        command: hook.command,
+        location,
+      })
       console.log(`[hook] ${hook.name} (${point})`)
-      if (HOST_HOOK_POINTS.has(point)) {
+
+      if (location === "host") {
         const [cmd, ...args] = hook.command
         const handle = yield* ChildProcess.make(cmd, args, {
           cwd: rootDir,
@@ -73,13 +84,37 @@ export const runHooks = Effect.fnUntraced(
         })
         const exitCode = (yield* handle.exitCode) as number
         if (exitCode !== 0) {
-          return yield* new PlanError({
-            message: `Host hook ${hook.name} failed with exit code ${exitCode}`,
+          const message = `Host hook ${hook.name} failed with exit code ${exitCode}`
+          yield* store.emit("hook.failed", {
+            name: hook.name,
+            point,
+            durationMs: Date.now() - start,
+            error: message,
           })
+          return yield* new PlanError({ message })
         }
       } else {
-        yield* runner.exec(hook.command)
+        yield* runner.exec(hook.command).pipe(
+          Effect.catch((error) =>
+            Effect.gen(function* () {
+              const message = error instanceof Error ? error.message : String(error)
+              yield* store.emit("hook.failed", {
+                name: hook.name,
+                point,
+                durationMs: Date.now() - start,
+                error: message,
+              })
+              return yield* Effect.fail(error)
+            })
+          )
+        )
       }
+
+      yield* store.emit("hook.completed", {
+        name: hook.name,
+        point,
+        durationMs: Date.now() - start,
+      })
     }
   },
   (effect) =>

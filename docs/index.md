@@ -26,6 +26,19 @@ npx @kotarcreative/biodome up
 - **Features:** JavaScript modules in `biodome/features/` that export a default function receiving the biodome context.
 - **Services:** Backing containers like Postgres or Redis, declared in `biodome/services.mjs`.
 
+## Event capture
+
+Every lifecycle command (`build`, `up`, `down`, `exec`, `restart`, `status`, `ps`, `logs`, `config validate`) captures a structured, append-only event log by default. Pass `--no-events` to disable. Events are written to `.biodome/logs/events-<runId>.jsonl` and include every plan load, generated file, hook, and runtime operation with timing.
+
+```bash
+biodome build
+biodome --no-events build
+biodome events
+biodome events --run <runId>
+```
+
+This event stream lets you audit exactly what happened during a run and is designed to eventually support replaying a run step by step.
+
 ## Documentation
 
 - [File layout](file-layout.md)

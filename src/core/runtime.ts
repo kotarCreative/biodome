@@ -6,6 +6,7 @@
 import { Effect } from "effect"
 import { RuntimeError } from "./errors.js"
 import type { Capabilities } from "./capabilities.js"
+import type { EventStore } from "./events.js"
 
 export interface SandboxRuntime {
   readonly project: string
@@ -14,26 +15,26 @@ export interface SandboxRuntime {
   readonly capabilities: Capabilities
 
   /** Verify that the runtime backend is reachable (Docker daemon, remote API, etc.). */
-  ensureAvailable(): Effect.Effect<void, RuntimeError, never>
+  ensureAvailable(): Effect.Effect<void, RuntimeError, EventStore>
 
   /** Prepare/build the environment (images, packages, generated assets). */
-  build(rootDir: string): Effect.Effect<void, RuntimeError, never>
+  build(rootDir: string): Effect.Effect<void, RuntimeError, EventStore>
 
   /** Start the environment. When `build` is true, rebuild first. */
-  start(rootDir: string, build?: boolean): Effect.Effect<void, RuntimeError, never>
+  start(rootDir: string, build?: boolean): Effect.Effect<void, RuntimeError, EventStore>
 
   /** Stop the environment. */
-  stop(rootDir?: string): Effect.Effect<void, RuntimeError, never>
+  stop(rootDir?: string): Effect.Effect<void, RuntimeError, EventStore>
 
   /** Execute a command inside the development environment. */
-  exec(command: string[]): Effect.Effect<void, RuntimeError, never>
+  exec(command: string[]): Effect.Effect<void, RuntimeError, EventStore>
 
   /** Show runtime status (running containers, processes, etc.). */
-  status(): Effect.Effect<void, RuntimeError, never>
+  status(): Effect.Effect<void, RuntimeError, EventStore>
 
   /** Stream logs from the dev environment or a named process. */
-  logs(processName?: string): Effect.Effect<void, RuntimeError, never>
+  logs(processName?: string): Effect.Effect<void, RuntimeError, EventStore>
 
   /** Restart a managed process. */
-  restart(processName: string): Effect.Effect<void, RuntimeError, never>
+  restart(processName: string): Effect.Effect<void, RuntimeError, EventStore>
 }

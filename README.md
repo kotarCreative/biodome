@@ -27,6 +27,9 @@ npx @kotarcreative/biodome info
 - `biodome ps` — show running containers for the project.
 - `biodome status` — report container health and running managed processes.
 - `biodome restart [process]` — restart a managed process or all daemons.
+- `biodome events [--run <runId>]` — show captured structured events from previous runs.
+
+Every lifecycle command captures a structured event stream to `.biodome/logs/events-<runId>.jsonl` by default. Pass `--no-events` to disable. This makes every plan load, hook, and runtime operation observable and reproducible.
 
 ## Documentation
 

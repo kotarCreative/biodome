@@ -15,6 +15,7 @@ import {
 import { createPlan } from "../../core/plan.js";
 import type { SandboxRuntime } from "../../core/runtime.js";
 import { PlanError } from "../../core/errors.js";
+import { NoOpEventStoreLive, FileEventStoreLive, readEventsFromPath } from "../../core/events.js";
 
 function tmpDir(prefix: string): string {
   return join("/tmp", `${prefix}-${Date.now()}`);
@@ -53,7 +54,7 @@ describe("runHooks", () => {
     const exec = vi.fn().mockReturnValue(Effect.void);
     const runner = { exec } as unknown as SandboxRuntime;
     const program = runHooks(plan, "start.post", runner, "/tmp").pipe(
-      Effect.provide(NodeRuntime)
+      Effect.provide(Layer.merge(NodeRuntime, NoOpEventStoreLive("test")))
     );
     await Effect.runPromise(program);
     expect(exec).toHaveBeenCalledWith(["python", "manage.py", "migrate"]);
@@ -73,10 +74,43 @@ describe("runHooks", () => {
     const exec = vi.fn().mockReturnValue(Effect.void);
     const runner = { exec } as unknown as SandboxRuntime;
     const program = runHooks(plan, "build.pre", runner, "/tmp").pipe(
-      Effect.provide(NodeRuntime)
+      Effect.provide(Layer.merge(NodeRuntime, NoOpEventStoreLive("test")))
     );
     await Effect.runPromise(program);
     expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("emits exactly one hook.completed event per sandbox hook", async () => {
+    const dir = tmpDir("hook-events");
+    mkdirSync(dir, { recursive: true });
+    const logPath = join(dir, "events.jsonl");
+
+    const plan = createPlan("test");
+    plan.runtime.processes.push({
+      name: "migrate",
+      command: ["python", "manage.py", "migrate"],
+      ports: [],
+      environment: {},
+      mode: "oneshot",
+      startOn: "start.post",
+    });
+
+    const exec = vi.fn().mockReturnValue(Effect.void);
+    const runner = { exec } as unknown as SandboxRuntime;
+    const program = runHooks(plan, "start.post", runner, "/tmp").pipe(
+      Effect.provide(
+        Layer.merge(NodeRuntime, FileEventStoreLive({ runId: "test", path: logPath }))
+      )
+    );
+
+    try {
+      await Effect.runPromise(program);
+      const events = await Effect.runPromise(readEventsFromPath(logPath));
+      const completed = events.filter((e) => e.type === "hook.completed");
+      expect(completed).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("ignores hooks at unrelated lifecycle points", async () => {
@@ -93,7 +127,7 @@ describe("runHooks", () => {
     const exec = vi.fn().mockReturnValue(Effect.void);
     const runner = { exec } as unknown as SandboxRuntime;
     const program = runHooks(plan, "stop.pre", runner, "/tmp").pipe(
-      Effect.provide(NodeRuntime)
+      Effect.provide(Layer.merge(NodeRuntime, NoOpEventStoreLive("test")))
     );
     await Effect.runPromise(program);
     expect(exec).not.toHaveBeenCalled();

@@ -1,7 +1,8 @@
 import { Command } from "commander"
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { Effect } from "effect"
+import { randomUUID } from "node:crypto"
+import { Effect, Layer } from "effect"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import {
   buildPlanEffect,
@@ -20,7 +21,7 @@ import { DockerRuntime } from "../docker/runner.js"
 import { formatInfo, formatAgentsMd } from "../core/info.js"
 import { Plan } from "../core/plan.js"
 import type { SandboxRuntime } from "../core/runtime.js"
-import { PlanError } from "../core/errors.js"
+import { PlanError, SandboxError } from "../core/errors.js"
 import { NodeRuntime } from "../core/runtime-node.js"
 import {
   detectStarterLanguages,
@@ -28,6 +29,7 @@ import {
   runHooks,
   runSafe,
 } from "./helpers.js"
+import { EventStore, FileEventStoreLive, NoOpEventStoreLive, SandboxEvent, eventLogPath, formatEvent } from "../core/events.js"
 
 const BIODOME_DIR = ".biodome"
 
@@ -35,7 +37,7 @@ function ensureBiodomeDir(rootDir: string): void {
   mkdirSync(join(rootDir, BIODOME_DIR), { recursive: true })
 }
 
-function writeGeneratedFiles(rootDir: string, plan: Plan): void {
+function writeGeneratedFiles(rootDir: string, plan: Plan): string[] {
   ensureBiodomeDir(rootDir)
   writeFileSync(join(rootDir, BIODOME_DIR, "Dockerfile"), generateDockerfile(plan))
 
@@ -58,20 +60,105 @@ function writeGeneratedFiles(rootDir: string, plan: Plan): void {
   if (!existsSync(dockerignorePath)) {
     writeFileSync(dockerignorePath, generateDockerignore())
   }
+
+  return [
+    join(rootDir, BIODOME_DIR, "Dockerfile"),
+    join(rootDir, BIODOME_DIR, "docker-compose.yaml"),
+    join(rootDir, BIODOME_DIR, "supervisord.conf"),
+    ...Object.keys(healthchecks).map((name) => join(healthcheckDir, name)),
+  ].filter((p) => existsSync(p))
 }
 
 function createRuntime(project: string): SandboxRuntime {
   return new DockerRuntime(project)
 }
 
-function withNodeRuntime<E>(
-  program: Effect.Effect<void, E, ChildProcessSpawner.ChildProcessSpawner>
+function buildEventStoreLayer(
+  rootDir: string,
+  enabled: boolean,
+  runId: string
+): Layer.Layer<EventStore> {
+  if (!enabled) {
+    return NoOpEventStoreLive(runId)
+  }
+  return FileEventStoreLive({
+    runId,
+    path: eventLogPath(rootDir, runId),
+  })
+}
+
+function buildLayers(
+  rootDir: string,
+  enabled: boolean,
+  runId: string
+): Layer.Layer<ChildProcessSpawner.ChildProcessSpawner | EventStore, never, never> {
+  return Layer.merge(NodeRuntime, buildEventStoreLayer(rootDir, enabled, runId))
+}
+
+function withLayers<E>(
+  program: Effect.Effect<void, E, ChildProcessSpawner.ChildProcessSpawner | EventStore>,
+  rootDir: string,
+  enabled: boolean,
+  runId: string
 ): Effect.Effect<void, E, never> {
-  return program.pipe(Effect.provide(NodeRuntime)) as Effect.Effect<void, E, never>
+  return program.pipe(Effect.provide(buildLayers(rootDir, enabled, runId))) as Effect.Effect<void, E, never>
+}
+
+function wrapRunEvents(
+  command: string,
+  effect: Effect.Effect<void, SandboxError, EventStore | ChildProcessSpawner.ChildProcessSpawner>
+): Effect.Effect<void, SandboxError, EventStore | ChildProcessSpawner.ChildProcessSpawner> {
+  return Effect.gen(function* () {
+    const store = yield* EventStore
+    const start = Date.now()
+    yield* store.emit("run.started", { command, cwd: process.cwd() })
+    const result = yield* effect.pipe(
+      Effect.tap(() =>
+        store.emit("run.completed", { command, durationMs: Date.now() - start })
+      ),
+      Effect.catch((error) =>
+        Effect.gen(function* () {
+          const message = error instanceof Error ? error.message : String(error)
+          yield* store.emit("run.failed", { command, durationMs: Date.now() - start, error: message })
+          yield* store.close()
+          return yield* Effect.fail(error)
+        })
+      )
+    )
+    yield* store.close()
+    return result
+  })
+}
+
+function emitPlanLoaded(plan: Plan): Effect.Effect<void, never, EventStore> {
+  return Effect.gen(function* () {
+    const store = yield* EventStore
+    yield* store.emit("plan.loaded", {
+      project: plan.project,
+      languages: plan.build.languageRequests.map((l) => l.name),
+      services: plan.runtime.services.map((s) => s.name),
+      processes: plan.runtime.processes.map((p) => p.name),
+    })
+  })
+}
+
+function emitFilesGenerated(rootDir: string, files: string[]): Effect.Effect<void, never, EventStore> {
+  return Effect.gen(function* () {
+    const store = yield* EventStore
+    yield* store.emit("files.generated", { rootDir, files })
+  })
+}
+
+function emitConfigValidated(project: string, valid: boolean): Effect.Effect<void, never, EventStore> {
+  return Effect.gen(function* () {
+    const store = yield* EventStore
+    yield* store.emit("config.validated", { project, valid })
+  })
 }
 
 const program = new Command()
 program.name("biodome").description("Self-contained development environment manager").version("0.1.0")
+program.option("--no-events", "disable structured event capture")
 
 program
   .command("init")
@@ -126,10 +213,13 @@ program
   .command("build")
   .description("Prepare the development environment")
   .action(() => {
+    const runId = randomUUID()
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
       const plan = yield* buildPlanEffect(rootDir)
-      writeGeneratedFiles(rootDir, plan)
+      yield* emitPlanLoaded(plan)
+      const files = writeGeneratedFiles(rootDir, plan)
+      yield* emitFilesGenerated(rootDir, files)
       const runtime = createRuntime(plan.project)
       yield* runtime.ensureAvailable()
       yield* runHooks(plan, "build.pre", runtime, rootDir)
@@ -138,7 +228,8 @@ program
       console.log(`Environment ready for ${plan.project}`)
     }).pipe(Effect.scoped)
 
-    runSafe(withNodeRuntime(cliProgram))
+    const wrapped = wrapRunEvents("build", cliProgram)
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId))
   })
 
 program
@@ -147,10 +238,13 @@ program
   .option("--build", "Rebuild the environment before starting")
   .option("--wait", "Block until Ctrl+C is pressed")
   .action((options) => {
+    const runId = randomUUID()
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
       const plan = yield* buildPlanEffect(rootDir)
-      writeGeneratedFiles(rootDir, plan)
+      yield* emitPlanLoaded(plan)
+      const files = writeGeneratedFiles(rootDir, plan)
+      yield* emitFilesGenerated(rootDir, files)
 
       const runtime = createRuntime(plan.project)
       yield* runtime.ensureAvailable()
@@ -172,16 +266,19 @@ program
       }
     }).pipe(Effect.scoped)
 
-    runSafe(withNodeRuntime(cliProgram))
+    const wrapped = wrapRunEvents("up", cliProgram)
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId))
   })
 
 program
   .command("down")
   .description("Stop the development environment")
   .action(() => {
+    const runId = randomUUID()
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
       const plan = yield* buildPlanEffect(rootDir)
+      yield* emitPlanLoaded(plan)
       const runtime = createRuntime(plan.project)
       yield* runtime.ensureAvailable()
       yield* runHooks(plan, "stop.pre", runtime, rootDir)
@@ -190,7 +287,8 @@ program
       console.log("Stopped")
     }).pipe(Effect.scoped)
 
-    runSafe(withNodeRuntime(cliProgram))
+    const wrapped = wrapRunEvents("down", cliProgram)
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId))
   })
 
 program
@@ -198,9 +296,11 @@ program
   .description("Run a command in the dev container")
   .allowUnknownOption()
   .action((cmd: string[]) => {
+    const runId = randomUUID()
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
       const plan = yield* buildPlanEffect(rootDir)
+      yield* emitPlanLoaded(plan)
       const runtime = createRuntime(plan.project)
       yield* runtime.ensureAvailable()
       yield* runHooks(plan, "exec.pre", runtime, rootDir)
@@ -208,7 +308,8 @@ program
       yield* runHooks(plan, "exec.post", runtime, rootDir)
     }).pipe(Effect.scoped)
 
-    runSafe(withNodeRuntime(cliProgram))
+    const wrapped = wrapRunEvents("exec", cliProgram)
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId))
   })
 
 program
@@ -228,6 +329,7 @@ program
   .command("logs [process]")
   .description("Tail logs from a managed process")
   .action((processName?: string) => {
+    const runId = randomUUID()
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
       const config = yield* validateConfigEffect(rootDir)
@@ -236,13 +338,15 @@ program
       yield* runtime.logs(processName)
     }).pipe(Effect.scoped)
 
-    runSafe(withNodeRuntime(cliProgram))
+    const wrapped = wrapRunEvents("logs", cliProgram)
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId))
   })
 
 program
   .command("ps")
   .description("Show running containers for the project")
   .action(() => {
+    const runId = randomUUID()
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
       const config = yield* validateConfigEffect(rootDir)
@@ -251,13 +355,15 @@ program
       yield* runtime.status()
     }).pipe(Effect.scoped)
 
-    runSafe(withNodeRuntime(cliProgram))
+    const wrapped = wrapRunEvents("ps", cliProgram)
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId))
   })
 
 program
   .command("status")
   .description("Report container health and running processes")
   .action(() => {
+    const runId = randomUUID()
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
       const config = yield* validateConfigEffect(rootDir)
@@ -274,16 +380,19 @@ program
       ])
     }).pipe(Effect.scoped)
 
-    runSafe(withNodeRuntime(cliProgram))
+    const wrapped = wrapRunEvents("status", cliProgram)
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId))
   })
 
 program
   .command("restart [process]")
   .description("Restart a managed process or all daemon processes")
   .action((processName?: string) => {
+    const runId = randomUUID()
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
       const plan = yield* buildPlanEffect(rootDir)
+      yield* emitPlanLoaded(plan)
       const runtime = createRuntime(plan.project)
       yield* runtime.ensureAvailable()
       if (processName) {
@@ -295,24 +404,66 @@ program
       }
     }).pipe(Effect.scoped)
 
-    runSafe(withNodeRuntime(cliProgram))
+    const wrapped = wrapRunEvents("restart", cliProgram)
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId))
+  })
+
+program
+  .command("events")
+  .description("Show captured structured events for the current project")
+  .option("--run <runId>", "Filter to a specific run")
+  .action((options) => {
+    const cliProgram = Effect.gen(function* () {
+      const rootDir = process.cwd()
+      const logsDir = join(rootDir, BIODOME_DIR, "logs")
+      if (!existsSync(logsDir)) {
+        console.log("No events captured yet")
+        return
+      }
+
+      const files = readdirSync(logsDir).filter((f) => f.startsWith("events-") && f.endsWith(".jsonl"))
+      if (files.length === 0) {
+        console.log("No event logs found")
+        return
+      }
+
+      const events = files
+        .flatMap((file: string) => {
+          const text = readFileSync(join(logsDir, file), "utf-8")
+          return text
+            .split("\n")
+            .filter((line: string) => line.trim().length > 0)
+            .map((line: string) => JSON.parse(line) as SandboxEvent)
+        })
+        .filter((event: SandboxEvent) => !options.run || event.runId === options.run)
+        .sort((a: SandboxEvent, b: SandboxEvent) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+
+      for (const event of events) {
+        console.log(formatEvent(event))
+      }
+    })
+
+    runSafe(cliProgram)
   })
 
 const configCmd = program.command("config").description("Manage sandbox configuration")
 
 configCmd
   .command("validate")
-  .description("Validate sandbox/ configuration and feature modules without building")
+  .description("Validate biodome/ configuration and feature modules without building")
   .action(() => {
+    const runId = randomUUID()
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
       yield* validateFeaturesEffect(rootDir)
       const plan = yield* buildPlanEffect(rootDir, { dryRun: true })
       yield* validatePlan(plan)
+      yield* emitConfigValidated(plan.project, true)
       console.log("Configuration is valid")
     })
 
-    runSafe(cliProgram)
+    const wrapped = wrapRunEvents("config validate", cliProgram)
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId))
   })
 
 const generateCmd = program.command("generate").description("Generate project files")
