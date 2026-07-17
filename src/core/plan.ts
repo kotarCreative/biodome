@@ -21,6 +21,7 @@ export interface BuildPlan {
   environment: Record<string, string>
   nodeModulesVolume: boolean
   venvVolume: boolean
+  vendorVolume: boolean
   mcpEnabled: boolean
   mcpPort: number
 }
@@ -202,6 +203,7 @@ export function createPlan(project: string): Plan {
       environment: {},
       nodeModulesVolume: false,
       venvVolume: false,
+      vendorVolume: false,
       mcpEnabled: false,
       mcpPort: 3001,
     },
@@ -412,6 +414,7 @@ export const PlanSchema = Schema.Struct({
     environment: Schema.Record(Schema.String, Schema.String),
     nodeModulesVolume: Schema.Boolean,
     venvVolume: Schema.Boolean,
+    vendorVolume: Schema.Boolean,
     mcpEnabled: Schema.Boolean,
     mcpPort: Schema.Number,
   }),

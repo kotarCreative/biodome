@@ -177,6 +177,13 @@ export function detectStarterLanguages(rootDir: string): StarterLanguage[] {
     languages.push({ name: "java", options: { version: "21" } })
   }
 
+  const hasPhp =
+    existsSync(join(rootDir, "composer.json")) ||
+    existsSync(join(rootDir, "composer.lock"))
+  if (hasPhp) {
+    languages.push({ name: "php", options: { version: "8.3" } })
+  }
+
   return languages
 }
 

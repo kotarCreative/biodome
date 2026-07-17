@@ -176,6 +176,57 @@ export default function app(ctx) {
 
 Because both `python` and `node` are declared, the generated image uses `debian:12-slim` as its base and installs both runtimes. Both processes run under `supervisord` in the same container.
 
+## Laravel + Postgres
+
+```javascript
+// biodome/services.mjs
+export default function services(ctx) {
+  ctx.addService("postgres", {
+    port: 5432,
+    databases: [{ name: "laravel" }],
+    users: [{ name: "laravel", password: "devpassword" }],
+  });
+}
+```
+
+```javascript
+// biodome/features/php.mjs
+export default function php(ctx) {
+  ctx.addLanguage("php", { version: "8.3" });
+}
+```
+
+```javascript
+// biodome/features/app.mjs
+export default function app(ctx) {
+  ctx.addProcess({
+    name: "laravel",
+    command: ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"],
+    port: 8000,
+    healthCheck: {
+      type: "http",
+      url: "http://localhost:8000",
+      interval: "5s",
+      timeout: "3s",
+      retries: 10,
+    },
+  });
+}
+```
+
+```javascript
+// biodome/features/migrate.mjs
+export default function migrate(ctx) {
+  ctx.addHook({
+    name: "migrate",
+    command: ["php", "artisan", "migrate", "--force"],
+    startOn: "start.post",
+  });
+}
+```
+
+Composer dependencies are installed from `composer.json`/`composer.lock`, and the generated `vendor` directory is persisted in a Docker volume so iterative rebuilds stay fast.
+
 ## Custom MCP server
 
 ```javascript

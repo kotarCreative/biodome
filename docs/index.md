@@ -17,7 +17,7 @@ npx @kotarcreative/biodome build
 npx @kotarcreative/biodome up
 ```
 
-`init` auto-detects languages from project files (`package.json`, `bun.lockb`, `requirements.txt`, `go.mod`, etc.) and generates a starter `biodome/features/auto-detect.mjs` feature. To skip this and create a minimal scaffold, pass `--bare`.
+`init` auto-detects languages from project files (`package.json`, `bun.lockb`, `requirements.txt`, `composer.json`, `go.mod`, etc.) and generates a starter `biodome/features/auto-detect.mjs` feature. To skip this and create a minimal scaffold, pass `--bare`.
 
 ## Concepts
 

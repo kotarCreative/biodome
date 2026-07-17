@@ -297,6 +297,56 @@ function javaDependencies(_ctx: BuildContext, _options: LanguageOptions): void {
   // Maven and Gradle dependency handling are not implemented yet.
 }
 
+// PHP
+// ---
+// In single-language mode we use the official PHP CLI image.
+// In multi-language mode we install PHP from the Sury repository on the
+// neutral Debian base. Composer is always installed so that `biodome exec
+// composer` works, and Laravel projects are supported through the standard
+// composer.json workflow.
+
+function phpBaseImage(options: LanguageOptions): string {
+  const version = options.version || "8.3"
+  return `php:${version}-cli`
+}
+
+function phpRuntimeInstall(ctx: BuildContext, options: LanguageOptions): void {
+  const version = options.version || "8.3"
+  const majorMinor = version.split(".").slice(0, 2).join(".")
+  ctx.addRuntimeInstall(
+    shell([
+      aptCacheMounts(),
+      aptInstall(["ca-certificates", "curl", "gnupg", "lsb-release"]),
+      "&& mkdir -p /etc/apt/keyrings",
+      '&& curl -fsSL https://packages.sury.org/php/apt.gpg | gpg --dearmor -o /etc/apt/keyrings/sury-php.gpg',
+      '&& echo "deb [signed-by=/etc/apt/keyrings/sury-php.gpg] https://packages.sury.org/php/ $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/sury-php.list',
+      "&& apt-get update",
+      `&& apt-get install -y --no-install-recommends php${majorMinor}-cli php${majorMinor}-common php${majorMinor}-curl php${majorMinor}-mbstring php${majorMinor}-xml php${majorMinor}-zip php${majorMinor}-mysql php${majorMinor}-pgsql php${majorMinor}-sqlite3 php${majorMinor}-intl php${majorMinor}-bcmath php${majorMinor}-gd`,
+    ])
+  )
+  ctx.addLanguageSnippet(
+    "RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer"
+  )
+}
+
+function phpDependencies(ctx: BuildContext, _options: LanguageOptions): void {
+  ctx.addLanguageSnippet(
+    "RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer"
+  )
+  const files = ctx.requireDependencyFiles(["composer.json", "composer.lock"])
+  if (files.length > 0) {
+    ctx.addDependencyInstall({
+      files,
+      command: "RUN --mount=type=cache,target=/root/.composer/cache composer install --no-interaction --no-progress --optimize-autoloader && rm -rf /root/.composer/cache/*",
+    })
+    ctx.addCopyArtifact({
+      files: ["composer.json"],
+      lines: ["COPY --from=deps /workspace/vendor /workspace/vendor"],
+    })
+    ctx.enableVendorVolume()
+  }
+}
+
 export const languageHandlers: Record<string, LanguageHandler> = {
   python: {
     baseImage: pythonBaseImage,
@@ -322,6 +372,11 @@ export const languageHandlers: Record<string, LanguageHandler> = {
     baseImage: javaBaseImage,
     installRuntime: javaRuntimeInstall,
     installDependencies: javaDependencies,
+  },
+  php: {
+    baseImage: phpBaseImage,
+    installRuntime: phpRuntimeInstall,
+    installDependencies: phpDependencies,
   },
 }
 

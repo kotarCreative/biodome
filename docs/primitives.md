@@ -63,6 +63,7 @@ Adds a language runtime and configures dependency installation.
 export default function stack(ctx) {
   ctx.addLanguage("python", { version: "3.12" });
   ctx.addLanguage("node", { version: "20", packageManager: "pnpm" });
+  ctx.addLanguage("php", { version: "8.3" });
 }
 ```
 
@@ -73,7 +74,7 @@ Language setup affects:
 - How dependencies are installed.
 - What artifacts are copied into the final dev stage.
 
-Manifest files are detected from the project root. For example, Node.js uses `npm ci` when `package-lock.json` exists and falls back to `npm install` when only `package.json` exists. If no manifest is present, only the base image is configured and no dependency install step is emitted.
+Manifest files are detected from the project root. For example, Node.js uses `npm ci` when `package-lock.json` exists and falls back to `npm install` when only `package.json` exists. PHP projects use `composer install` when `composer.json` is present. If no manifest is present, only the base image is configured and no dependency install step is emitted.
 
 When multiple languages are requested, the CLI uses a neutral base image (`debian:12-slim`) and installs every runtime on top of it, so processes can use any combination of languages in the same container.
 

@@ -209,6 +209,19 @@ describe("detectStarterLanguages", () => {
     }
   });
 
+  it("detects php from composer.json", () => {
+    const dir = tmpDir("php-lang");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "composer.json"), JSON.stringify({ name: "app", require: { "laravel/framework": "^11.0" } }));
+    try {
+      expect(detectStarterLanguages(dir)).toEqual([
+        { name: "php", options: { version: "8.3" } },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("returns an empty array when no project files are found", () => {
     const dir = tmpDir("no-lang");
     mkdirSync(dir, { recursive: true });

@@ -505,6 +505,10 @@ export class SandboxContext implements FeatureContext, BuildContext {
     this.plan.build.venvVolume = true
   }
 
+  enableVendorVolume(): void {
+    this.plan.build.vendorVolume = true
+  }
+
   configureMcp(port: number): void {
     this.plan.build.mcpEnabled = true
     this.plan.build.mcpPort = port
