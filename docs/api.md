@@ -55,6 +55,10 @@ Declare an agent-discoverable endpoint with a name, optional URL/port, credentia
 
 Declare an environment variable. Provide exactly one of `value` (literal) or `from: { env }` (host passthrough). Optional: `scope` (`"build" | "runtime" | "both"`, default `"runtime"`), and for passthrough vars `required` and `default`. Passthrough values are resolved from the host at `up` time and never written to the image or `plan.json`. See [Primitives](primitives.md#addenvkey-spec).
 
+### `addVolume(spec)`
+
+Mount a local directory or cloud storage into the dev container. Supported types: `"local"`, `"s3"`, `"s3-file"`, `"dropbox"`, `"gdrive"`. Credentials can be literal strings or env references. See [Primitives](primitives.md#addvolumespec).
+
 ### `fileExists(path)`
 
 Check if a file exists relative to the project root.

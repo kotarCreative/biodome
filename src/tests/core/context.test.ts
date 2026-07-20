@@ -501,7 +501,7 @@ describe("SandboxContext", () => {
     const ctx = new SandboxContext("/tmp", "test");
     ctx.addService("custom", { image: "nginx:latest" });
 
-    expect(ctx.plan.runtime.volumes).toHaveLength(0);
+    expect(ctx.plan.runtime.namedVolumes).toHaveLength(0);
   });
 
   it("rejects a process with a non-array command", () => {
@@ -587,5 +587,170 @@ describe("SandboxContext", () => {
     expect(mcp.ports[0].container).toBe(3005);
     expect(mcp.healthCheck).toBeDefined();
     expect(mcp.healthCheck!.url).toContain("localhost:3005");
+  });
+
+  describe("addVolume", () => {
+    it("adds a local bind-mount volume", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addVolume({
+        name: "data",
+        type: "local",
+        source: "./data",
+        target: "/workspace/data",
+      });
+
+      expect(ctx.plan.runtime.volumes).toHaveLength(1);
+      const volume = ctx.plan.runtime.volumes[0];
+      expect(volume.name).toBe("data");
+      expect(volume.type).toBe("local");
+      expect(volume.source).toBe("./data");
+      expect(volume.target).toBe("/workspace/data");
+      expect(ctx.plan.build.aptPackages).not.toContain("rclone");
+      expect(ctx.plan.runtime.processes).toHaveLength(0);
+    });
+
+    it("adds an S3 bucket mount as a daemon process", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addVolume({
+        name: "s3-data",
+        type: "s3",
+        bucket: "my-bucket",
+        prefix: "data/",
+        target: "/workspace/s3-data",
+        credentials: {
+          accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
+          secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
+        },
+      });
+
+      expect(ctx.plan.runtime.volumes).toHaveLength(1);
+      expect(ctx.plan.build.aptPackages).toContain("rclone");
+      expect(ctx.plan.build.aptPackages).toContain("fuse3");
+
+      const proc = ctx.plan.runtime.processes[0];
+      expect(proc.name).toBe("rclone-mount-s3-data");
+      expect(proc.mode).toBe("daemon");
+      expect(proc.command).toEqual([
+        "rclone",
+        "mount",
+        "s3:my-bucket/data/",
+        "/workspace/s3-data",
+        "--allow-other",
+        "--vfs-cache-mode",
+        "writes",
+      ]);
+      expect(proc.environment).toEqual({
+        RCLONE_S3_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}",
+        RCLONE_S3_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}",
+      });
+    });
+
+    it("adds an S3 file copy as a startup hook", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addVolume({
+        name: "s3-config",
+        type: "s3-file",
+        bucket: "my-bucket",
+        key: "config.json",
+        target: "/workspace/config.json",
+        credentials: {
+          accessKeyId: "AKIAIOSFODNN7EXAMPLE",
+          secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
+        },
+      });
+
+      const hook = ctx.plan.runtime.processes[0];
+      expect(hook.name).toBe("rclone-copy-s3-config");
+      expect(hook.mode).toBe("oneshot");
+      expect(hook.startOn).toBe("start.post");
+      expect(hook.command).toEqual([
+        "rclone",
+        "copy",
+        "s3:my-bucket/config.json",
+        "/workspace/config.json",
+      ]);
+      expect(hook.environment).toEqual({
+        RCLONE_S3_ACCESS_KEY_ID: "AKIAIOSFODNN7EXAMPLE",
+        RCLONE_S3_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}",
+      });
+    });
+
+    it("adds Dropbox and Google Drive mounts", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addVolume({
+        name: "dropbox",
+        type: "dropbox",
+        path: "/Projects",
+        target: "/workspace/dropbox",
+        credentials: { token: { env: "DROPBOX_TOKEN" } },
+      });
+      ctx.addVolume({
+        name: "gdrive",
+        type: "gdrive",
+        path: "/Documents",
+        target: "/workspace/gdrive",
+        credentials: {
+          clientId: { env: "GDRIVE_CLIENT_ID" },
+          clientSecret: { env: "GDRIVE_CLIENT_SECRET" },
+          token: { env: "GDRIVE_TOKEN" },
+        },
+      });
+
+      const dropbox = ctx.plan.runtime.processes.find((p) => p.name === "rclone-mount-dropbox");
+      expect(dropbox?.command).toContain("dropbox:/Projects");
+      expect(dropbox?.environment).toEqual({ RCLONE_DROPBOX_TOKEN: "${DROPBOX_TOKEN}" });
+
+      const gdrive = ctx.plan.runtime.processes.find((p) => p.name === "rclone-mount-gdrive");
+      expect(gdrive?.command).toContain("drive:/Documents");
+      expect(gdrive?.environment).toEqual({
+        RCLONE_DRIVE_CLIENT_ID: "${GDRIVE_CLIENT_ID}",
+        RCLONE_DRIVE_CLIENT_SECRET: "${GDRIVE_CLIENT_SECRET}",
+        RCLONE_DRIVE_TOKEN: "${GDRIVE_TOKEN}",
+      });
+    });
+
+    it("rejects duplicate volume names", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addVolume({ name: "data", type: "local", source: "./a", target: "/workspace/a" });
+      expect(() =>
+        ctx.addVolume({ name: "data", type: "local", source: "./b", target: "/workspace/b" })
+      ).toThrow(/Duplicate volume name/);
+    });
+
+    it("rejects local volumes without a source", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      expect(() =>
+        ctx.addVolume({ name: "data", type: "local", target: "/workspace/data" } as any)
+      ).toThrow(/local volumes require a source path/);
+    });
+
+    it("rejects S3 volumes without a bucket", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      expect(() =>
+        ctx.addVolume({ name: "s3", type: "s3", target: "/workspace/s3" } as any)
+      ).toThrow(/S3 volumes require a bucket/);
+    });
+
+    it("rejects s3-file volumes without a key", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      expect(() =>
+        ctx.addVolume({
+          name: "s3",
+          type: "s3-file",
+          bucket: "my-bucket",
+          target: "/workspace/s3",
+        } as any)
+      ).toThrow(/s3-file volumes require a key/);
+    });
+
+    it("rejects cloud volumes without a path", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      expect(() =>
+        ctx.addVolume({ name: "db", type: "dropbox", target: "/workspace/db" } as any)
+      ).toThrow(/dropbox volumes require a path/);
+      expect(() =>
+        ctx.addVolume({ name: "gd", type: "gdrive", target: "/workspace/gd" } as any)
+      ).toThrow(/gdrive volumes require a path/);
+    });
   });
 });

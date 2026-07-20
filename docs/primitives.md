@@ -204,6 +204,81 @@ Keys must match `[A-Za-z_][A-Za-z0-9_]*`, and each key may only be declared once
 
 Use `value` for non-secret configuration you're happy to see in the built image and `plan.json`. Use `from` for anything sensitive (API keys, database URLs, tokens): passthrough variables are emitted as `${VAR}` interpolations in the generated compose file and resolved from the host shell / `.env` at `up` time, so the secret never lands in a committed artifact.
 
+## `addVolume(spec)`
+
+Mounts data into the dev container. Supports local bind mounts and cloud-backed mounts via `rclone`.
+
+```javascript
+export default function volumes(ctx) {
+  // Local bind mount
+  ctx.addVolume({
+    name: "data",
+    type: "local",
+    source: "./data",
+    target: "/workspace/data",
+  });
+
+  // S3 bucket mount
+  ctx.addVolume({
+    name: "s3-data",
+    type: "s3",
+    bucket: "my-bucket",
+    prefix: "data/",
+    target: "/workspace/s3-data",
+    credentials: {
+      accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
+      secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
+    },
+  });
+
+  // Single S3 file copied at container startup
+  ctx.addVolume({
+    name: "s3-config",
+    type: "s3-file",
+    bucket: "my-bucket",
+    key: "config.json",
+    target: "/workspace/config.json",
+    credentials: {
+      accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
+      secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
+    },
+  });
+
+  // Dropbox mount
+  ctx.addVolume({
+    name: "dropbox",
+    type: "dropbox",
+    path: "/Projects",
+    target: "/workspace/dropbox",
+    credentials: { token: { env: "DROPBOX_TOKEN" } },
+  });
+
+  // Google Drive mount
+  ctx.addVolume({
+    name: "gdrive",
+    type: "gdrive",
+    path: "/Documents",
+    target: "/workspace/gdrive",
+    credentials: {
+      clientId: { env: "GDRIVE_CLIENT_ID" },
+      clientSecret: { env: "GDRIVE_CLIENT_SECRET" },
+      token: { env: "GDRIVE_TOKEN" },
+    },
+  });
+}
+```
+
+- `name` — unique identifier.
+- `type` — `"local"`, `"s3"`, `"s3-file"`, `"dropbox"`, or `"gdrive"`.
+- `target` — absolute path inside the dev container.
+- `source` — local host path for `type: "local"`. Relative paths are resolved from the project root.
+- `bucket` / `key` / `prefix` — S3 location.
+- `path` — remote folder path for Dropbox or Google Drive.
+- `credentials` — map of provider credentials. Each value is either a literal string or an `{ env: "VAR_NAME" }` reference. Env references are resolved from the host at `up` time and never written to the generated files.
+- `options.readOnly` — set to `"true"` for read-only mounts (local only).
+
+Cloud-backed volumes install `rclone` and `fuse3` in the dev container, enable privileged mode, and run an `rclone mount` daemon process. `s3-file` volumes are copied once at container startup via an `start.post` hook instead of being mounted.
+
 ## Health checks
 
 Health checks are attached to daemon processes. Each daemon with a health check gets a generated shell script in `.biodome-build/healthchecks/<name>.sh`, and `supervisord` runs a companion `<name>-healthcheck` program that restarts the process after repeated failures. The dev service health check in the generated compose file runs all daemon health checks via `.biodome-build/healthchecks/all.sh`.

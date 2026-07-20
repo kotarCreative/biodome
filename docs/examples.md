@@ -305,3 +305,31 @@ export default function app(ctx) {
 ```
 
 `supervisord` manages all three processes in the same dev container.
+
+## Local + cloud volumes
+
+```javascript
+// .biodome/features/volumes.mjs
+export default function volumes(ctx) {
+  ctx.addVolume({
+    name: "data",
+    type: "local",
+    source: "./data",
+    target: "/workspace/data",
+  });
+
+  ctx.addVolume({
+    name: "s3-assets",
+    type: "s3",
+    bucket: "my-project-assets",
+    prefix: "dev/",
+    target: "/workspace/assets",
+    credentials: {
+      accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
+      secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
+    },
+  });
+}
+```
+
+Local volumes become Docker Compose bind mounts. S3, Dropbox, and Google Drive volumes are mounted with `rclone` inside the dev container.

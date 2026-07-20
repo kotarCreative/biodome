@@ -1,4 +1,4 @@
-import { Plan, Service, Port, SecretValue, EnvVar } from "./plan.js";
+import { Plan, Service, Port, SecretValue, EnvVar, Volume } from "./plan.js";
 
 function formatPort(p: Port): string {
   const label = p.name ? `${p.name}: ` : "";
@@ -24,6 +24,16 @@ function formatEnvVar(envVar: EnvVar): string {
     return `${envVar.key} = ${parts.join(", ")}${scope}`;
   }
   return `${envVar.key} = ${envVar.value}${scope}`;
+}
+
+function formatVolume(volume: Volume): string {
+  const parts: string[] = [volume.type];
+  if (volume.source) parts.push(`source ${volume.source}`);
+  if (volume.bucket) parts.push(`bucket ${volume.bucket}`);
+  if (volume.key) parts.push(`key ${volume.key}`);
+  if (volume.prefix) parts.push(`prefix ${volume.prefix}`);
+  if (volume.path) parts.push(`path ${volume.path}`);
+  return `${volume.name} (${parts.join(", ")}) → ${volume.target}`;
 }
 
 export interface ServiceConnection {
@@ -95,6 +105,14 @@ export function formatInfo(plan: Plan): string {
         lines.push(`      internal: ${conn.internal}`);
         lines.push(`      external: ${conn.external}`);
       }
+    }
+  }
+
+  if (plan.runtime.volumes.length > 0) {
+    lines.push("");
+    lines.push("Volumes:");
+    for (const volume of plan.runtime.volumes) {
+      lines.push(`  - ${formatVolume(volume)}`);
     }
   }
 
@@ -204,6 +222,15 @@ export function formatAgentsMd(plan: Plan): string {
       }
       lines.push("");
     }
+  }
+
+  if (plan.runtime.volumes.length > 0) {
+    lines.push("## Volumes");
+    lines.push("");
+    for (const volume of plan.runtime.volumes) {
+      lines.push(`- \`${formatVolume(volume)}\``);
+    }
+    lines.push("");
   }
 
   if (plan.runtime.endpoints.length > 0) {

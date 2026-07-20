@@ -19,6 +19,8 @@ import {
   EnvSpecSchema,
   EnvVar,
   ProcessHealthCheckSpecSchema,
+  VolumeSpecSchema,
+  Volume,
 } from "./plan.js"
 import {
   FeatureContext,
@@ -30,6 +32,7 @@ import {
   ServiceOptions,
   EndpointSpec,
   EnvSpec,
+  VolumeSpec,
 } from "./feature.js"
 import { BuildContext } from "./build-context.js"
 import { languageHandlers, getDefaultBaseImage } from "./languages.js"
@@ -253,7 +256,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
     this.plan.runtime.services.push(svc)
     for (const vol of svc.volumes) {
       if (!vol.host.startsWith("/") && !vol.host.startsWith("./") && !vol.host.startsWith("~")) {
-        this.plan.runtime.volumes.push({ name: vol.host })
+        this.plan.runtime.namedVolumes.push({ name: vol.host })
       }
     }
   }
@@ -330,6 +333,155 @@ export class SandboxContext implements FeatureContext, BuildContext {
         this.plan.runtime.environment[key] = validated.value!
       }
     }
+  }
+
+  addVolume(spec: VolumeSpec): void {
+    const validated = Schema.decodeSync(VolumeSpecSchema)(spec)
+
+    if (this.plan.runtime.volumes.some((v) => v.name === validated.name)) {
+      throw new ValidationError({ message: `Duplicate volume name: ${validated.name}` })
+    }
+
+    this.validateVolumeSpec(validated)
+
+    const volume: Volume = {
+      name: validated.name,
+      type: validated.type,
+      source: validated.source,
+      target: validated.target,
+      bucket: validated.bucket,
+      key: validated.key,
+      prefix: validated.prefix,
+      path: validated.path,
+      credentials: validated.credentials ? { ...validated.credentials } : undefined,
+      options: validated.options ? { ...validated.options } : undefined,
+    }
+
+    this.plan.runtime.volumes.push(volume)
+
+    if (validated.type === "local") {
+      // Local bind mounts are emitted directly in compose; nothing else to do.
+      return
+    }
+
+    // Cloud-backed volumes use rclone. Ensure it and FUSE are available.
+    this.addAptPackage("rclone")
+    this.addAptPackage("fuse3")
+
+    const env = this.buildRcloneEnv(volume)
+
+    if (validated.type === "s3-file") {
+      // Single-file volumes are copied once at container startup.
+      const remote = this.rcloneRemote(volume)
+      this.addHook({
+        name: `rclone-copy-${validated.name}`,
+        command: ["rclone", "copy", remote, validated.target],
+        startOn: "start.post",
+        environment: env,
+      })
+      return
+    }
+
+    // Bucket/folder mounts run as a daemon process.
+    const remote = this.rcloneRemote(volume)
+    const command = [
+      "rclone",
+      "mount",
+      remote,
+      validated.target,
+      "--allow-other",
+      "--vfs-cache-mode",
+      "writes",
+    ]
+    if (validated.options?.readOnly === "true") {
+      command.push("--read-only")
+    }
+    this.addProcess({
+      name: `rclone-mount-${validated.name}`,
+      command,
+      environment: env,
+    })
+  }
+
+  private validateVolumeSpec(spec: VolumeSpec): void {
+    switch (spec.type) {
+      case "local": {
+        if (!spec.source) {
+          throw new ValidationError({ message: `Volume ${spec.name}: local volumes require a source path` })
+        }
+        break
+      }
+      case "s3":
+      case "s3-file": {
+        if (!spec.bucket) {
+          throw new ValidationError({ message: `Volume ${spec.name}: S3 volumes require a bucket` })
+        }
+        if (spec.type === "s3-file" && !spec.key) {
+          throw new ValidationError({ message: `Volume ${spec.name}: s3-file volumes require a key` })
+        }
+        break
+      }
+      case "dropbox":
+      case "gdrive": {
+        if (!spec.path) {
+          throw new ValidationError({ message: `Volume ${spec.name}: ${spec.type} volumes require a path` })
+        }
+        break
+      }
+    }
+  }
+
+  private rcloneRemote(volume: Volume): string {
+    switch (volume.type) {
+      case "s3":
+      case "s3-file": {
+        const prefix = volume.type === "s3-file" ? volume.key! : volume.prefix || ""
+        return `s3:${volume.bucket}/${prefix}`
+      }
+      case "dropbox":
+        return `dropbox:${volume.path}`
+      case "gdrive":
+        return `drive:${volume.path}`
+      default:
+        throw new ValidationError({ message: `Unsupported volume type for rclone: ${volume.type}` })
+    }
+  }
+
+  private buildRcloneEnv(volume: Volume): Record<string, string> {
+    const env: Record<string, string> = {}
+    if (!volume.credentials) return env
+
+    const mappings: Record<string, Record<string, string>> = {
+      s3: {
+        accessKeyId: "RCLONE_S3_ACCESS_KEY_ID",
+        secretAccessKey: "RCLONE_S3_SECRET_ACCESS_KEY",
+        region: "RCLONE_S3_REGION",
+        sessionToken: "RCLONE_S3_SESSION_TOKEN",
+      },
+      "s3-file": {
+        accessKeyId: "RCLONE_S3_ACCESS_KEY_ID",
+        secretAccessKey: "RCLONE_S3_SECRET_ACCESS_KEY",
+        region: "RCLONE_S3_REGION",
+        sessionToken: "RCLONE_S3_SESSION_TOKEN",
+      },
+      dropbox: {
+        token: "RCLONE_DROPBOX_TOKEN",
+      },
+      gdrive: {
+        clientId: "RCLONE_DRIVE_CLIENT_ID",
+        clientSecret: "RCLONE_DRIVE_CLIENT_SECRET",
+        token: "RCLONE_DRIVE_TOKEN",
+      },
+    }
+
+    const map = mappings[volume.type]
+    for (const [key, value] of Object.entries(volume.credentials)) {
+      const rcloneKey = map[key]
+      if (!rcloneKey) continue
+      env[rcloneKey] = typeof value === "string" ? value : `\${${value.env}}`
+    }
+
+    return env
   }
 
   fileExists(path: string): boolean {

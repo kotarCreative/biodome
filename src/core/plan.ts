@@ -39,6 +39,7 @@ export interface CopyArtifact {
 export interface RuntimePlan {
   services: Service[]
   networks: Network[]
+  namedVolumes: NamedVolume[]
   volumes: Volume[]
   ports: Port[]
   environment: Record<string, string>
@@ -117,8 +118,23 @@ export interface Network {
   driver: string
 }
 
+export interface NamedVolume {
+  name: string
+}
+
+export type VolumeType = "local" | "s3" | "s3-file" | "dropbox" | "gdrive"
+
 export interface Volume {
   name: string
+  type: VolumeType
+  source?: string
+  target: string
+  bucket?: string
+  key?: string
+  prefix?: string
+  path?: string
+  credentials?: Record<string, SecretValue>
+  options?: Record<string, string>
 }
 
 export interface Port {
@@ -210,6 +226,7 @@ export function createPlan(project: string): Plan {
     runtime: {
       services: [],
       networks: [{ name: "biodome", driver: "bridge" }],
+      namedVolumes: [],
       volumes: [],
       ports: [],
       environment: {},
@@ -309,6 +326,21 @@ export const EndpointSpecSchema = Schema.Struct({
   port: Schema.optional(Schema.Number),
   credentials: Schema.optional(EndpointCredentialsSchema),
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+})
+
+export const VolumeCredentialsSchema = Schema.Record(Schema.String, SecretValueSchema)
+
+export const VolumeSpecSchema = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1)),
+  type: Schema.Literals(["local", "s3", "s3-file", "dropbox", "gdrive"]),
+  source: Schema.optional(Schema.String),
+  target: Schema.String.check(Schema.isMinLength(1)),
+  bucket: Schema.optional(Schema.String),
+  key: Schema.optional(Schema.String),
+  prefix: Schema.optional(Schema.String),
+  path: Schema.optional(Schema.String),
+  credentials: Schema.optional(VolumeCredentialsSchema),
+  options: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 })
 
 export const EnvScopeSchema = Schema.Literals(["build", "runtime", "both"])
@@ -421,7 +453,21 @@ export const PlanSchema = Schema.Struct({
   runtime: Schema.Struct({
     services: Schema.Array(ServiceSchema),
     networks: Schema.Array(Schema.Struct({ name: Schema.String, driver: Schema.String })),
-    volumes: Schema.Array(Schema.Struct({ name: Schema.String })),
+    namedVolumes: Schema.Array(Schema.Struct({ name: Schema.String })),
+    volumes: Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        type: Schema.Literals(["local", "s3", "s3-file", "dropbox", "gdrive"]),
+        source: Schema.optional(Schema.String),
+        target: Schema.String,
+        bucket: Schema.optional(Schema.String),
+        key: Schema.optional(Schema.String),
+        prefix: Schema.optional(Schema.String),
+        path: Schema.optional(Schema.String),
+        credentials: Schema.optional(VolumeCredentialsSchema),
+        options: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+      })
+    ),
     ports: Schema.Array(PortSchema),
     environment: Schema.Record(Schema.String, Schema.String),
     processes: Schema.Array(ProcessSchema),

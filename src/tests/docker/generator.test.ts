@@ -202,4 +202,71 @@ describe("Docker generators", () => {
     expect(dockerignore).toContain("!.biodome-build/supervisord.conf");
     expect(dockerignore).not.toContain(".biodome-build\n");
   });
+
+  it("adds local bind mounts to the dev service", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.volumes.push({
+      name: "data",
+      type: "local",
+      source: "./data",
+      target: "/workspace/data",
+    });
+
+    const compose = generateCompose(plan);
+    expect(compose).toContain("./data:/workspace/data");
+  });
+
+  it("adds read-only local bind mounts", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.volumes.push({
+      name: "data",
+      type: "local",
+      source: "./data",
+      target: "/workspace/data",
+      options: { readOnly: "true" },
+    });
+
+    const compose = generateCompose(plan);
+    expect(compose).toContain("./data:/workspace/data:ro");
+  });
+
+  it("declares named local volumes in the compose volumes section", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.volumes.push({
+      name: "shared",
+      type: "local",
+      source: "shared-data",
+      target: "/workspace/shared",
+    });
+
+    const compose = generateCompose(plan);
+    expect(compose).toContain("shared-data:/workspace/shared");
+    expect(compose).toContain("volumes:\n  shared-data:");
+  });
+
+  it("enables privileged mode for cloud-backed volumes", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.volumes.push({
+      name: "s3-data",
+      type: "s3",
+      bucket: "my-bucket",
+      target: "/workspace/s3-data",
+    });
+
+    const compose = generateCompose(plan);
+    expect(compose).toContain("privileged: true");
+  });
+
+  it("does not enable privileged mode for local volumes only", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.volumes.push({
+      name: "data",
+      type: "local",
+      source: "./data",
+      target: "/workspace/data",
+    });
+
+    const compose = generateCompose(plan);
+    expect(compose).not.toContain("privileged");
+  });
 });
