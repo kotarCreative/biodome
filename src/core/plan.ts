@@ -122,7 +122,7 @@ export interface NamedVolume {
   name: string
 }
 
-export type VolumeType = "local" | "s3" | "dropbox" | "gdrive"
+export type VolumeType = "local" | "s3" | "gcs" | "azure" | "sftp" | "smb" | "webdav" | "dropbox" | "gdrive"
 
 export interface Volume {
   name: string
@@ -132,6 +132,16 @@ export interface Volume {
   bucket?: string
   prefix?: string
   path?: string
+  // Cloud / network providers
+  endpoint?: string
+  account?: string
+  container?: string
+  host?: string
+  port?: number
+  export?: string
+  share?: string
+  url?: string
+  vendor?: string
   credentials?: Record<string, SecretValue>
   options?: Record<string, string>
 }
@@ -331,12 +341,31 @@ export const VolumeCredentialsSchema = Schema.Record(Schema.String, SecretValueS
 
 export const VolumeSpecSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
-  type: Schema.Literals(["local", "s3", "dropbox", "gdrive"]),
+  type: Schema.Literals([
+    "local",
+    "s3",
+    "gcs",
+    "azure",
+    "sftp",
+    "smb",
+    "webdav",
+    "dropbox",
+    "gdrive",
+  ]),
   source: Schema.optional(Schema.String),
   target: Schema.String.check(Schema.isMinLength(1)),
   bucket: Schema.optional(Schema.String),
   prefix: Schema.optional(Schema.String),
   path: Schema.optional(Schema.String),
+  endpoint: Schema.optional(Schema.String),
+  account: Schema.optional(Schema.String),
+  container: Schema.optional(Schema.String),
+  host: Schema.optional(Schema.String),
+  port: Schema.optional(Schema.Number),
+  export: Schema.optional(Schema.String),
+  share: Schema.optional(Schema.String),
+  url: Schema.optional(Schema.String),
+  vendor: Schema.optional(Schema.String),
   credentials: Schema.optional(VolumeCredentialsSchema),
   options: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 })
@@ -455,12 +484,31 @@ export const PlanSchema = Schema.Struct({
     volumes: Schema.Array(
       Schema.Struct({
         name: Schema.String,
-        type: Schema.Literals(["local", "s3", "dropbox", "gdrive"]),
+        type: Schema.Literals([
+          "local",
+          "s3",
+          "gcs",
+          "azure",
+          "sftp",
+          "smb",
+          "webdav",
+          "dropbox",
+          "gdrive",
+        ]),
         source: Schema.optional(Schema.String),
         target: Schema.String,
         bucket: Schema.optional(Schema.String),
         prefix: Schema.optional(Schema.String),
         path: Schema.optional(Schema.String),
+        endpoint: Schema.optional(Schema.String),
+        account: Schema.optional(Schema.String),
+        container: Schema.optional(Schema.String),
+        host: Schema.optional(Schema.String),
+        port: Schema.optional(Schema.Number),
+        export: Schema.optional(Schema.String),
+        share: Schema.optional(Schema.String),
+        url: Schema.optional(Schema.String),
+        vendor: Schema.optional(Schema.String),
         credentials: Schema.optional(VolumeCredentialsSchema),
         options: Schema.optional(Schema.Record(Schema.String, Schema.String)),
       })

@@ -206,7 +206,7 @@ Use `value` for non-secret configuration you're happy to see in the built image 
 
 ## `addVolume(spec)`
 
-Mounts data into the dev container as a live read/write access point. Supports local bind mounts and cloud-backed mounts via `rclone`. No files are copied into the container.
+Mounts data into the dev container as a live read/write access point. Supports local bind mounts and cloud or network storage via `rclone`. No files are copied into the container.
 
 ```javascript
 export default function volumes(ctx) {
@@ -231,16 +231,16 @@ export default function volumes(ctx) {
     },
   });
 
-  // Access a specific S3 file by mounting its prefix
+  // S3-compatible service (MinIO, Wasabi, Cloudflare R2, ...)
   ctx.addVolume({
-    name: "s3-configs",
+    name: "minio",
     type: "s3",
     bucket: "my-bucket",
-    prefix: "configs/",
-    target: "/workspace/s3-configs",
+    target: "/workspace/minio",
     credentials: {
-      accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
-      secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
+      accessKeyId: { env: "MINIO_ACCESS_KEY" },
+      secretAccessKey: { env: "MINIO_SECRET_KEY" },
+      endpoint: "http://minio:9000",
     },
   });
 
@@ -269,15 +269,99 @@ export default function volumes(ctx) {
 ```
 
 - `name` — unique identifier.
-- `type` — `"local"`, `"s3"`, `"dropbox"`, or `"gdrive"`.
+- `type` — `"local"`, `"s3"`, `"gcs"`, `"azure"`, `"sftp"`, `"smb"`, `"webdav"`, `"dropbox"`, or `"gdrive"`.
 - `target` — absolute path inside the dev container.
 - `source` — local host path for `type: "local"`. Relative paths are resolved from the project root.
-- `bucket` / `prefix` — S3 location. Mount a prefix to access specific files inside it.
+- `bucket` / `prefix` — S3 or GCS location. Mount a prefix to access specific files inside it.
+- `account` / `container` / `path` — Azure Blob location.
+- `host` / `port` / `path` — SFTP location.
+- `host` / `share` — SMB share.
+- `url` / `path` / `vendor` — WebDAV location.
 - `path` — remote folder path for Dropbox or Google Drive.
 - `credentials` — map of provider credentials. Each value is either a literal string or an `{ env: "VAR_NAME" }` reference. Env references are resolved from the host at `up` time and never written to the generated files.
 - `options.readOnly` — set to `"true"` for read-only mounts (local only).
 
 Cloud-backed volumes install `rclone` and `fuse3` in the dev container, enable privileged mode, and run an `rclone mount` daemon process. Files are read and written directly against the remote source.
+
+### Volume wrappers
+
+For a simpler DX you can use provider-specific wrappers. They delegate to `addVolume` but accept friendlier field names.
+
+```javascript
+export default function volumes(ctx) {
+  ctx.addLocalVolume({ name: "data", source: "./data", target: "/workspace/data" });
+
+  ctx.addS3Volume({
+    name: "s3-data",
+    bucket: "my-bucket",
+    prefix: "data/",
+    target: "/workspace/s3-data",
+    credentials: {
+      accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
+      secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
+    },
+  });
+
+  ctx.addGcsVolume({
+    name: "gcs-data",
+    bucket: "my-bucket",
+    prefix: "data/",
+    target: "/workspace/gcs-data",
+    credentials: { token: { env: "GCS_TOKEN" } },
+  });
+
+  ctx.addAzureVolume({
+    name: "azure-data",
+    account: "myaccount",
+    container: "mycontainer",
+    path: "data/",
+    target: "/workspace/azure-data",
+    credentials: { accountKey: { env: "AZURE_KEY" } },
+  });
+
+  ctx.addSftpVolume({
+    name: "sftp-data",
+    host: "files.example.com",
+    path: "/srv/data",
+    target: "/workspace/sftp-data",
+    credentials: { user: "admin", password: { env: "SFTP_PASS" } },
+  });
+
+  ctx.addSmbVolume({
+    name: "smb-data",
+    host: "nas.local",
+    share: "shared",
+    target: "/workspace/smb-data",
+    credentials: { user: { env: "SMB_USER" }, password: { env: "SMB_PASS" } },
+  });
+
+  ctx.addWebdavVolume({
+    name: "webdav-data",
+    url: "https://cloud.example.com/webdav",
+    path: "projects",
+    target: "/workspace/webdav-data",
+    credentials: { user: "admin", password: { env: "WEBDAV_PASS" } },
+  });
+
+  ctx.addDropboxVolume({
+    name: "dropbox",
+    path: "/Projects",
+    target: "/workspace/dropbox",
+    credentials: { token: { env: "DROPBOX_TOKEN" } },
+  });
+
+  ctx.addGdriveVolume({
+    name: "gdrive",
+    path: "/Documents",
+    target: "/workspace/gdrive",
+    credentials: {
+      clientId: { env: "GDRIVE_CLIENT_ID" },
+      clientSecret: { env: "GDRIVE_CLIENT_SECRET" },
+      token: { env: "GDRIVE_TOKEN" },
+    },
+  });
+}
+```
 
 ## Health checks
 

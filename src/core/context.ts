@@ -21,6 +21,7 @@ import {
   ProcessHealthCheckSpecSchema,
   VolumeSpecSchema,
   Volume,
+  SecretValue,
 } from "./plan.js"
 import {
   FeatureContext,
@@ -33,6 +34,15 @@ import {
   EndpointSpec,
   EnvSpec,
   VolumeSpec,
+  LocalVolumeSpec,
+  S3VolumeSpec,
+  GcsVolumeSpec,
+  AzureVolumeSpec,
+  SftpVolumeSpec,
+  SmbVolumeSpec,
+  WebdavVolumeSpec,
+  DropboxVolumeSpec,
+  GdriveVolumeSpec,
 } from "./feature.js"
 import { BuildContext } from "./build-context.js"
 import { languageHandlers, getDefaultBaseImage } from "./languages.js"
@@ -352,6 +362,15 @@ export class SandboxContext implements FeatureContext, BuildContext {
       bucket: validated.bucket,
       prefix: validated.prefix,
       path: validated.path,
+      endpoint: validated.endpoint,
+      account: validated.account,
+      container: validated.container,
+      host: validated.host,
+      port: validated.port,
+      export: validated.export,
+      share: validated.share,
+      url: validated.url,
+      vendor: validated.vendor,
       credentials: validated.credentials ? { ...validated.credentials } : undefined,
       options: validated.options ? { ...validated.options } : undefined,
     }
@@ -398,9 +417,44 @@ export class SandboxContext implements FeatureContext, BuildContext {
         }
         break
       }
-      case "s3": {
+      case "s3":
+      case "gcs": {
         if (!spec.bucket) {
-          throw new ValidationError({ message: `Volume ${spec.name}: S3 volumes require a bucket` })
+          const label = spec.type === "s3" ? "S3" : "GCS"
+          throw new ValidationError({ message: `Volume ${spec.name}: ${label} volumes require a bucket` })
+        }
+        break
+      }
+      case "azure": {
+        if (!spec.account) {
+          throw new ValidationError({ message: `Volume ${spec.name}: azure volumes require an account` })
+        }
+        if (!spec.container) {
+          throw new ValidationError({ message: `Volume ${spec.name}: azure volumes require a container` })
+        }
+        break
+      }
+      case "sftp": {
+        if (!spec.host) {
+          throw new ValidationError({ message: `Volume ${spec.name}: sftp volumes require a host` })
+        }
+        if (!spec.path) {
+          throw new ValidationError({ message: `Volume ${spec.name}: sftp volumes require a path` })
+        }
+        break
+      }
+      case "smb": {
+        if (!spec.host) {
+          throw new ValidationError({ message: `Volume ${spec.name}: smb volumes require a host` })
+        }
+        if (!spec.share) {
+          throw new ValidationError({ message: `Volume ${spec.name}: smb volumes require a share` })
+        }
+        break
+      }
+      case "webdav": {
+        if (!spec.url) {
+          throw new ValidationError({ message: `Volume ${spec.name}: webdav volumes require a url` })
         }
         break
       }
@@ -419,6 +473,24 @@ export class SandboxContext implements FeatureContext, BuildContext {
       case "s3": {
         const prefix = volume.prefix || ""
         return `s3:${volume.bucket}/${prefix}`
+      }
+      case "gcs": {
+        const prefix = volume.prefix || ""
+        return `gcs:${volume.bucket}/${prefix}`
+      }
+      case "azure": {
+        const path = volume.path || ""
+        return `azure:${volume.container}/${path}`
+      }
+      case "sftp": {
+        return `sftp:${volume.path}`
+      }
+      case "smb": {
+        return `smb:${volume.host}/${volume.share}`
+      }
+      case "webdav": {
+        const path = volume.path || ""
+        return `webdav:${path}`
       }
       case "dropbox":
         return `dropbox:${volume.path}`
@@ -439,6 +511,33 @@ export class SandboxContext implements FeatureContext, BuildContext {
         secretAccessKey: "RCLONE_S3_SECRET_ACCESS_KEY",
         region: "RCLONE_S3_REGION",
         sessionToken: "RCLONE_S3_SESSION_TOKEN",
+        endpoint: "RCLONE_S3_ENDPOINT",
+      },
+      gcs: {
+        clientId: "RCLONE_GCS_CLIENT_ID",
+        clientSecret: "RCLONE_GCS_CLIENT_SECRET",
+        token: "RCLONE_GCS_TOKEN",
+        serviceAccountFile: "RCLONE_GCS_SERVICE_ACCOUNT_FILE",
+        projectNumber: "RCLONE_GCS_PROJECT_NUMBER",
+      },
+      azure: {
+        accountKey: "RCLONE_AZURE_KEY",
+        sasUrl: "RCLONE_AZURE_SAS_URL",
+      },
+      sftp: {
+        user: "RCLONE_SFTP_USER",
+        password: "RCLONE_SFTP_PASS",
+        keyFile: "RCLONE_SFTP_KEY_FILE",
+      },
+      smb: {
+        user: "RCLONE_SMB_USER",
+        password: "RCLONE_SMB_PASS",
+        domain: "RCLONE_SMB_DOMAIN",
+      },
+      webdav: {
+        user: "RCLONE_WEBDAV_USER",
+        password: "RCLONE_WEBDAV_PASS",
+        bearerToken: "RCLONE_WEBDAV_BEARER_TOKEN",
       },
       dropbox: {
         token: "RCLONE_DROPBOX_TOKEN",
@@ -450,6 +549,22 @@ export class SandboxContext implements FeatureContext, BuildContext {
       },
     }
 
+    // Provider-level settings that are not credentials but still configure rclone.
+    if (volume.type === "sftp" && volume.host) {
+      env.RCLONE_SFTP_HOST = volume.host
+      if (volume.port) env.RCLONE_SFTP_PORT = String(volume.port)
+    }
+    if (volume.type === "smb" && volume.host) {
+      env.RCLONE_SMB_HOST = volume.host
+    }
+    if (volume.type === "azure" && volume.account) {
+      env.RCLONE_AZURE_ACCOUNT = volume.account
+    }
+    if (volume.type === "webdav" && volume.url) {
+      env.RCLONE_WEBDAV_URL = volume.url
+      if (volume.vendor) env.RCLONE_WEBDAV_VENDOR = volume.vendor
+    }
+
     const map = mappings[volume.type]
     for (const [key, value] of Object.entries(volume.credentials)) {
       const rcloneKey = map[key]
@@ -458,6 +573,128 @@ export class SandboxContext implements FeatureContext, BuildContext {
     }
 
     return env
+  }
+
+  // Volume wrappers — thin helpers that delegate to addVolume with the right
+  // provider-specific shape and credential mapping.
+
+  addLocalVolume(spec: LocalVolumeSpec): void {
+    this.addVolume({
+      name: spec.name,
+      type: "local",
+      source: spec.source,
+      target: spec.target,
+      options: spec.options,
+    })
+  }
+
+  addS3Volume(spec: S3VolumeSpec): void {
+    this.addVolume({
+      name: spec.name,
+      type: "s3",
+      bucket: spec.bucket,
+      prefix: spec.prefix,
+      target: spec.target,
+      credentials: this.normalizeCredentials(spec.credentials),
+      options: spec.options,
+    })
+  }
+
+  addGcsVolume(spec: GcsVolumeSpec): void {
+    this.addVolume({
+      name: spec.name,
+      type: "gcs",
+      bucket: spec.bucket,
+      prefix: spec.prefix,
+      target: spec.target,
+      credentials: this.normalizeCredentials(spec.credentials),
+      options: spec.options,
+    })
+  }
+
+  addAzureVolume(spec: AzureVolumeSpec): void {
+    this.addVolume({
+      name: spec.name,
+      type: "azure",
+      account: spec.account,
+      container: spec.container,
+      path: spec.path,
+      target: spec.target,
+      credentials: this.normalizeCredentials(spec.credentials),
+      options: spec.options,
+    })
+  }
+
+  addSftpVolume(spec: SftpVolumeSpec): void {
+    this.addVolume({
+      name: spec.name,
+      type: "sftp",
+      host: spec.host,
+      port: spec.port,
+      path: spec.path,
+      target: spec.target,
+      credentials: this.normalizeCredentials(spec.credentials),
+      options: spec.options,
+    })
+  }
+
+  addSmbVolume(spec: SmbVolumeSpec): void {
+    this.addVolume({
+      name: spec.name,
+      type: "smb",
+      host: spec.host,
+      share: spec.share,
+      target: spec.target,
+      credentials: this.normalizeCredentials(spec.credentials),
+      options: spec.options,
+    })
+  }
+
+  addWebdavVolume(spec: WebdavVolumeSpec): void {
+    this.addVolume({
+      name: spec.name,
+      type: "webdav",
+      url: spec.url,
+      path: spec.path,
+      target: spec.target,
+      vendor: spec.vendor,
+      credentials: spec.credentials ? this.normalizeCredentials(spec.credentials) : undefined,
+      options: spec.options,
+    })
+  }
+
+  addDropboxVolume(spec: DropboxVolumeSpec): void {
+    this.addVolume({
+      name: spec.name,
+      type: "dropbox",
+      path: spec.path,
+      target: spec.target,
+      credentials: this.normalizeCredentials(spec.credentials),
+      options: spec.options,
+    })
+  }
+
+  addGdriveVolume(spec: GdriveVolumeSpec): void {
+    this.addVolume({
+      name: spec.name,
+      type: "gdrive",
+      path: spec.path,
+      target: spec.target,
+      credentials: this.normalizeCredentials(spec.credentials),
+      options: spec.options,
+    })
+  }
+
+  private normalizeCredentials(
+    credentials: Record<string, SecretValue | undefined>
+  ): Record<string, SecretValue> {
+    const result: Record<string, SecretValue> = {}
+    for (const [key, value] of Object.entries(credentials)) {
+      if (value !== undefined) {
+        result[key] = value
+      }
+    }
+    return result
   }
 
   fileExists(path: string): boolean {

@@ -735,5 +735,181 @@ describe("SandboxContext", () => {
         ctx.addVolume({ name: "gd", type: "gdrive", target: "/workspace/gd" } as any)
       ).toThrow(/gdrive volumes require a path/);
     });
+
+    it("adds GCS, Azure, SFTP, SMB, and WebDAV mounts", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addVolume({
+        name: "gcs",
+        type: "gcs",
+        bucket: "my-bucket",
+        prefix: "data/",
+        target: "/workspace/gcs",
+        credentials: { token: { env: "GCS_TOKEN" } },
+      });
+      ctx.addVolume({
+        name: "azure",
+        type: "azure",
+        account: "myaccount",
+        container: "mycontainer",
+        path: "backups/",
+        target: "/workspace/azure",
+        credentials: { accountKey: { env: "AZURE_KEY" } },
+      });
+      ctx.addVolume({
+        name: "sftp",
+        type: "sftp",
+        host: "files.example.com",
+        port: 2222,
+        path: "/srv/data",
+        target: "/workspace/sftp",
+        credentials: { user: "admin", password: { env: "SFTP_PASS" } },
+      });
+      ctx.addVolume({
+        name: "smb",
+        type: "smb",
+        host: "nas.local",
+        share: "shared",
+        target: "/workspace/smb",
+        credentials: { user: { env: "SMB_USER" }, password: { env: "SMB_PASS" } },
+      });
+      ctx.addVolume({
+        name: "webdav",
+        type: "webdav",
+        url: "https://cloud.example.com/webdav",
+        path: "projects",
+        target: "/workspace/webdav",
+        vendor: "nextcloud",
+        credentials: { user: "admin", password: { env: "WEBDAV_PASS" } },
+      });
+
+      const gcs = ctx.plan.runtime.processes.find((p) => p.name === "rclone-mount-gcs");
+      expect(gcs?.command).toContain("gcs:my-bucket/data/");
+      expect(gcs?.environment).toEqual({ RCLONE_GCS_TOKEN: "${GCS_TOKEN}" });
+
+      const azure = ctx.plan.runtime.processes.find((p) => p.name === "rclone-mount-azure");
+      expect(azure?.command).toContain("azure:mycontainer/backups/");
+      expect(azure?.environment).toEqual({
+        RCLONE_AZURE_ACCOUNT: "myaccount",
+        RCLONE_AZURE_KEY: "${AZURE_KEY}",
+      });
+
+      const sftp = ctx.plan.runtime.processes.find((p) => p.name === "rclone-mount-sftp");
+      expect(sftp?.command).toContain("sftp:/srv/data");
+      expect(sftp?.environment).toEqual({
+        RCLONE_SFTP_HOST: "files.example.com",
+        RCLONE_SFTP_PORT: "2222",
+        RCLONE_SFTP_USER: "admin",
+        RCLONE_SFTP_PASS: "${SFTP_PASS}",
+      });
+
+      const smb = ctx.plan.runtime.processes.find((p) => p.name === "rclone-mount-smb");
+      expect(smb?.command).toContain("smb:nas.local/shared");
+      expect(smb?.environment).toEqual({
+        RCLONE_SMB_HOST: "nas.local",
+        RCLONE_SMB_USER: "${SMB_USER}",
+        RCLONE_SMB_PASS: "${SMB_PASS}",
+      });
+
+      const webdav = ctx.plan.runtime.processes.find((p) => p.name === "rclone-mount-webdav");
+      expect(webdav?.command).toContain("webdav:projects");
+      expect(webdav?.environment).toEqual({
+        RCLONE_WEBDAV_URL: "https://cloud.example.com/webdav",
+        RCLONE_WEBDAV_VENDOR: "nextcloud",
+        RCLONE_WEBDAV_USER: "admin",
+        RCLONE_WEBDAV_PASS: "${WEBDAV_PASS}",
+      });
+    });
+
+    it("supports S3-compatible endpoints via the endpoint credential", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addVolume({
+        name: "minio",
+        type: "s3",
+        bucket: "my-bucket",
+        target: "/workspace/minio",
+        credentials: {
+          accessKeyId: { env: "MINIO_ACCESS_KEY" },
+          secretAccessKey: { env: "MINIO_SECRET_KEY" },
+          endpoint: "http://minio:9000",
+        },
+      });
+
+      const proc = ctx.plan.runtime.processes[0];
+      expect(proc.environment).toEqual({
+        RCLONE_S3_ACCESS_KEY_ID: "${MINIO_ACCESS_KEY}",
+        RCLONE_S3_SECRET_ACCESS_KEY: "${MINIO_SECRET_KEY}",
+        RCLONE_S3_ENDPOINT: "http://minio:9000",
+      });
+    });
+
+    it("adds volumes through wrapper helpers", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addLocalVolume({ name: "data", source: "./data", target: "/workspace/data" });
+      ctx.addS3Volume({
+        name: "s3",
+        bucket: "bucket",
+        target: "/workspace/s3",
+        credentials: { accessKeyId: "a", secretAccessKey: "b" },
+      });
+      ctx.addGcsVolume({
+        name: "gcs",
+        bucket: "bucket",
+        target: "/workspace/gcs",
+        credentials: { token: { env: "GCS_TOKEN" } },
+      });
+      ctx.addAzureVolume({
+        name: "azure",
+        account: "acc",
+        container: "cont",
+        target: "/workspace/azure",
+        credentials: { accountKey: { env: "AZURE_KEY" } },
+      });
+      ctx.addSftpVolume({
+        name: "sftp",
+        host: "host",
+        path: "/data",
+        target: "/workspace/sftp",
+        credentials: { user: "u" },
+      });
+      ctx.addSmbVolume({
+        name: "smb",
+        host: "host",
+        share: "share",
+        target: "/workspace/smb",
+        credentials: { user: "u" },
+      });
+      ctx.addWebdavVolume({
+        name: "webdav",
+        url: "https://example.com/dav",
+        target: "/workspace/webdav",
+      });
+      ctx.addDropboxVolume({
+        name: "dropbox",
+        path: "/p",
+        target: "/workspace/dropbox",
+        credentials: { token: { env: "T" } },
+      });
+      ctx.addGdriveVolume({
+        name: "gdrive",
+        path: "/p",
+        target: "/workspace/gdrive",
+        credentials: {
+          clientId: "a",
+          clientSecret: "b",
+          token: { env: "T" },
+        },
+      });
+
+      expect(ctx.plan.runtime.volumes).toHaveLength(9);
+      expect(ctx.plan.runtime.volumes[0].type).toBe("local");
+      expect(ctx.plan.runtime.volumes[1].type).toBe("s3");
+      expect(ctx.plan.runtime.volumes[2].type).toBe("gcs");
+      expect(ctx.plan.runtime.volumes[3].type).toBe("azure");
+      expect(ctx.plan.runtime.volumes[4].type).toBe("sftp");
+      expect(ctx.plan.runtime.volumes[5].type).toBe("smb");
+      expect(ctx.plan.runtime.volumes[6].type).toBe("webdav");
+      expect(ctx.plan.runtime.volumes[7].type).toBe("dropbox");
+      expect(ctx.plan.runtime.volumes[8].type).toBe("gdrive");
+    });
   });
 });

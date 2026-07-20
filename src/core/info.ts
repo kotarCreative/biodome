@@ -32,6 +32,13 @@ function formatVolume(volume: Volume): string {
   if (volume.bucket) parts.push(`bucket ${volume.bucket}`);
   if (volume.prefix) parts.push(`prefix ${volume.prefix}`);
   if (volume.path) parts.push(`path ${volume.path}`);
+  if (volume.endpoint) parts.push(`endpoint ${volume.endpoint}`);
+  if (volume.account) parts.push(`account ${volume.account}`);
+  if (volume.container) parts.push(`container ${volume.container}`);
+  if (volume.host) parts.push(`host ${volume.host}`);
+  if (volume.port) parts.push(`port ${volume.port}`);
+  if (volume.share) parts.push(`share ${volume.share}`);
+  if (volume.url) parts.push(`url ${volume.url}`);
   return `${volume.name} (${parts.join(", ")}) → ${volume.target}`;
 }
 

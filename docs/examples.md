@@ -332,4 +332,35 @@ export default function volumes(ctx) {
 }
 ```
 
-Local volumes become Docker Compose bind mounts. S3, Dropbox, and Google Drive volumes are mounted with `rclone` inside the dev container.
+Local volumes become Docker Compose bind mounts. Cloud and network volumes are mounted with `rclone` inside the dev container.
+
+The same example with wrapper helpers:
+
+```javascript
+// .biodome/features/volumes.mjs
+export default function volumes(ctx) {
+  ctx.addLocalVolume({ name: "data", source: "./data", target: "/workspace/data" });
+
+  ctx.addS3Volume({
+    name: "s3-assets",
+    bucket: "my-project-assets",
+    prefix: "dev/",
+    target: "/workspace/assets",
+    credentials: {
+      accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
+      secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
+    },
+  });
+
+  ctx.addGdriveVolume({
+    name: "gdrive",
+    path: "/ProjectDocs",
+    target: "/workspace/gdrive",
+    credentials: {
+      clientId: { env: "GDRIVE_CLIENT_ID" },
+      clientSecret: { env: "GDRIVE_CLIENT_SECRET" },
+      token: { env: "GDRIVE_TOKEN" },
+    },
+  });
+}
+```

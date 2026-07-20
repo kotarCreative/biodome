@@ -57,7 +57,27 @@ Declare an environment variable. Provide exactly one of `value` (literal) or `fr
 
 ### `addVolume(spec)`
 
-Mount a local directory or cloud storage into the dev container as a live read/write access point. Supported types: `"local"`, `"s3"`, `"dropbox"`, `"gdrive"`. Credentials can be literal strings or env references. See [Primitives](primitives.md#addvolumespec).
+Mount a local directory or cloud/network storage into the dev container as a live read/write access point. Supported types: `"local"`, `"s3"`, `"gcs"`, `"azure"`, `"sftp"`, `"smb"`, `"webdav"`, `"dropbox"`, `"gdrive"`. Credentials can be literal strings or env references. See [Primitives](primitives.md#addvolumespec).
+
+### `addLocalVolume(spec)`
+
+### `addS3Volume(spec)`
+
+### `addGcsVolume(spec)`
+
+### `addAzureVolume(spec)`
+
+### `addSftpVolume(spec)`
+
+### `addSmbVolume(spec)`
+
+### `addWebdavVolume(spec)`
+
+### `addDropboxVolume(spec)`
+
+### `addGdriveVolume(spec)`
+
+Provider-specific wrappers around `addVolume` with friendlier field names. See [Primitives](primitives.md#volume-wrappers).
 
 ### `fileExists(path)`
 
