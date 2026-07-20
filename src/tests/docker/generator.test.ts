@@ -223,7 +223,7 @@ describe("Docker generators", () => {
       type: "local",
       source: "./data",
       target: "/workspace/data",
-      options: { readOnly: "true" },
+      readOnly: true,
     });
 
     const compose = generateCompose(plan);
@@ -268,5 +268,20 @@ describe("Docker generators", () => {
 
     const compose = generateCompose(plan);
     expect(compose).not.toContain("privileged");
+  });
+
+  it("does not enable privileged mode when all cloud volumes are proxy volumes", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.volumes.push({
+      name: "s3-proxy",
+      type: "s3",
+      bucket: "my-bucket",
+      target: "/workspace/s3-proxy",
+      proxy: true,
+    });
+
+    const compose = generateCompose(plan);
+    expect(compose).not.toContain("privileged");
+    expect(compose).not.toContain("/workspace/s3-proxy");
   });
 });

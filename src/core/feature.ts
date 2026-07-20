@@ -27,7 +27,8 @@ export interface LocalVolumeSpec {
   name: string
   source: string
   target: string
-  options?: { readOnly?: "true" | "false" }
+  readOnly?: boolean
+  allowedPaths?: string[]
 }
 
 export interface S3VolumeSpec {
@@ -36,13 +37,15 @@ export interface S3VolumeSpec {
   prefix?: string
   target: string
   credentials: {
-    accessKeyId: SecretValue
-    secretAccessKey: SecretValue
+    accessKeyId?: SecretValue
+    secretAccessKey?: SecretValue
     region?: SecretValue
     sessionToken?: SecretValue
     endpoint?: SecretValue
   }
-  options?: { readOnly?: "true" | "false" }
+  proxy?: boolean
+  readOnly?: boolean
+  allowedPaths?: string[]
 }
 
 export interface GcsVolumeSpec {
@@ -57,7 +60,9 @@ export interface GcsVolumeSpec {
     serviceAccountFile?: SecretValue
     projectNumber?: SecretValue
   }
-  options?: { readOnly?: "true" | "false" }
+  proxy?: boolean
+  readOnly?: boolean
+  allowedPaths?: string[]
 }
 
 export interface AzureVolumeSpec {
@@ -70,7 +75,9 @@ export interface AzureVolumeSpec {
     accountKey?: SecretValue
     sasUrl?: SecretValue
   }
-  options?: { readOnly?: "true" | "false" }
+  proxy?: boolean
+  readOnly?: boolean
+  allowedPaths?: string[]
 }
 
 export interface SftpVolumeSpec {
@@ -80,11 +87,13 @@ export interface SftpVolumeSpec {
   path: string
   target: string
   credentials: {
-    user: SecretValue
+    user?: SecretValue
     password?: SecretValue
     keyFile?: SecretValue
   }
-  options?: { readOnly?: "true" | "false" }
+  proxy?: boolean
+  readOnly?: boolean
+  allowedPaths?: string[]
 }
 
 export interface SmbVolumeSpec {
@@ -97,7 +106,9 @@ export interface SmbVolumeSpec {
     password?: SecretValue
     domain?: SecretValue
   }
-  options?: { readOnly?: "true" | "false" }
+  proxy?: boolean
+  readOnly?: boolean
+  allowedPaths?: string[]
 }
 
 export interface WebdavVolumeSpec {
@@ -111,15 +122,19 @@ export interface WebdavVolumeSpec {
     bearerToken?: SecretValue
   }
   vendor?: string
-  options?: { readOnly?: "true" | "false" }
+  proxy?: boolean
+  readOnly?: boolean
+  allowedPaths?: string[]
 }
 
 export interface DropboxVolumeSpec {
   name: string
   path: string
   target: string
-  credentials: { token: SecretValue }
-  options?: { readOnly?: "true" | "false" }
+  credentials: { token?: SecretValue }
+  proxy?: boolean
+  readOnly?: boolean
+  allowedPaths?: string[]
 }
 
 export interface GdriveVolumeSpec {
@@ -127,11 +142,13 @@ export interface GdriveVolumeSpec {
   path: string
   target: string
   credentials: {
-    clientId: SecretValue
-    clientSecret: SecretValue
-    token: SecretValue
+    clientId?: SecretValue
+    clientSecret?: SecretValue
+    token?: SecretValue
   }
-  options?: { readOnly?: "true" | "false" }
+  proxy?: boolean
+  readOnly?: boolean
+  allowedPaths?: string[]
 }
 
 export interface Feature {

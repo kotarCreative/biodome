@@ -144,6 +144,11 @@ export interface Volume {
   vendor?: string
   credentials?: Record<string, SecretValue>
   options?: Record<string, string>
+  // MCP proxy mode: when true, the volume is not mounted in the dev container.
+  // The MCP server exposes file-access tools and uses provider SDKs/adapters.
+  proxy?: boolean
+  readOnly?: boolean
+  allowedPaths?: string[]
 }
 
 export interface Port {
@@ -161,6 +166,10 @@ export interface Process {
   healthCheck?: ProcessHealthCheck
   mode: "daemon" | "oneshot"
   startOn: LifecyclePoint
+  // When false, the process environment is not merged into the global runtime
+  // environment. This keeps sensitive env vars (e.g. MCP proxy credentials) out of
+  // the dev service's compose environment.
+  mergeEnv?: boolean
 }
 
 export interface ProcessHealthCheck {
@@ -269,6 +278,7 @@ export const ProcessSpecSchema = Schema.Struct({
   healthCheck: Schema.optional(ProcessHealthCheckSpecSchema),
   mode: Schema.optional(Schema.Literals(["daemon", "oneshot"])),
   startOn: Schema.optional(LifecyclePointSchema),
+  mergeEnv: Schema.optional(Schema.Boolean),
 })
 
 export const HookSpecSchema = ProcessSpecSchema.pipe(
@@ -368,6 +378,9 @@ export const VolumeSpecSchema = Schema.Struct({
   vendor: Schema.optional(Schema.String),
   credentials: Schema.optional(VolumeCredentialsSchema),
   options: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  proxy: Schema.optional(Schema.Boolean),
+  readOnly: Schema.optional(Schema.Boolean),
+  allowedPaths: Schema.optional(Schema.Array(Schema.String)),
 })
 
 export const EnvScopeSchema = Schema.Literals(["build", "runtime", "both"])
@@ -427,6 +440,7 @@ export const ProcessSchema = Schema.Struct({
   healthCheck: Schema.optional(ProcessHealthCheckSpecSchema),
   mode: Schema.Literals(["daemon", "oneshot"]),
   startOn: LifecyclePointSchema,
+  mergeEnv: Schema.optional(Schema.Boolean),
 })
 
 export const ServiceSchema = Schema.Struct({
@@ -511,6 +525,9 @@ export const PlanSchema = Schema.Struct({
         vendor: Schema.optional(Schema.String),
         credentials: Schema.optional(VolumeCredentialsSchema),
         options: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+        proxy: Schema.optional(Schema.Boolean),
+        readOnly: Schema.optional(Schema.Boolean),
+        allowedPaths: Schema.optional(Schema.Array(Schema.String)),
       })
     ),
     ports: Schema.Array(PortSchema),

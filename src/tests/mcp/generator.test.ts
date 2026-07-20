@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createPlan } from "../../core/plan.js";
-import { generatePlanJson, generateMcpServerContent } from "../../mcp/generator.js";
+import { generatePlanJson } from "../../mcp/generator.js";
 
 describe("generatePlanJson", () => {
   it("serializes an empty plan", () => {
@@ -102,62 +102,47 @@ describe("generatePlanJson", () => {
   });
 });
 
-describe("generateMcpServerContent", () => {
-  it("returns valid JavaScript source", () => {
-    const src = generateMcpServerContent();
-    expect(src).toBeTruthy();
-    expect(src).toContain("biodome-mcp server");
-    expect(src).toContain("@modelcontextprotocol/sdk");
-    expect(src).toContain("StreamableHTTPServerTransport");
-    expect(src).toContain("get_sandbox_info");
-    expect(src).toContain("get_endpoints");
-    expect(src).toContain("get_process_status");
-    expect(src).toContain("get_service_health");
-    expect(src).toContain("get_logs");
-    expect(src).toContain("restart_process");
-    expect(src).toContain("exec_command");
+describe("volume serialization", () => {
+  it("includes proxy volumes with credential references", () => {
+    const plan = createPlan("app");
+    plan.runtime.volumes.push({
+      name: "s3-data",
+      type: "s3",
+      target: "/workspace/s3-data",
+      bucket: "my-bucket",
+      prefix: "data/",
+      proxy: true,
+      readOnly: true,
+      allowedPaths: ["**/*.pdf"],
+      credentials: {
+        accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
+        secretAccessKey: "literal-secret",
+      },
+    });
+
+    const json = JSON.parse(generatePlanJson(plan));
+    expect(json.volumes).toHaveLength(1);
+    const volume = json.volumes[0];
+    expect(volume.name).toBe("s3-data");
+    expect(volume.proxy).toBe(true);
+    expect(volume.readOnly).toBe(true);
+    expect(volume.allowedPaths).toEqual(["**/*.pdf"]);
+    expect(volume.credentials.accessKeyId).toEqual({ env: "AWS_ACCESS_KEY_ID" });
+    expect(volume.credentials.secretAccessKey).toBe("literal-secret");
   });
 
-  it("creates a no-op when parsed as JavaScript (no syntax errors)", () => {
-    // Basic check that it's parseable: the function returns a string
-    expect(typeof generateMcpServerContent()).toBe("string");
-  });
+  it("includes non-proxy local volumes without credentials", () => {
+    const plan = createPlan("app");
+    plan.runtime.volumes.push({
+      name: "data",
+      type: "local",
+      target: "/workspace/data",
+      source: "./data",
+    });
 
-  it("does not build the tail command through a shell", () => {
-    const src = generateMcpServerContent();
-    // The vulnerable form interpolated filePath into a shell string.
-    expect(src).not.toContain('tail -${lines}');
-    expect(src).toContain('execFileSync("tail"');
-  });
-
-  it("validates process names to prevent injection/traversal", () => {
-    const src = generateMcpServerContent();
-    expect(src).toContain("isSafeProcessName");
-    expect(src).toContain("[A-Za-z0-9_.-]+");
-  });
-
-  it("refuses to restart the MCP server itself", () => {
-    const src = generateMcpServerContent();
-    expect(src).toContain("Refusing to restart the biodome-mcp server itself");
-  });
-
-  it("binds to 0.0.0.0 so the published port is reachable", () => {
-    const src = generateMcpServerContent();
-    expect(src).toContain('httpServer.listen(port, "0.0.0.0"');
-  });
-
-  it("resolves endpoint credential env references from the container env", () => {
-    const src = generateMcpServerContent();
-    expect(src).toContain("resolveSecret");
-    expect(src).toContain("resolveEndpoint");
-    expect(src).toContain("process.env[value.env]");
-  });
-
-  it("redacts endpoint credentials in the MCP audit log", () => {
-    const src = generateMcpServerContent();
-    expect(src).toContain("redactEndpointForLog");
-    expect(src).toContain("REDACTED");
-    // The log payload is redacted; the returned result still contains secrets.
-    expect(src).toContain("logCall(name, args, redacted)");
+    const json = JSON.parse(generatePlanJson(plan));
+    expect(json.volumes).toHaveLength(1);
+    expect(json.volumes[0].proxy).toBe(false);
+    expect(json.volumes[0].readOnly).toBe(false);
   });
 });

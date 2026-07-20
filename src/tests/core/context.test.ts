@@ -842,6 +842,51 @@ describe("SandboxContext", () => {
       });
     });
 
+    it("does not mount proxy volumes in the dev container", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addVolume({
+        name: "s3-proxy",
+        type: "s3",
+        bucket: "my-bucket",
+        target: "/workspace/s3-proxy",
+        proxy: true,
+        credentials: {
+          accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
+          secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
+        },
+      });
+
+      expect(ctx.plan.runtime.volumes).toHaveLength(1);
+      expect(ctx.plan.runtime.volumes[0].proxy).toBe(true);
+      expect(ctx.plan.build.aptPackages).not.toContain("rclone");
+      expect(ctx.plan.runtime.processes).toHaveLength(0);
+    });
+
+    it("isolates proxy-volume credentials in the MCP process environment", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addVolume({
+        name: "s3-proxy",
+        type: "s3",
+        bucket: "my-bucket",
+        target: "/workspace/s3-proxy",
+        proxy: true,
+        credentials: {
+          accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
+          secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
+        },
+      });
+      ctx.configureMcp(3001);
+
+      const mcp = ctx.plan.runtime.processes.find((p) => p.name === "biodome-mcp");
+      expect(mcp).toBeDefined();
+      expect(mcp!.mergeEnv).toBe(false);
+      expect(mcp!.environment.AWS_ACCESS_KEY_ID).toBe("${AWS_ACCESS_KEY_ID}");
+      expect(mcp!.environment.AWS_SECRET_ACCESS_KEY).toBe("${AWS_SECRET_ACCESS_KEY}");
+      // Credentials must not leak into the dev service's global environment.
+      expect(ctx.plan.runtime.environment.AWS_ACCESS_KEY_ID).toBeUndefined();
+      expect(ctx.plan.runtime.environment.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+    });
+
     it("adds volumes through wrapper helpers", () => {
       const ctx = new SandboxContext("/tmp", "test");
       ctx.addLocalVolume({ name: "data", source: "./data", target: "/workspace/data" });

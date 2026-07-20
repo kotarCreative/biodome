@@ -283,6 +283,37 @@ export default function volumes(ctx) {
 
 Cloud-backed volumes install `rclone` and `fuse3` in the dev container, enable privileged mode, and run an `rclone mount` daemon process. Files are read and written directly against the remote source.
 
+### Proxy mode (agent-safe access)
+
+By default, cloud volumes are mounted inside the dev container, so any process or agent in the container can read them. If you want to keep credentials and data access away from the sandbox, enable **proxy mode**:
+
+```javascript
+export default function volumes(ctx) {
+  ctx.addS3Volume({
+    name: "s3-data",
+    bucket: "my-bucket",
+    prefix: "reports/",
+    target: "/workspace/s3-data",
+    proxy: true,
+    readOnly: true,
+    allowedPaths: ["reports/**/*.pdf"],
+    credentials: {
+      accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
+      secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
+    },
+  });
+}
+```
+
+In proxy mode:
+
+- The volume is **not mounted** in the dev container.
+- Credentials are passed only to the MCP server process, never to the dev container's global environment.
+- Agents access files through MCP tools: `list_volumes`, `list_files`, `read_file`, `write_file`, `stat_file`.
+- Access rules are enforced by the MCP server (`allowedPaths`, `readOnly`).
+
+Proxy mode is currently supported for S3, GCS, and Azure Blob. Other volume types still fall back to `rclone` mount.
+
 ### Volume wrappers
 
 For a simpler DX you can use provider-specific wrappers. They delegate to `addVolume` but accept friendlier field names.

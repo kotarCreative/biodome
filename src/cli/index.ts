@@ -1,6 +1,7 @@
 import { Command } from "commander"
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, copyFileSync } from "node:fs"
+import { join, dirname } from "node:path"
+import { fileURLToPath } from "node:url"
 import { randomUUID } from "node:crypto"
 import { Effect, Layer } from "effect"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -20,7 +21,7 @@ import {
 import { DockerRuntime } from "../docker/runner.js"
 import { formatInfo, formatAgentsMd } from "../core/info.js"
 import { Plan } from "../core/plan.js"
-import { generatePlanJson, generateMcpServerContent } from "../mcp/generator.js"
+import { generatePlanJson } from "../mcp/generator.js"
 import type { SandboxRuntime } from "../core/runtime.js"
 import { PlanError, SandboxError } from "../core/errors.js"
 import { NodeRuntime } from "../core/runtime-node.js"
@@ -34,6 +35,13 @@ import { EventStore, FileEventStoreLive, NoOpEventStoreLive, SandboxEvent, event
 
 const CONFIG_DIR = ".biodome"
 const BUILD_DIR = ".biodome-build"
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
+function mcpServerSourcePath(): string {
+  // When running from dist/cli/index.js, the built MCP server is at dist/mcp/server.js.
+  return join(__dirname, "..", "mcp", "server.js")
+}
 
 function ensureBuildDir(rootDir: string): void {
   mkdirSync(join(rootDir, BUILD_DIR), { recursive: true })
@@ -80,7 +88,7 @@ function writeGeneratedFiles(rootDir: string, plan: Plan): string[] {
 
   if (plan.build.mcpEnabled) {
     writeFileSync(join(rootDir, BUILD_DIR, "plan.json"), generatePlanJson(plan))
-    writeFileSync(join(rootDir, BUILD_DIR, "mcp-server.js"), generateMcpServerContent())
+    copyFileSync(mcpServerSourcePath(), join(rootDir, BUILD_DIR, "mcp-server.js"))
   }
 
   return [

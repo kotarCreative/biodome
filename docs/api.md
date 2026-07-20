@@ -57,7 +57,7 @@ Declare an environment variable. Provide exactly one of `value` (literal) or `fr
 
 ### `addVolume(spec)`
 
-Mount a local directory or cloud/network storage into the dev container as a live read/write access point. Supported types: `"local"`, `"s3"`, `"gcs"`, `"azure"`, `"sftp"`, `"smb"`, `"webdav"`, `"dropbox"`, `"gdrive"`. Credentials can be literal strings or env references. See [Primitives](primitives.md#addvolumespec).
+Mount a local directory or cloud/network storage into the dev container as a live read/write access point, or declare a proxy volume for agent-safe access through the MCP server. Supported types: `"local"`, `"s3"`, `"gcs"`, `"azure"`, `"sftp"`, `"smb"`, `"webdav"`, `"dropbox"`, `"gdrive"`. Credentials can be literal strings or env references. See [Primitives](primitives.md#addvolumespec).
 
 ### `addLocalVolume(spec)`
 
@@ -77,7 +77,17 @@ Mount a local directory or cloud/network storage into the dev container as a liv
 
 ### `addGdriveVolume(spec)`
 
-Provider-specific wrappers around `addVolume` with friendlier field names. See [Primitives](primitives.md#volume-wrappers).
+Provider-specific wrappers around `addVolume` with friendlier field names. All wrappers accept `proxy`, `readOnly`, and `allowedPaths`. See [Primitives](primitives.md#volume-wrappers).
+
+### MCP volume tools
+
+When proxy volumes are enabled, the MCP server exposes these tools for agent access:
+
+- `list_volumes` — list proxy volumes and their access rules.
+- `list_files` — list files under a volume-qualified path (`s3-data:reports/`).
+- `read_file` — read a file as base64 (`s3-data:reports/file.pdf`).
+- `write_file` — write a file from base64 content.
+- `stat_file` — get file metadata.
 
 ### `fileExists(path)`
 

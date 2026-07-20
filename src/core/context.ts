@@ -354,6 +354,8 @@ export class SandboxContext implements FeatureContext, BuildContext {
 
     this.validateVolumeSpec(validated)
 
+    const readOnly = validated.readOnly || validated.options?.readOnly === "true"
+
     const volume: Volume = {
       name: validated.name,
       type: validated.type,
@@ -373,12 +375,20 @@ export class SandboxContext implements FeatureContext, BuildContext {
       vendor: validated.vendor,
       credentials: validated.credentials ? { ...validated.credentials } : undefined,
       options: validated.options ? { ...validated.options } : undefined,
+      proxy: validated.proxy,
+      readOnly,
+      allowedPaths: validated.allowedPaths ? [...validated.allowedPaths] : undefined,
     }
 
     this.plan.runtime.volumes.push(volume)
 
     if (validated.type === "local") {
       // Local bind mounts are emitted directly in compose; nothing else to do.
+      return
+    }
+
+    if (validated.proxy) {
+      // Proxy volumes are accessed through the MCP server, not mounted.
       return
     }
 
@@ -399,7 +409,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       "--vfs-cache-mode",
       "writes",
     ]
-    if (validated.options?.readOnly === "true") {
+    if (readOnly) {
       command.push("--read-only")
     }
     this.addProcess({
@@ -584,7 +594,8 @@ export class SandboxContext implements FeatureContext, BuildContext {
       type: "local",
       source: spec.source,
       target: spec.target,
-      options: spec.options,
+      readOnly: spec.readOnly,
+      allowedPaths: spec.allowedPaths,
     })
   }
 
@@ -596,7 +607,9 @@ export class SandboxContext implements FeatureContext, BuildContext {
       prefix: spec.prefix,
       target: spec.target,
       credentials: this.normalizeCredentials(spec.credentials),
-      options: spec.options,
+      proxy: spec.proxy,
+      readOnly: spec.readOnly,
+      allowedPaths: spec.allowedPaths,
     })
   }
 
@@ -608,7 +621,9 @@ export class SandboxContext implements FeatureContext, BuildContext {
       prefix: spec.prefix,
       target: spec.target,
       credentials: this.normalizeCredentials(spec.credentials),
-      options: spec.options,
+      proxy: spec.proxy,
+      readOnly: spec.readOnly,
+      allowedPaths: spec.allowedPaths,
     })
   }
 
@@ -621,7 +636,9 @@ export class SandboxContext implements FeatureContext, BuildContext {
       path: spec.path,
       target: spec.target,
       credentials: this.normalizeCredentials(spec.credentials),
-      options: spec.options,
+      proxy: spec.proxy,
+      readOnly: spec.readOnly,
+      allowedPaths: spec.allowedPaths,
     })
   }
 
@@ -634,7 +651,9 @@ export class SandboxContext implements FeatureContext, BuildContext {
       path: spec.path,
       target: spec.target,
       credentials: this.normalizeCredentials(spec.credentials),
-      options: spec.options,
+      proxy: spec.proxy,
+      readOnly: spec.readOnly,
+      allowedPaths: spec.allowedPaths,
     })
   }
 
@@ -646,7 +665,9 @@ export class SandboxContext implements FeatureContext, BuildContext {
       share: spec.share,
       target: spec.target,
       credentials: this.normalizeCredentials(spec.credentials),
-      options: spec.options,
+      proxy: spec.proxy,
+      readOnly: spec.readOnly,
+      allowedPaths: spec.allowedPaths,
     })
   }
 
@@ -659,7 +680,9 @@ export class SandboxContext implements FeatureContext, BuildContext {
       target: spec.target,
       vendor: spec.vendor,
       credentials: spec.credentials ? this.normalizeCredentials(spec.credentials) : undefined,
-      options: spec.options,
+      proxy: spec.proxy,
+      readOnly: spec.readOnly,
+      allowedPaths: spec.allowedPaths,
     })
   }
 
@@ -670,7 +693,9 @@ export class SandboxContext implements FeatureContext, BuildContext {
       path: spec.path,
       target: spec.target,
       credentials: this.normalizeCredentials(spec.credentials),
-      options: spec.options,
+      proxy: spec.proxy,
+      readOnly: spec.readOnly,
+      allowedPaths: spec.allowedPaths,
     })
   }
 
@@ -681,7 +706,9 @@ export class SandboxContext implements FeatureContext, BuildContext {
       path: spec.path,
       target: spec.target,
       credentials: this.normalizeCredentials(spec.credentials),
-      options: spec.options,
+      proxy: spec.proxy,
+      readOnly: spec.readOnly,
+      allowedPaths: spec.allowedPaths,
     })
   }
 
@@ -795,6 +822,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       healthCheck,
       mode,
       startOn,
+      mergeEnv: spec.mergeEnv,
     }
   }
 
@@ -841,6 +869,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
   }
 
   private mergeProcessEnv(proc: Process): void {
+    if (proc.mergeEnv === false) return
     for (const [key, value] of Object.entries(proc.environment)) {
       // Variables declared via addEnv take precedence over process-level env.
       // This prevents a process's local environment from silently overwriting
@@ -885,6 +914,19 @@ export class SandboxContext implements FeatureContext, BuildContext {
       this.addLanguage("node", { version: "20" })
     }
 
+    // Collect proxy-volume credential env references so the MCP server can
+    // resolve them at runtime. Keep them isolated to the MCP process so they
+    // are not merged into the dev service's global environment.
+    const mcpEnvironment: Record<string, string> = {}
+    for (const volume of this.plan.runtime.volumes) {
+      if (!volume.proxy) continue
+      if (!volume.credentials) continue
+      for (const value of Object.values(volume.credentials)) {
+        if (typeof value === "string") continue
+        mcpEnvironment[value.env] = `\${${value.env}}`
+      }
+    }
+
     this.addProcess({
       name: "biodome-mcp",
       command: [
@@ -895,6 +937,8 @@ export class SandboxContext implements FeatureContext, BuildContext {
       ],
       port,
       healthCheck: { type: "http", url: `http://localhost:${port}/health` },
+      environment: mcpEnvironment,
+      mergeEnv: false,
     })
   }
 }

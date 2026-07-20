@@ -28,6 +28,8 @@ function formatEnvVar(envVar: EnvVar): string {
 
 function formatVolume(volume: Volume): string {
   const parts: string[] = [volume.type];
+  if (volume.proxy) parts.push("proxy");
+  if (volume.readOnly) parts.push("read-only");
   if (volume.source) parts.push(`source ${volume.source}`);
   if (volume.bucket) parts.push(`bucket ${volume.bucket}`);
   if (volume.prefix) parts.push(`prefix ${volume.prefix}`);
@@ -39,6 +41,7 @@ function formatVolume(volume: Volume): string {
   if (volume.port) parts.push(`port ${volume.port}`);
   if (volume.share) parts.push(`share ${volume.share}`);
   if (volume.url) parts.push(`url ${volume.url}`);
+  if (volume.allowedPaths?.length) parts.push(`allowed: ${volume.allowedPaths.join(", ")}`);
   return `${volume.name} (${parts.join(", ")}) → ${volume.target}`;
 }
 

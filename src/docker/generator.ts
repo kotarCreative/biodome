@@ -332,8 +332,10 @@ function devService(plan: Plan): ComposeService {
     networks: ["biodome"],
   };
 
-  const hasCloudVolume = plan.runtime.volumes.some((v) => v.type !== "local");
-  if (hasCloudVolume) {
+  const hasMountedCloudVolume = plan.runtime.volumes.some(
+    (v) => v.type !== "local" && !v.proxy
+  );
+  if (hasMountedCloudVolume) {
     // FUSE-based cloud mounts (S3, Dropbox, Google Drive) need privileged mode.
     service.privileged = true;
   }
@@ -342,7 +344,7 @@ function devService(plan: Plan): ComposeService {
     if (volume.type === "local" && volume.source) {
       service.volumes = service.volumes || [];
       service.volumes.push(`${volume.source}:${volume.target}`);
-      if (volume.options?.readOnly === "true") {
+      if (volume.readOnly) {
         service.volumes[service.volumes.length - 1] += ":ro";
       }
     }
