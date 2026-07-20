@@ -1,6 +1,7 @@
 /biodome
 /biodome.exe
 .biodome/
+.biodome-build/
 node_modules
 dist
 

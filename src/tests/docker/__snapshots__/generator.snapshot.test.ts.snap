@@ -30,10 +30,10 @@ FROM base AS dev
 WORKDIR /workspace
 
 # Copy supervisord configuration for managed processes.
-COPY .biodome/supervisord.conf /workspace/.biodome/supervisord.conf
+COPY .biodome-build/supervisord.conf /workspace/.biodome-build/supervisord.conf
 
 # Start managed processes via supervisord.
-CMD ["supervisord", "-c", "/workspace/.biodome/supervisord.conf"]
+CMD ["supervisord", "-c", "/workspace/.biodome-build/supervisord.conf"]
 "
 `;
 
@@ -64,7 +64,7 @@ stdout_logfile=/tmp/backend.log
 stderr_logfile=/tmp/backend.log
 
 [program:backend-healthcheck]
-command=sh /workspace/.biodome/healthchecks/backend-monitor.sh
+command=sh /workspace/.biodome-build/healthchecks/backend-monitor.sh
 autostart=true
 autorestart=true
 startsecs=5
@@ -91,7 +91,7 @@ services:
   dev:
     build:
       context: ..
-      dockerfile: .biodome/Dockerfile
+      dockerfile: .biodome-build/Dockerfile
     image: multi-app-dev:latest
     container_name: multi-app-dev
     working_dir: /workspace
@@ -105,7 +105,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - sh /workspace/.biodome/healthchecks/all.sh
+        - sh /workspace/.biodome-build/healthchecks/all.sh
       interval: 5s
       timeout: 3s
       retries: 3
@@ -169,7 +169,7 @@ services:
   dev:
     build:
       context: ..
-      dockerfile: .biodome/Dockerfile
+      dockerfile: .biodome-build/Dockerfile
     image: multi-lang-dev:latest
     container_name: multi-lang-dev
     working_dir: /workspace
@@ -227,7 +227,7 @@ services:
   dev:
     build:
       context: ..
-      dockerfile: .biodome/Dockerfile
+      dockerfile: .biodome-build/Dockerfile
     image: bash-app-dev:latest
     container_name: bash-app-dev
     working_dir: /workspace
@@ -276,10 +276,10 @@ FROM base AS dev
 WORKDIR /workspace
 
 # Copy supervisord configuration for managed processes.
-COPY .biodome/supervisord.conf /workspace/.biodome/supervisord.conf
+COPY .biodome-build/supervisord.conf /workspace/.biodome-build/supervisord.conf
 
 # Start managed processes via supervisord.
-CMD ["supervisord", "-c", "/workspace/.biodome/supervisord.conf"]
+CMD ["supervisord", "-c", "/workspace/.biodome-build/supervisord.conf"]
 "
 `;
 
@@ -311,7 +311,7 @@ stderr_logfile=/tmp/web.log
 environment=DEBUG="1"
 
 [program:web-healthcheck]
-command=sh /workspace/.biodome/healthchecks/web-monitor.sh
+command=sh /workspace/.biodome-build/healthchecks/web-monitor.sh
 autostart=true
 autorestart=true
 startsecs=5
@@ -329,7 +329,7 @@ services:
   dev:
     build:
       context: ..
-      dockerfile: .biodome/Dockerfile
+      dockerfile: .biodome-build/Dockerfile
     image: my-app-dev:latest
     container_name: my-app-dev
     working_dir: /workspace
@@ -343,7 +343,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - sh /workspace/.biodome/healthchecks/all.sh
+        - sh /workspace/.biodome-build/healthchecks/all.sh
       interval: 5s
       timeout: 3s
       retries: 10
@@ -417,10 +417,10 @@ WORKDIR /workspace
 COPY --from=deps /workspace/vendor /workspace/vendor
 
 # Copy supervisord configuration for managed processes.
-COPY .biodome/supervisord.conf /workspace/.biodome/supervisord.conf
+COPY .biodome-build/supervisord.conf /workspace/.biodome-build/supervisord.conf
 
 # Start managed processes via supervisord.
-CMD ["supervisord", "-c", "/workspace/.biodome/supervisord.conf"]
+CMD ["supervisord", "-c", "/workspace/.biodome-build/supervisord.conf"]
 "
 `;
 
@@ -451,7 +451,7 @@ stdout_logfile=/tmp/laravel.log
 stderr_logfile=/tmp/laravel.log
 
 [program:laravel-healthcheck]
-command=sh /workspace/.biodome/healthchecks/laravel-monitor.sh
+command=sh /workspace/.biodome-build/healthchecks/laravel-monitor.sh
 autostart=true
 autorestart=true
 startsecs=5
@@ -469,7 +469,7 @@ services:
   dev:
     build:
       context: ..
-      dockerfile: .biodome/Dockerfile
+      dockerfile: .biodome-build/Dockerfile
     image: php-app-dev:latest
     container_name: php-app-dev
     working_dir: /workspace
@@ -483,7 +483,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - sh /workspace/.biodome/healthchecks/all.sh
+        - sh /workspace/.biodome-build/healthchecks/all.sh
       interval: 5s
       timeout: 3s
       retries: 10
@@ -547,7 +547,7 @@ services:
   dev:
     build:
       context: ..
-      dockerfile: .biodome/Dockerfile
+      dockerfile: .biodome-build/Dockerfile
     image: py-app-dev:latest
     container_name: py-app-dev
     working_dir: /workspace

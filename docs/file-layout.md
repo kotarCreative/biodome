@@ -1,10 +1,10 @@
 # File layout
 
-Every biodome project has a `biodome/` directory at the repository root. The directory contains metadata, services, and feature files.
+Every biodome project has a `.biodome/` directory at the repository root. The directory contains metadata, services, and feature files. Generated build artifacts are written to `.biodome-build/` so config and generated output stay separate.
 
 ```
 my-project/
-├── biodome/
+├── .biodome/
 │   ├── config.json          # project metadata
 │   ├── services.mjs         # backing services
 │   └── features/
@@ -12,18 +12,21 @@ my-project/
 │       ├── migrate.mjs      # one-shot hook
 │       ├── python.mjs       # language runtime
 │       └── npm-tools.mjs    # tools and packages
-├── .biodome/
+├── .biodome-build/
 │   ├── Dockerfile           # generated
 │   ├── supervisord.conf     # generated
 │   ├── docker-compose.yaml  # generated
-│   └── healthchecks/        # generated
-│       ├── <process>.sh
-│       ├── <process>-monitor.sh
-│       └── all.sh
-└── .dockerignore            # generated
+│   ├── healthchecks/        # generated
+│   │   ├── <process>.sh
+│   │   ├── <process>-monitor.sh
+│   │   └── all.sh
+│   └── logs/                # generated event logs
+│       └── events-<runId>.jsonl
+├── .dockerignore            # generated
+└── .gitignore               # `.biodome-build/` entry added by `biodome build`
 ```
 
-## `biodome/config.json`
+## `.biodome/config.json`
 
 Static metadata for the project. Currently only the project name is required.
 
@@ -35,11 +38,11 @@ Static metadata for the project. Currently only the project name is required.
 }
 ```
 
-## `biodome/services.mjs`
+## `.biodome/services.mjs`
 
 Backing services run as separate containers. Use `ctx.addService()` for each service.
 
-> Legacy `.js` extensions are also supported (`biodome/services.js`).
+> Legacy `.js` extensions are also supported (`.biodome/services.js`).
 
 ```javascript
 export default function services(ctx) {
@@ -53,14 +56,14 @@ export default function services(ctx) {
 }
 ```
 
-## `biodome/features/*.mjs`
+## `.biodome/features/*.mjs`
 
 Feature files declare languages, packages, tools, processes, and hooks. They are loaded in sorted order and each receives the shared context.
 
-> Legacy `.js` extensions are also supported (`biodome/features/*.js`).
+> Legacy `.js` extensions are also supported (`.biodome/features/*.js`).
 
 ```javascript
-// biodome/features/python.mjs
+// .biodome/features/python.mjs
 export default function python(ctx) {
   ctx.addLanguage("python", { version: "3.12" });
   ctx.addTool("libpq-dev");
@@ -72,10 +75,11 @@ export default function python(ctx) {
 
 After running `biodome build` or `biodome up`, the CLI writes:
 
-- `.biodome/Dockerfile` — multi-stage image for the dev container.
-- `.biodome/supervisord.conf` — process manager config for daemon processes.
-- `.biodome/docker-compose.yaml` — backing services and dev service.
-- `.biodome/healthchecks/*.sh` — per-process health check and monitor scripts, plus an aggregate `all.sh`.
+- `.biodome-build/Dockerfile` — multi-stage image for the dev container.
+- `.biodome-build/supervisord.conf` — process manager config for daemon processes.
+- `.biodome-build/docker-compose.yaml` — backing services and dev service.
+- `.biodome-build/healthchecks/*.sh` — per-process health check and monitor scripts, plus an aggregate `all.sh`.
+- `.biodome-build/logs/events-<runId>.jsonl` — structured event log for each run.
 - `.dockerignore` — build context exclusions.
 
 Do not edit these files directly. They are regenerated each time.

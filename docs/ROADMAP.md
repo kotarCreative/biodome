@@ -1,13 +1,13 @@
 # Roadmap
 
-Biodome is a TypeScript/Node CLI that turns a `biodome/` directory into a reproducible Docker development environment.
+Biodome is a TypeScript/Node CLI that turns a `.biodome/` directory into a reproducible Docker development environment.
 
 ## Current state
 
-- `biodome init` scaffolds `biodome/config.json`, `biodome/services.mjs`, and `biodome/features/*.mjs` (legacy `.js` extensions are also supported).
+- `biodome init` scaffolds `.biodome/config.json`, `.biodome/services.mjs`, and `.biodome/features/*.mjs` (legacy `.js` extensions are also supported).
 - `biodome build` / `up` / `down` / `exec` manage the generated Docker environment.
 - `biodome info` and `biodome generate agents.md` produce project summaries from the computed plan.
-- `biodome config validate` checks `biodome/config.json` schema and feature/service module exports without executing feature scripts.
+- `biodome config validate` checks `.biodome/config.json` schema and feature/service module exports without executing feature scripts.
 - Feature files are plain ESM modules that export a default function receiving a typed `SandboxContext`.
 - Dockerfile, `docker-compose.yaml`, `.dockerignore`, `supervisord.conf`, and per-process health check scripts are generated from the plan.
 - Integration tests assert generated images build for Python, Node, and Go, that a Postgres service becomes healthy, and that a daemon process becomes healthy and is monitored by `supervisord`.
@@ -27,7 +27,7 @@ Biodome is a TypeScript/Node CLI that turns a `biodome/` directory into a reprod
 3. ~~Document the feature module API and the available language handlers.~~ Done — `docs/primitives.md`, `docs/api.md`, `docs/examples.md`, and `docs/file-layout.md` cover the API, primitives, file layout, and examples.
 4. ~~Per-process health checks in `supervisord`.~~ Done — each daemon process with a health check now gets a generated check script and a `supervisord` monitor program that restarts the process after repeated failures. The dev service health check now aggregates all daemon checks, and `supervisorctl` is configured to use the generated `supervisord.conf`.
 5. ~~Multi-language / multi-base-image support.~~ Done — multiple `addLanguage` calls now install all requested runtimes on a shared `debian:12-slim` base image, enabling Python + Node, Go + Rust, or any other combination in a single container.
- 6. ~~CLI polish.~~ Done — `biodome init` now auto-detects languages and generates a starter `biodome/features/auto-detect.mjs` feature by default, `biodome status` reports container health and running processes, and `biodome config validate` runs `validatePlan` to catch port conflicts without building.
+ 6. ~~CLI polish.~~ Done — `biodome init` now auto-detects languages and generates a starter `.biodome/features/auto-detect.mjs` feature by default, `biodome status` reports container health and running processes, and `biodome config validate` runs `validatePlan` to catch port conflicts without building.
 
 ## Next steps
 

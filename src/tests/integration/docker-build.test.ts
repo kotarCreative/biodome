@@ -35,9 +35,9 @@ describeIntegration("docker build integration", () => {
   it("builds a generated Dockerfile for a Python project with a usable venv", async () => {
     const dir = join("/tmp", "sandbox-integration-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "py-fixture" } }),
-      "biodome/services.mjs": "export default function services() {}\n",
-      "biodome/features/python.mjs": `
+      ".biodome/config.json": JSON.stringify({ project: { name: "py-fixture" } }),
+      ".biodome/services.mjs": "export default function services() {}\n",
+      ".biodome/features/python.mjs": `
         export default function python(ctx) {
           ctx.addLanguage("python", { version: "3.12" });
         }
@@ -77,9 +77,9 @@ describeIntegration("docker build integration", () => {
   it("builds a generated Dockerfile for a node project", async () => {
     const dir = join("/tmp", "sandbox-integration-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "node-fixture" } }),
-      "biodome/services.mjs": "export default function services() {}\n",
-      "biodome/features/node.mjs": `
+      ".biodome/config.json": JSON.stringify({ project: { name: "node-fixture" } }),
+      ".biodome/services.mjs": "export default function services() {}\n",
+      ".biodome/features/node.mjs": `
         export default function node(ctx) {
           ctx.addLanguage("node", { version: "20" });
         }
@@ -112,13 +112,13 @@ describeIntegration("docker build integration", () => {
   it("generates a compose file with a healthy postgres service", async () => {
     const dir = join("/tmp", "sandbox-integration-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "pg-fixture" } }),
-      "biodome/services.mjs": `
+      ".biodome/config.json": JSON.stringify({ project: { name: "pg-fixture" } }),
+      ".biodome/services.mjs": `
         export default function services(ctx) {
           ctx.addService("postgres", { port: 5432 });
         }
       `,
-      "biodome/features/node.mjs": `
+      ".biodome/features/node.mjs": `
         export default function node(ctx) {
           ctx.addLanguage("node", { version: "20" });
         }
@@ -181,9 +181,9 @@ describeIntegration("docker build integration", () => {
   it("builds a generated Dockerfile for a go project", async () => {
     const dir = join("/tmp", "sandbox-integration-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "go-fixture" } }),
-      "biodome/services.mjs": "export default function services() {}\n",
-      "biodome/features/go.mjs": `
+      ".biodome/config.json": JSON.stringify({ project: { name: "go-fixture" } }),
+      ".biodome/services.mjs": "export default function services() {}\n",
+      ".biodome/features/go.mjs": `
         export default function go(ctx) {
           ctx.addLanguage("go", { version: "1.22" });
         }
@@ -225,14 +225,14 @@ describeIntegration("docker build integration", () => {
   it("builds a generated Dockerfile with Python and Node runtimes", async () => {
     const dir = join("/tmp", "sandbox-integration-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "py-node-fixture" } }),
-      "biodome/services.mjs": "export default function services() {}\n",
-      "biodome/features/python.mjs": `
+      ".biodome/config.json": JSON.stringify({ project: { name: "py-node-fixture" } }),
+      ".biodome/services.mjs": "export default function services() {}\n",
+      ".biodome/features/python.mjs": `
         export default function python(ctx) {
           ctx.addLanguage("python", { version: "3.12" });
         }
       `,
-      "biodome/features/node.mjs": `
+      ".biodome/features/node.mjs": `
         export default function node(ctx) {
           ctx.addLanguage("node", { version: "20" });
         }
@@ -294,14 +294,14 @@ class Handler(BaseHTTPRequestHandler):
 HTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
 `;
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: projectName } }),
-      "biodome/services.mjs": "export default function services() {}\n",
-      "biodome/features/python.mjs": `
+      ".biodome/config.json": JSON.stringify({ project: { name: projectName } }),
+      ".biodome/services.mjs": "export default function services() {}\n",
+      ".biodome/features/python.mjs": `
         export default function python(ctx) {
           ctx.addLanguage("python", { version: "3.12" });
         }
       `,
-      "biodome/features/web.mjs": `
+      ".biodome/features/web.mjs": `
         export default function web(ctx) {
           ctx.addProcess({
             name: "web",

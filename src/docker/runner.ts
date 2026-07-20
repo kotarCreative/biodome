@@ -8,7 +8,7 @@ import type { SandboxRuntime } from "../core/runtime.js"
 import { RuntimeError } from "../core/errors.js"
 import { EventStore, type EventData } from "../core/events.js"
 
-const COMPOSE_FILE = ".biodome/docker-compose.yaml"
+const COMPOSE_FILE = ".biodome-build/docker-compose.yaml"
 
 const DOCKER_CAPABILITIES = capabilitiesOf(
   "lifecycle.build",
@@ -378,7 +378,7 @@ export class DockerRuntime implements SandboxRuntime {
           `${this.project}-dev`,
           "supervisorctl",
           "-c",
-          "/workspace/.biodome/supervisord.conf",
+          "/workspace/.biodome-build/supervisord.conf",
           "restart",
           processName,
         ],

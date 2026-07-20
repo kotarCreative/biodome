@@ -65,7 +65,7 @@ export function generateDockerfile(plan: Plan): string {
   if (plan.build.mcpEnabled) {
     lines.push("# Install the MCP SDK for the biodome-mcp server.");
     lines.push("# Installed under /node_modules so the ESM server at");
-    lines.push("# /workspace/.biodome/mcp-server.js can resolve it. /node_modules is on");
+    lines.push("# /workspace/.biodome-build/mcp-server.js can resolve it. /node_modules is on");
     lines.push("# the module resolution path and is not shadowed by the /workspace mount.");
     lines.push("RUN npm install --prefix / @modelcontextprotocol/sdk");
     lines.push("");
@@ -125,10 +125,10 @@ export function generateDockerfile(plan: Plan): string {
 
   if (hasDaemonProcesses) {
     lines.push("# Copy supervisord configuration for managed processes.");
-    lines.push("COPY .biodome/supervisord.conf /workspace/.biodome/supervisord.conf");
+    lines.push("COPY .biodome-build/supervisord.conf /workspace/.biodome-build/supervisord.conf");
     lines.push("");
     lines.push("# Start managed processes via supervisord.");
-    lines.push('CMD ["supervisord", "-c", "/workspace/.biodome/supervisord.conf"]');
+    lines.push('CMD ["supervisord", "-c", "/workspace/.biodome-build/supervisord.conf"]');
   } else {
     lines.push("# Source code is mounted at runtime via 'docker run -v .:/workspace'");
     lines.push('CMD ["bash"]');
@@ -203,7 +203,7 @@ export function generateSupervisordConf(plan: Plan): string {
       const startPeriod = proc.healthCheck.startPeriod || "5s";
       lines.push(`[program:${proc.name}-healthcheck]`);
       lines.push(
-        `command=sh /workspace/.biodome/healthchecks/${proc.name}-monitor.sh`
+        `command=sh /workspace/.biodome-build/healthchecks/${proc.name}-monitor.sh`
       );
       lines.push("autostart=true");
       lines.push("autorestart=true");
@@ -224,10 +224,9 @@ export function generateDockerignore(): string {
     "",
     ".git",
     ".gitignore",
-    ".biodome/*",
-    "!.biodome/supervisord.conf",
+    ".biodome-build/*",
+    "!.biodome-build/supervisord.conf",
     ".data",
-    "biodome",
     "node_modules",
     ".venv",
     "venv",
@@ -313,7 +312,7 @@ function devService(plan: Plan): ComposeService {
   const service: ComposeService = {
     build: {
       context: "..",
-      dockerfile: ".biodome/Dockerfile",
+      dockerfile: ".biodome-build/Dockerfile",
     },
     image: `${plan.project}-dev:latest`,
     container_name: `${plan.project}-dev`,
@@ -384,7 +383,7 @@ function devService(plan: Plan): ComposeService {
       );
 
       service.healthcheck = {
-        test: ["CMD-SHELL", "sh /workspace/.biodome/healthchecks/all.sh"],
+        test: ["CMD-SHELL", "sh /workspace/.biodome-build/healthchecks/all.sh"],
         interval: formatDuration(Math.min(...intervals)),
         timeout: formatDuration(Math.max(1, timeouts.reduce((a, b) => a + b, 0))),
         retries: Math.min(...retries),
@@ -465,12 +464,12 @@ function processHealthMonitorScript(proc: Process): string {
     `sleep ${startPeriod}`,
     "failures=0",
     "while true; do",
-    `  if sh /workspace/.biodome/healthchecks/${proc.name}.sh >/dev/null 2>&1; then`,
+    `  if sh /workspace/.biodome-build/healthchecks/${proc.name}.sh >/dev/null 2>&1; then`,
     "    failures=0",
     "  else",
     "    failures=$((failures + 1))",
     `    if [ $failures -ge ${retries} ]; then`,
-    `      supervisorctl -c /workspace/.biodome/supervisord.conf restart ${proc.name}`,
+    `      supervisorctl -c /workspace/.biodome-build/supervisord.conf restart ${proc.name}`,
     "      failures=0",
     "    fi",
     "  fi",
@@ -483,7 +482,7 @@ function aggregateHealthCheckScript(processes: Process[]): string {
   const daemonProcesses = processes.filter((p) => p.mode === "daemon");
   const checks = daemonProcesses
     .filter((p) => p.healthCheck)
-    .map((p) => `sh /workspace/.biodome/healthchecks/${p.name}.sh`);
+    .map((p) => `sh /workspace/.biodome-build/healthchecks/${p.name}.sh`);
   if (checks.length === 0) {
     return ["#!/bin/sh", "# Auto-generated aggregate health check", "exit 0"].join("\n") + "\n";
   }

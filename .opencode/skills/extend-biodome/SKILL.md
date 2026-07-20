@@ -10,7 +10,7 @@ Dockerfile, compose file, supervisord config, and health checks. Features call
 `ctx.addX(...)` methods; each method mutates the shared `Plan`.
 
 This skill is for extending biodome **itself** (the code under `src/`), not for
-authoring `biodome/features/*.mjs` in a downstream project.
+authoring `.biodome/features/*.mjs` in a downstream project.
 
 ## Read before writing
 

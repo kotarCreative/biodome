@@ -15,13 +15,13 @@ npx @kotarcreative/biodome info
 
 ## Commands
 
-- `biodome init [--bare]` — create a `biodome/` directory with language auto-detection; `--bare` creates a minimal scaffold.
+- `biodome init [--bare]` — create a `.biodome/` directory with language auto-detection; `--bare` creates a minimal scaffold.
 - `biodome build` — generate Docker files and build the dev image.
 - `biodome up` — start the dev container and backing services.
 - `biodome down` — stop the environment.
 - `biodome exec <command>` — run a command inside the dev container.
 - `biodome info` — show services, ports, and connection strings.
-- `biodome config validate` — validate `biodome/`, feature/service module exports, and the computed plan (including port conflicts) without building.
+- `biodome config validate` — validate `.biodome/`, feature/service module exports, and the computed plan (including port conflicts) without building.
 - `biodome generate agents.md` — create `AGENTS.md` for AI context.
 - `biodome logs [process]` — tail logs from a managed process.
 - `biodome ps` — show running containers for the project.
@@ -29,7 +29,7 @@ npx @kotarcreative/biodome info
 - `biodome restart [process]` — restart a managed process or all daemons.
 - `biodome events [--run <runId>]` — show captured structured events from previous runs.
 
-Every lifecycle command captures a structured event stream to `.biodome/logs/events-<runId>.jsonl` by default. Pass `--no-events` to disable. This makes every plan load, hook, and runtime operation observable and reproducible.
+Every lifecycle command captures a structured event stream to `.biodome-build/logs/events-<runId>.jsonl` by default. Pass `--no-events` to disable. This makes every plan load, hook, and runtime operation observable and reproducible.
 
 ## Documentation
 

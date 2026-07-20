@@ -187,7 +187,7 @@ export const NoOpEventStoreLive = (runId = "noop"): Layer.Layer<EventStore> =>
   })
 
 export function eventLogPath(rootDir: string, runId: string): string {
-  return join(rootDir, ".biodome", "logs", `events-${runId}.jsonl`)
+  return join(rootDir, ".biodome-build", "logs", `events-${runId}.jsonl`)
 }
 
 export function formatEvent(event: SandboxEvent): string {

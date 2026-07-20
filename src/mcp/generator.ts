@@ -68,7 +68,7 @@ import {
 function parseArgs() {
   const args = process.argv.slice(2);
   let port = 3001;
-  let planPath = "/workspace/.biodome/plan.json";
+  let planPath = "/workspace/.biodome-build/plan.json";
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port" && i + 1 < args.length) port = parseInt(args[++i], 10);
     if (args[i] === "--plan" && i + 1 < args.length) planPath = args[++i];
@@ -82,7 +82,7 @@ function readPlan(path) {
 
 function runSupervisorctl(...args) {
   try {
-    const stdout = execFileSync("supervisorctl", ["-c", "/workspace/.biodome/supervisord.conf", ...args], {
+    const stdout = execFileSync("supervisorctl", ["-c", "/workspace/.biodome-build/supervisord.conf", ...args], {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
     });

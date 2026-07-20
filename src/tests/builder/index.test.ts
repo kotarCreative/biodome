@@ -24,13 +24,13 @@ describe("buildPlan", () => {
   it("loads config and features", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "my-app" } }),
-      "biodome/services.mjs": `
+      ".biodome/config.json": JSON.stringify({ project: { name: "my-app" } }),
+      ".biodome/services.mjs": `
         export default function services(ctx) {
           ctx.addService("postgres", { port: 5432 });
         }
       `,
-      "biodome/features/django.mjs": `
+      ".biodome/features/django.mjs": `
         export default function django(ctx) {
           ctx.addLanguage("python", { version: "3.12" });
           ctx.addProcess({
@@ -53,8 +53,8 @@ describe("buildPlan", () => {
   it("still loads legacy .js feature files", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "legacy-app" } }),
-      "biodome/services.js": `
+      ".biodome/config.json": JSON.stringify({ project: { name: "legacy-app" } }),
+      ".biodome/services.js": `
         export default function services(ctx) {
           ctx.addService("redis", { port: 6379 });
         }
@@ -69,8 +69,8 @@ describe("buildPlan", () => {
   it("executes arbitrary commands in features", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "cmd-app" } }),
-      "biodome/features/env.mjs": `
+      ".biodome/config.json": JSON.stringify({ project: { name: "cmd-app" } }),
+      ".biodome/features/env.mjs": `
         export default function env(ctx) {
           const result = ctx.exec("echo branch=main");
           ctx.addEnv("BRANCH", { value: result.stdout.trim().split("=")[1] });
@@ -85,9 +85,9 @@ describe("buildPlan", () => {
   it("uses npm install when no lock file exists", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "node-app" } }),
+      ".biodome/config.json": JSON.stringify({ project: { name: "node-app" } }),
       "package.json": JSON.stringify({ name: "node-app" }),
-      "biodome/features/node.mjs": `
+      ".biodome/features/node.mjs": `
         export default function node(ctx) {
           ctx.addLanguage("node", { version: "20" });
         }
@@ -108,10 +108,10 @@ describe("buildPlan", () => {
   it("uses npm ci when package-lock.json exists", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "node-app" } }),
+      ".biodome/config.json": JSON.stringify({ project: { name: "node-app" } }),
       "package.json": JSON.stringify({ name: "node-app" }),
       "package-lock.json": JSON.stringify({}),
-      "biodome/features/node.mjs": `
+      ".biodome/features/node.mjs": `
         export default function node(ctx) {
           ctx.addLanguage("node", { version: "20" });
         }
@@ -130,9 +130,9 @@ describe("buildPlan", () => {
   it("adds a named volume for the Python venv", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "py-app" } }),
+      ".biodome/config.json": JSON.stringify({ project: { name: "py-app" } }),
       "requirements.txt": "django\n",
-      "biodome/features/python.mjs": `
+      ".biodome/features/python.mjs": `
         export default function python(ctx) {
           ctx.addLanguage("python", { version: "3.12" });
         }
@@ -148,16 +148,16 @@ describe("buildPlan", () => {
   it("builds a plan with Python and Node in one image", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "fullstack-app" } }),
+      ".biodome/config.json": JSON.stringify({ project: { name: "fullstack-app" } }),
       "requirements.txt": "django\n",
       "package.json": JSON.stringify({ name: "frontend" }),
       "package-lock.json": JSON.stringify({}),
-      "biodome/features/python.mjs": `
+      ".biodome/features/python.mjs": `
         export default function python(ctx) {
           ctx.addLanguage("python", { version: "3.12" });
         }
       `,
-      "biodome/features/node.mjs": `
+      ".biodome/features/node.mjs": `
         export default function node(ctx) {
           ctx.addLanguage("node", { version: "20" });
         }
@@ -185,8 +185,8 @@ describe("validateConfig", () => {
   it("returns a valid config without executing feature scripts", () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "my-app" } }),
-      "biodome/features/dangerous.mjs": `
+      ".biodome/config.json": JSON.stringify({ project: { name: "my-app" } }),
+      ".biodome/features/dangerous.mjs": `
         export default function dangerous(ctx) {
           ctx.exec("touch /tmp/should-not-run");
         }
@@ -200,7 +200,7 @@ describe("validateConfig", () => {
   it("throws a helpful error for a missing project name", () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: {} }),
+      ".biodome/config.json": JSON.stringify({ project: {} }),
     });
 
     expect(() => validateConfig(dir)).toThrow(/Missing key/);
@@ -209,7 +209,7 @@ describe("validateConfig", () => {
   it("throws a helpful error for non-object config", () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify("bad"),
+      ".biodome/config.json": JSON.stringify("bad"),
     });
 
     expect(() => validateConfig(dir)).toThrow(/Expected object, got "bad"/);
@@ -220,13 +220,13 @@ describe("validatePlan", () => {
   it("throws when a process and service share a host port", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "port-conflict" } }),
-      "biodome/services.mjs": `
+      ".biodome/config.json": JSON.stringify({ project: { name: "port-conflict" } }),
+      ".biodome/services.mjs": `
         export default function services(ctx) {
           ctx.addService("postgres", { port: 5432 });
         }
       `,
-      "biodome/features/django.mjs": `
+      ".biodome/features/django.mjs": `
         export default function django(ctx) {
           ctx.addProcess({ name: "pg", command: ["node"], port: 5432 });
         }
@@ -241,8 +241,8 @@ describe("validatePlan", () => {
   it("can be called directly on a valid plan", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "valid-plan" } }),
-      "biodome/features/web.mjs": `
+      ".biodome/config.json": JSON.stringify({ project: { name: "valid-plan" } }),
+      ".biodome/features/web.mjs": `
         export default function web(ctx) {
           ctx.addProcess({ name: "app", command: ["node"], port: 3000 });
         }
@@ -259,8 +259,8 @@ describe("validateFeatures", () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     const marker = join(dir, "should-not-run");
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "my-app" } }),
-      "biodome/features/dangerous.mjs": `
+      ".biodome/config.json": JSON.stringify({ project: { name: "my-app" } }),
+      ".biodome/features/dangerous.mjs": `
         import { writeFileSync } from "node:fs";
         writeFileSync(${JSON.stringify(marker)}, "executed");
         export default function dangerous(ctx) {
@@ -277,13 +277,13 @@ describe("validateFeatures", () => {
   it("accepts modules that export a default function", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "ok-app" } }),
-      "biodome/services.mjs": `
+      ".biodome/config.json": JSON.stringify({ project: { name: "ok-app" } }),
+      ".biodome/services.mjs": `
         export default function services(ctx) {
           ctx.addService("redis", { port: 6379 });
         }
       `,
-      "biodome/features/node.mjs": `
+      ".biodome/features/node.mjs": `
         export default function node(ctx) {
           ctx.addLanguage("node");
         }
@@ -296,8 +296,8 @@ describe("validateFeatures", () => {
   it("rejects a feature module without a default export", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "bad-app" } }),
-      "biodome/features/incomplete.mjs": `
+      ".biodome/config.json": JSON.stringify({ project: { name: "bad-app" } }),
+      ".biodome/features/incomplete.mjs": `
         export const notDefault = 42;
       `,
     });
@@ -308,8 +308,8 @@ describe("validateFeatures", () => {
   it("rejects a services module whose default export is not a function", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "bad-app" } }),
-      "biodome/services.mjs": `
+      ".biodome/config.json": JSON.stringify({ project: { name: "bad-app" } }),
+      ".biodome/services.mjs": `
         export default 42;
       `,
     });
@@ -320,11 +320,11 @@ describe("validateFeatures", () => {
   it("prefers services.mjs over services.js", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({ project: { name: "legacy-app" } }),
-      "biodome/services.mjs": `
+      ".biodome/config.json": JSON.stringify({ project: { name: "legacy-app" } }),
+      ".biodome/services.mjs": `
         export default function services() {}
       `,
-      "biodome/services.js": `
+      ".biodome/services.js": `
         export default "ignored";
       `,
     });
@@ -335,11 +335,11 @@ describe("validateFeatures", () => {
   it("enables MCP when config has mcp.enabled", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({
+      ".biodome/config.json": JSON.stringify({
         project: { name: "mcp-app" },
         mcp: { enabled: true, port: 3100 },
       }),
-      "biodome/features/.gitkeep": "",
+      ".biodome/features/.gitkeep": "",
     });
 
     const plan = await buildPlan(dir);
@@ -366,11 +366,11 @@ describe("validateFeatures", () => {
   it("does not override an explicit node language request when MCP is enabled", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
-      "biodome/config.json": JSON.stringify({
+      ".biodome/config.json": JSON.stringify({
         project: { name: "mcp-node-app" },
         mcp: { enabled: true },
       }),
-      "biodome/features/node.mjs": `
+      ".biodome/features/node.mjs": `
         export default function node(ctx) {
           ctx.addLanguage("node", { version: "22", packageManager: "pnpm" });
         }

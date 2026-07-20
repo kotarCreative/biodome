@@ -32,24 +32,38 @@ import {
 } from "./helpers.js"
 import { EventStore, FileEventStoreLive, NoOpEventStoreLive, SandboxEvent, eventLogPath, formatEvent } from "../core/events.js"
 
-const BIODOME_DIR = ".biodome"
+const CONFIG_DIR = ".biodome"
+const BUILD_DIR = ".biodome-build"
 
-function ensureBiodomeDir(rootDir: string): void {
-  mkdirSync(join(rootDir, BIODOME_DIR), { recursive: true })
+function ensureBuildDir(rootDir: string): void {
+  mkdirSync(join(rootDir, BUILD_DIR), { recursive: true })
+}
+
+function ensureGitignore(rootDir: string): void {
+  const gitignorePath = join(rootDir, ".gitignore")
+  const entry = ".biodome-build/"
+  if (!existsSync(gitignorePath)) {
+    writeFileSync(gitignorePath, `# biodome build output\n${entry}\n`)
+    return
+  }
+  const content = readFileSync(gitignorePath, "utf-8")
+  if (!content.split("\n").some((line) => line.trim() === entry)) {
+    writeFileSync(gitignorePath, content.trimEnd() + `\n# biodome build output\n${entry}\n`)
+  }
 }
 
 function writeGeneratedFiles(rootDir: string, plan: Plan): string[] {
-  ensureBiodomeDir(rootDir)
-  writeFileSync(join(rootDir, BIODOME_DIR, "Dockerfile"), generateDockerfile(plan))
+  ensureBuildDir(rootDir)
+  writeFileSync(join(rootDir, BUILD_DIR, "Dockerfile"), generateDockerfile(plan))
 
   const supervisord = generateSupervisordConf(plan)
   if (supervisord) {
-    writeFileSync(join(rootDir, BIODOME_DIR, "supervisord.conf"), supervisord)
+    writeFileSync(join(rootDir, BUILD_DIR, "supervisord.conf"), supervisord)
   }
 
-  writeFileSync(join(rootDir, BIODOME_DIR, "docker-compose.yaml"), generateCompose(plan))
+  writeFileSync(join(rootDir, BUILD_DIR, "docker-compose.yaml"), generateCompose(plan))
 
-  const healthcheckDir = join(rootDir, BIODOME_DIR, "healthchecks")
+  const healthcheckDir = join(rootDir, BUILD_DIR, "healthchecks")
   rmSync(healthcheckDir, { recursive: true, force: true })
   mkdirSync(healthcheckDir, { recursive: true })
   const healthchecks = generateHealthcheckScripts(plan)
@@ -62,15 +76,17 @@ function writeGeneratedFiles(rootDir: string, plan: Plan): string[] {
     writeFileSync(dockerignorePath, generateDockerignore())
   }
 
+  ensureGitignore(rootDir)
+
   if (plan.build.mcpEnabled) {
-    writeFileSync(join(rootDir, BIODOME_DIR, "plan.json"), generatePlanJson(plan))
-    writeFileSync(join(rootDir, BIODOME_DIR, "mcp-server.js"), generateMcpServerContent())
+    writeFileSync(join(rootDir, BUILD_DIR, "plan.json"), generatePlanJson(plan))
+    writeFileSync(join(rootDir, BUILD_DIR, "mcp-server.js"), generateMcpServerContent())
   }
 
   return [
-    join(rootDir, BIODOME_DIR, "Dockerfile"),
-    join(rootDir, BIODOME_DIR, "docker-compose.yaml"),
-    join(rootDir, BIODOME_DIR, "supervisord.conf"),
+    join(rootDir, BUILD_DIR, "Dockerfile"),
+    join(rootDir, BUILD_DIR, "docker-compose.yaml"),
+    join(rootDir, BUILD_DIR, "supervisord.conf"),
     ...Object.keys(healthchecks).map((name) => join(healthcheckDir, name)),
   ].filter((p) => existsSync(p))
 }
@@ -168,37 +184,37 @@ program.option("--no-events", "disable structured event capture")
 
 program
   .command("init")
-  .description("Initialize a biodome/ directory with language auto-detection")
-  .option("--bare", "Skip language auto-detection and create a minimal biodome")
+  .description("Initialize the .biodome/ config directory with language auto-detection")
+  .option("--bare", "Skip language auto-detection and create a minimal .biodome")
   .action((options) => {
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
-      const biodomeDir = join(rootDir, "biodome")
+      const configDir = join(rootDir, CONFIG_DIR)
       const projectName = rootDir.split("/").pop() || "project"
 
-      if (existsSync(biodomeDir)) {
-        return yield* new PlanError({ message: "Biodome directory already exists" })
+      if (existsSync(configDir)) {
+        return yield* new PlanError({ message: "Config directory .biodome already exists" })
       }
 
       yield* Effect.try({
         try: () => {
-          mkdirSync(biodomeDir, { recursive: true })
+          mkdirSync(configDir, { recursive: true })
           writeFileSync(
-            join(biodomeDir, "config.json"),
+            join(configDir, "config.json"),
             JSON.stringify({ project: { name: projectName } }, null, 2) + "\n"
           )
           writeFileSync(
-            join(biodomeDir, "services.mjs"),
+            join(configDir, "services.mjs"),
             "export default function services(ctx) {\n  // Define backing services here\n}\n"
           )
-          mkdirSync(join(biodomeDir, "features"), { recursive: true })
+          mkdirSync(join(configDir, "features"), { recursive: true })
 
           if (options.bare) {
-            writeFileSync(join(biodomeDir, "features", ".gitkeep"), "")
+            writeFileSync(join(configDir, "features", ".gitkeep"), "")
           } else {
             const languages = detectStarterLanguages(rootDir)
             writeFileSync(
-              join(biodomeDir, "features", "auto-detect.mjs"),
+              join(configDir, "features", "auto-detect.mjs"),
               generateStarterFeature(languages)
             )
           }
@@ -209,7 +225,7 @@ program
           }),
       })
 
-      console.log(`Initialized biodome for ${projectName}`)
+      console.log(`Initialized .biodome config for ${projectName}`)
     })
 
     runSafe(cliProgram)
@@ -381,7 +397,7 @@ program
       yield* runtime.exec([
         "supervisorctl",
         "-c",
-        "/workspace/.biodome/supervisord.conf",
+        "/workspace/.biodome-build/supervisord.conf",
         "status",
       ])
     }).pipe(Effect.scoped)
@@ -421,7 +437,7 @@ program
   .action((options) => {
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd()
-      const logsDir = join(rootDir, BIODOME_DIR, "logs")
+      const logsDir = join(rootDir, BUILD_DIR, "logs")
       if (!existsSync(logsDir)) {
         console.log("No events captured yet")
         return
@@ -456,7 +472,7 @@ const configCmd = program.command("config").description("Manage sandbox configur
 
 configCmd
   .command("validate")
-  .description("Validate biodome/ configuration and feature modules without building")
+  .description("Validate .biodome/ configuration and feature modules without building")
   .action(() => {
     const runId = randomUUID()
     const cliProgram = Effect.gen(function* () {

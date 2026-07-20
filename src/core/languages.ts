@@ -128,14 +128,20 @@ function nodeRuntimeInstall(ctx: BuildContext, options: LanguageOptions): void {
 
 function nodeDependencies(ctx: BuildContext, options: LanguageOptions): void {
   if (options.packageManager === "pnpm") {
-    ctx.addLanguageSnippet("RUN corepack enable && corepack prepare pnpm@latest --activate")
+    // Use pnpm 10.x — pnpm 11 moved to pnpm-workspace.yaml for settings and
+    // removed neverBuiltDependencies. Pin to v10 so we can inject the config
+    // via .npmrc until proper pnpm 11 support is added.
+    ctx.addLanguageSnippet("RUN corepack enable && corepack prepare pnpm@10 --activate")
     const lockFile = "pnpm-lock.yaml"
     const files = ctx.requireDependencyFiles(["package.json", lockFile])
     if (files.length > 0) {
       const flag = ctx.fileExists(lockFile) ? "--frozen-lockfile" : ""
+      // pnpm 10 blocks lifecycle scripts by default. Inject an empty
+      // neverBuiltDependencies allowlist so all build scripts run (expected
+      // in dev environments).
       ctx.addDependencyInstall({
         files,
-        command: `RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install ${flag} && mkdir -p /workspace/node_modules && pnpm store prune`.trimEnd(),
+        command: `RUN --mount=type=cache,target=/root/.local/share/pnpm/store echo 'neverBuiltDependencies=' > .npmrc && pnpm install ${flag} && mkdir -p /workspace/node_modules && pnpm store prune`.trimEnd(),
       })
       ctx.addCopyArtifact({
         files: ["package.json"],

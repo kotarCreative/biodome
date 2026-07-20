@@ -524,9 +524,9 @@ export class SandboxContext implements FeatureContext, BuildContext {
       name: "biodome-mcp",
       command: [
         "node",
-        "/workspace/.biodome/mcp-server.js",
+        "/workspace/.biodome-build/mcp-server.js",
         "--port", String(port),
-        "--plan", "/workspace/.biodome/plan.json",
+        "--plan", "/workspace/.biodome-build/plan.json",
       ],
       port,
       healthCheck: { type: "http", url: `http://localhost:${port}/health` },

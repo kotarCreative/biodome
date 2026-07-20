@@ -129,7 +129,7 @@ export default function services(ctx) {
 
 ## `addEndpoint(spec)`
 
-Declares an agent-discoverable endpoint — a custom API or resource a feature stands up — along with how to reach it and any credentials needed to use it. Endpoints appear in `biodome info`, the generated `AGENTS.md`, `.biodome/plan.json`, and the MCP `get_endpoints` tool, so an agent can discover the port, URL, credentials, and metadata for a service you created.
+Declares an agent-discoverable endpoint — a custom API or resource a feature stands up — along with how to reach it and any credentials needed to use it. Endpoints appear in `biodome info`, the generated `AGENTS.md`, `.biodome-build/plan.json`, and the MCP `get_endpoints` tool, so an agent can discover the port, URL, credentials, and metadata for a service you created.
 
 ```javascript
 export default function djangoApi(ctx) {
@@ -161,7 +161,7 @@ export default function djangoApi(ctx) {
 
 Credential values can be plain strings or environment-variable references:
 
-- **Literal** (`password: "devpassword"`) — stored verbatim. Convenient for throwaway local dev values, but it is written to `.biodome/plan.json` and surfaced by every info surface.
+- **Literal** (`password: "devpassword"`) — stored verbatim. Convenient for throwaway local dev values, but it is written to `.biodome-build/plan.json` and surfaced by every info surface.
 - **Env reference** (`password: { env: "DJANGO_ADMIN_PASSWORD" }`) — the secret stays out of `plan.json` and the generated `AGENTS.md` (they show `$DJANGO_ADMIN_PASSWORD`). The MCP `get_endpoints` tool resolves the reference from the container's live environment when an agent asks, so real secrets are never persisted on disk.
 
 Prefer env references for anything sensitive.
@@ -206,7 +206,7 @@ Use `value` for non-secret configuration you're happy to see in the built image 
 
 ## Health checks
 
-Health checks are attached to daemon processes. Each daemon with a health check gets a generated shell script in `.biodome/healthchecks/<name>.sh`, and `supervisord` runs a companion `<name>-healthcheck` program that restarts the process after repeated failures. The dev service health check in the generated compose file runs all daemon health checks via `.biodome/healthchecks/all.sh`.
+Health checks are attached to daemon processes. Each daemon with a health check gets a generated shell script in `.biodome-build/healthchecks/<name>.sh`, and `supervisord` runs a companion `<name>-healthcheck` program that restarts the process after repeated failures. The dev service health check in the generated compose file runs all daemon health checks via `.biodome-build/healthchecks/all.sh`.
 
 ```javascript
 export default function api(ctx) {

@@ -28,8 +28,8 @@ const NodeRuntime = NodeChildProcessSpawner.layer.pipe(
 describe("resolveProjectName", () => {
   it("reads the project name from sandbox/config.json", () => {
     const dir = tmpDir("project-name");
-    mkdirSync(join(dir, "biodome"), { recursive: true });
-    writeFileSync(join(dir, "biodome", "config.json"), JSON.stringify({ project: { name: "my-app" } }));
+    mkdirSync(join(dir, ".biodome"), { recursive: true });
+    writeFileSync(join(dir, ".biodome", "config.json"), JSON.stringify({ project: { name: "my-app" } }));
 
     try {
       expect(resolveProjectName(dir)).toBe("my-app");

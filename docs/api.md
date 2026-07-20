@@ -49,7 +49,7 @@ Add a backing service. See [File layout](file-layout.md).
 
 ### `addEndpoint(spec)`
 
-Declare an agent-discoverable endpoint with a name, optional URL/port, credentials (plain or env-referenced), and free-form metadata. Endpoints are surfaced in `biodome info`, `AGENTS.md`, `.biodome/plan.json`, and the MCP `get_endpoints` tool. See [Primitives](primitives.md#addendpointspec).
+Declare an agent-discoverable endpoint with a name, optional URL/port, credentials (plain or env-referenced), and free-form metadata. Endpoints are surfaced in `biodome info`, `AGENTS.md`, `.biodome-build/plan.json`, and the MCP `get_endpoints` tool. See [Primitives](primitives.md#addendpointspec).
 
 ### `addEnv(key, spec)`
 
@@ -145,11 +145,11 @@ type LifecyclePoint =
 
 ### `biodome init [--bare]`
 
-Create a `biodome/` directory with a starter config and a generated `biodome/features/auto-detect.mjs` feature. The auto-detect feature inspects project files (`package.json`, `bun.lockb`, `requirements.txt`, `go.mod`, `Cargo.toml`, `pom.xml`, etc.) and calls `ctx.addLanguage` for each detected language. Pass `--bare` to skip auto-detection and create a minimal scaffold.
+Create a `.biodome/` directory with a starter config and a generated `.biodome/features/auto-detect.mjs` feature. The auto-detect feature inspects project files (`package.json`, `bun.lockb`, `requirements.txt`, `go.mod`, `Cargo.toml`, `pom.xml`, etc.) and calls `ctx.addLanguage` for each detected language. Pass `--bare` to skip auto-detection and create a minimal scaffold.
 
 ### `biodome build`
 
-Generate `.biodome/Dockerfile`, `.biodome/docker-compose.yaml`, `.biodome/supervisord.conf` (when there are daemon processes), `.biodome/healthchecks/*.sh` (when there are daemon processes with health checks), `.dockerignore`, and build the dev image.
+Generate `.biodome-build/Dockerfile`, `.biodome-build/docker-compose.yaml`, `.biodome-build/supervisord.conf` (when there are daemon processes), `.biodome-build/healthchecks/*.sh` (when there are daemon processes with health checks), `.dockerignore`, and build the dev image.
 
 ### `biodome up [--build] [--wait]`
 
@@ -173,7 +173,7 @@ Print a summary of the project: base image, languages, services, endpoints, envi
 
 ### `biodome config validate`
 
-Validate the `biodome/` configuration and feature modules without building. This checks the config schema, validates feature/service module exports, builds the plan in dry-run mode, and runs `validatePlan` to catch port conflicts and other plan-level errors.
+Validate the `.biodome/` configuration and feature modules without building. This checks the config schema, validates feature/service module exports, builds the plan in dry-run mode, and runs `validatePlan` to catch port conflicts and other plan-level errors.
 
 ### `biodome generate agents.md`
 

@@ -94,7 +94,7 @@ export default function vite(ctx) {
 
 Biodome ships a built-in MCP (Model Context Protocol) server that exposes sandbox status, logs, and actions to AI agents. When enabled, the server runs inside the dev container as a `supervisord`-managed daemon and listens on a configurable port (default `3001`).
 
-To enable, add `mcp` to your `biodome/config.json`:
+To enable, add `mcp` to your `.biodome/config.json`:
 
 ```json
 {
@@ -263,8 +263,8 @@ export default function apiEnv(ctx) {
 - Commands are arrays of strings. If you need shell features, use `sh -c` as the first argument.
 - Health checks with `type: "http"` automatically add `curl` to the image.
 - Health checks with `type: "tcp"` automatically add `netcat-openbsd` to the image.
-- Each daemon process with a health check gets a generated script in `.biodome/healthchecks/<name>.sh` and a `supervisord` monitor program (`<name>-healthcheck`) that restarts the process after repeated failures.
-- The dev service health check in `docker-compose.yaml` runs all daemon health checks via `.biodome/healthchecks/all.sh`.
+- Each daemon process with a health check gets a generated script in `.biodome-build/healthchecks/<name>.sh` and a `supervisord` monitor program (`<name>-healthcheck`) that restarts the process after repeated failures.
+- The dev service health check in `docker-compose.yaml` runs all daemon health checks via `.biodome-build/healthchecks/all.sh`.
 
 ## Viewing process logs
 

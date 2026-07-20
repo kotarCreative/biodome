@@ -6,7 +6,7 @@ import { SandboxContext } from "../core/context.js"
 import { Plan, Port, ConfigSchema } from "../core/plan.js"
 import { ConfigError, FeatureError, PlanError, SandboxError, ValidationError } from "../core/errors.js"
 
-const BIODOME_DIR = "biodome"
+const BIODOME_DIR = ".biodome"
 
 export interface BuildPlanOptions {
   dryRun?: boolean
