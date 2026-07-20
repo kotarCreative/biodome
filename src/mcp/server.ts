@@ -21,6 +21,10 @@ import {
 
 async function createVolumeAdapter(config: VolumeConfig): Promise<VolumeAdapter> {
   switch (config.type) {
+    case "local": {
+      const { createLocalAdapter } = await import("./volumes/local.js")
+      return createLocalAdapter(config)
+    }
     case "s3": {
       const { createS3Adapter } = await import("./volumes/s3.js")
       return createS3Adapter(config)

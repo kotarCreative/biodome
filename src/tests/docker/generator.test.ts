@@ -320,4 +320,18 @@ describe("Docker generators", () => {
     expect(dockerfile).not.toContain("@google-cloud/storage");
     expect(dockerfile).not.toContain("@azure/storage-blob");
   });
+
+  it("does not mount local proxy volumes in the dev service", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.volumes.push({
+      name: "local-proxy",
+      type: "local",
+      source: "./data",
+      target: "/workspace/data",
+      proxy: true,
+    });
+
+    const compose = generateCompose(plan);
+    expect(compose).not.toContain("./data:/workspace/data");
+  });
 });

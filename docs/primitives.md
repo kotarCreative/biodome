@@ -312,7 +312,7 @@ In proxy mode:
 - Agents access files through MCP tools: `list_volumes`, `list_files`, `read_file`, `write_file`, `stat_file`.
 - Access rules are enforced by the MCP server (`allowedPaths`, `readOnly`).
 
-Proxy mode is currently supported for S3, GCS, and Azure Blob. Other volume types still fall back to `rclone` mount.
+Proxy mode is supported for `local`, `s3`, `gcs`, and `azure` volumes. Other volume types still fall back to `rclone` mount.
 
 ### Volume wrappers
 

@@ -887,6 +887,22 @@ describe("SandboxContext", () => {
       expect(ctx.plan.runtime.environment.AWS_SECRET_ACCESS_KEY).toBeUndefined();
     });
 
+    it("supports local proxy volumes that are not mounted in the container", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addVolume({
+        name: "local-proxy",
+        type: "local",
+        source: "./data",
+        target: "/workspace/data",
+        proxy: true,
+        allowedPaths: ["**/*.txt"],
+      });
+
+      expect(ctx.plan.runtime.volumes).toHaveLength(1);
+      expect(ctx.plan.runtime.volumes[0].proxy).toBe(true);
+      expect(ctx.plan.runtime.processes).toHaveLength(0);
+    });
+
     it("adds volumes through wrapper helpers", () => {
       const ctx = new SandboxContext("/tmp", "test");
       ctx.addLocalVolume({ name: "data", source: "./data", target: "/workspace/data" });

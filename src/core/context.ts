@@ -382,13 +382,13 @@ export class SandboxContext implements FeatureContext, BuildContext {
 
     this.plan.runtime.volumes.push(volume)
 
-    if (validated.type === "local") {
-      // Local bind mounts are emitted directly in compose; nothing else to do.
+    if (validated.proxy) {
+      // Proxy volumes are accessed through the MCP server, not mounted.
       return
     }
 
-    if (validated.proxy) {
-      // Proxy volumes are accessed through the MCP server, not mounted.
+    if (validated.type === "local") {
+      // Local bind mounts are emitted directly in compose; nothing else to do.
       return
     }
 

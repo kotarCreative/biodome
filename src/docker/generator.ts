@@ -349,7 +349,7 @@ function devService(plan: Plan): ComposeService {
   }
 
   for (const volume of plan.runtime.volumes) {
-    if (volume.type === "local" && volume.source) {
+    if (volume.type === "local" && volume.source && !volume.proxy) {
       service.volumes = service.volumes || [];
       service.volumes.push(`${volume.source}:${volume.target}`);
       if (volume.readOnly) {

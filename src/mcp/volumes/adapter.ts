@@ -14,6 +14,7 @@ export interface VolumeConfig {
   name: string
   type: string
   target: string
+  source?: string
   bucket?: string
   prefix?: string
   path?: string
