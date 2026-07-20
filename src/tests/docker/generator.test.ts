@@ -284,4 +284,40 @@ describe("Docker generators", () => {
     expect(compose).not.toContain("privileged");
     expect(compose).not.toContain("/workspace/s3-proxy");
   });
+
+  it("installs only the provider SDKs needed by proxy volumes in the Dockerfile", () => {
+    const plan = createPlan("my-app");
+    plan.build.mcpEnabled = true;
+    plan.runtime.volumes.push({
+      name: "s3-proxy",
+      type: "s3",
+      bucket: "my-bucket",
+      target: "/workspace/s3-proxy",
+      proxy: true,
+    });
+    plan.runtime.volumes.push({
+      name: "azure-proxy",
+      type: "azure",
+      account: "myaccount",
+      container: "mycontainer",
+      target: "/workspace/azure-proxy",
+      proxy: true,
+    });
+
+    const dockerfile = generateDockerfile(plan);
+    expect(dockerfile).toContain("@aws-sdk/client-s3");
+    expect(dockerfile).toContain("@azure/storage-blob");
+    expect(dockerfile).not.toContain("@google-cloud/storage");
+  });
+
+  it("does not install provider SDKs when no proxy volumes exist", () => {
+    const plan = createPlan("my-app");
+    plan.build.mcpEnabled = true;
+
+    const dockerfile = generateDockerfile(plan);
+    expect(dockerfile).toContain("@modelcontextprotocol/sdk");
+    expect(dockerfile).not.toContain("@aws-sdk/client-s3");
+    expect(dockerfile).not.toContain("@google-cloud/storage");
+    expect(dockerfile).not.toContain("@azure/storage-blob");
+  });
 });

@@ -13,11 +13,30 @@ import {
 } from "@modelcontextprotocol/sdk/types.js"
 import {
   VolumeConfig,
-  createVolumeAdapter,
+  VolumeAdapter,
   FileInfo,
   matchesAllowedPath,
   VolumeAccessError,
-} from "./volumes/index.js"
+} from "./volumes/adapter.js"
+
+async function createVolumeAdapter(config: VolumeConfig): Promise<VolumeAdapter> {
+  switch (config.type) {
+    case "s3": {
+      const { createS3Adapter } = await import("./volumes/s3.js")
+      return createS3Adapter(config)
+    }
+    case "gcs": {
+      const { createGcsAdapter } = await import("./volumes/gcs.js")
+      return createGcsAdapter(config)
+    }
+    case "azure": {
+      const { createAzureAdapter } = await import("./volumes/azure.js")
+      return createAzureAdapter(config)
+    }
+    default:
+      throw new VolumeAccessError(`Proxy volume type not yet implemented: ${config.type}`)
+  }
+}
 
 function parseArgs() {
   const args = process.argv.slice(2)
@@ -463,7 +482,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new McpError(ErrorCode.InvalidParams, "Unknown proxy volume: " + parsed.volume)
         }
         assertReadAllowed(volume, parsed.subPath)
-        const adapter = createVolumeAdapter(volume)
+        const adapter = await createVolumeAdapter(volume)
         const files = await adapter.list(parsed.subPath)
         const result = {
           content: [{ type: "text", text: files.map(formatFileInfo).join("\n") }],
@@ -483,7 +502,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new McpError(ErrorCode.InvalidParams, "Unknown proxy volume: " + parsed.volume)
         }
         assertReadAllowed(volume, parsed.subPath)
-        const adapter = createVolumeAdapter(volume)
+        const adapter = await createVolumeAdapter(volume)
         const buffer = await adapter.read(parsed.subPath)
         const result = {
           content: [{ type: "text", text: buffer.toString("base64") }],
@@ -504,7 +523,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new McpError(ErrorCode.InvalidParams, "Unknown proxy volume: " + parsed.volume)
         }
         assertWriteAllowed(volume, parsed.subPath)
-        const adapter = createVolumeAdapter(volume)
+        const adapter = await createVolumeAdapter(volume)
         const buffer = Buffer.from(content, "base64")
         await adapter.write(parsed.subPath, buffer)
         const result = {
@@ -525,7 +544,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new McpError(ErrorCode.InvalidParams, "Unknown proxy volume: " + parsed.volume)
         }
         assertReadAllowed(volume, parsed.subPath)
-        const adapter = createVolumeAdapter(volume)
+        const adapter = await createVolumeAdapter(volume)
         const info = await adapter.stat(parsed.subPath)
         const result = {
           content: [{ type: "text", text: formatFileInfo(info) }],

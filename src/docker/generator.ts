@@ -70,6 +70,14 @@ export function generateDockerfile(plan: Plan): string {
     lines.push("# the module resolution path and is not shadowed by the /workspace mount.");
     lines.push("RUN npm install --prefix / @modelcontextprotocol/sdk");
     lines.push("");
+
+    const proxySdks = mcpProxySdks(plan);
+    if (proxySdks.length > 0) {
+      lines.push("# Install provider SDKs for MCP proxy volumes.");
+      lines.push("# Only the SDKs actually used by declared proxy volumes are installed.");
+      lines.push(`RUN npm install --prefix / ${proxySdks.join(" ")}`);
+      lines.push("");
+    }
   }
 
   for (const snippet of plan.build.runtimeInstalls) {
@@ -469,6 +477,22 @@ function serviceCompose(svc: Service): ComposeService {
 
 function isNamedVolume(host: string): boolean {
   return !host.startsWith("/") && !host.startsWith("./") && !host.startsWith("~");
+}
+
+const MCP_PROXY_SDKS: Record<string, string> = {
+  s3: "@aws-sdk/client-s3",
+  gcs: "@google-cloud/storage",
+  azure: "@azure/storage-blob",
+};
+
+function mcpProxySdks(plan: Plan): string[] {
+  const packages = new Set<string>();
+  for (const volume of plan.runtime.volumes) {
+    if (volume.proxy && MCP_PROXY_SDKS[volume.type]) {
+      packages.add(MCP_PROXY_SDKS[volume.type]);
+    }
+  }
+  return Array.from(packages).sort();
 }
 
 function processHealthCheckScript(proc: Process): string {
