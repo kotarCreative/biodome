@@ -122,7 +122,7 @@ export interface NamedVolume {
   name: string
 }
 
-export type VolumeType = "local" | "s3" | "s3-file" | "dropbox" | "gdrive"
+export type VolumeType = "local" | "s3" | "dropbox" | "gdrive"
 
 export interface Volume {
   name: string
@@ -130,7 +130,6 @@ export interface Volume {
   source?: string
   target: string
   bucket?: string
-  key?: string
   prefix?: string
   path?: string
   credentials?: Record<string, SecretValue>
@@ -332,11 +331,10 @@ export const VolumeCredentialsSchema = Schema.Record(Schema.String, SecretValueS
 
 export const VolumeSpecSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
-  type: Schema.Literals(["local", "s3", "s3-file", "dropbox", "gdrive"]),
+  type: Schema.Literals(["local", "s3", "dropbox", "gdrive"]),
   source: Schema.optional(Schema.String),
   target: Schema.String.check(Schema.isMinLength(1)),
   bucket: Schema.optional(Schema.String),
-  key: Schema.optional(Schema.String),
   prefix: Schema.optional(Schema.String),
   path: Schema.optional(Schema.String),
   credentials: Schema.optional(VolumeCredentialsSchema),
@@ -457,11 +455,10 @@ export const PlanSchema = Schema.Struct({
     volumes: Schema.Array(
       Schema.Struct({
         name: Schema.String,
-        type: Schema.Literals(["local", "s3", "s3-file", "dropbox", "gdrive"]),
+        type: Schema.Literals(["local", "s3", "dropbox", "gdrive"]),
         source: Schema.optional(Schema.String),
         target: Schema.String,
         bucket: Schema.optional(Schema.String),
-        key: Schema.optional(Schema.String),
         prefix: Schema.optional(Schema.String),
         path: Schema.optional(Schema.String),
         credentials: Schema.optional(VolumeCredentialsSchema),

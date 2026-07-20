@@ -645,31 +645,26 @@ describe("SandboxContext", () => {
       });
     });
 
-    it("adds an S3 file copy as a startup hook", () => {
+    it("adds an S3 prefix mount for file access without copying", () => {
       const ctx = new SandboxContext("/tmp", "test");
       ctx.addVolume({
-        name: "s3-config",
-        type: "s3-file",
+        name: "s3-configs",
+        type: "s3",
         bucket: "my-bucket",
-        key: "config.json",
-        target: "/workspace/config.json",
+        prefix: "configs/",
+        target: "/workspace/s3-configs",
         credentials: {
           accessKeyId: "AKIAIOSFODNN7EXAMPLE",
           secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
         },
       });
 
-      const hook = ctx.plan.runtime.processes[0];
-      expect(hook.name).toBe("rclone-copy-s3-config");
-      expect(hook.mode).toBe("oneshot");
-      expect(hook.startOn).toBe("start.post");
-      expect(hook.command).toEqual([
-        "rclone",
-        "copy",
-        "s3:my-bucket/config.json",
-        "/workspace/config.json",
-      ]);
-      expect(hook.environment).toEqual({
+      const proc = ctx.plan.runtime.processes[0];
+      expect(proc.name).toBe("rclone-mount-s3-configs");
+      expect(proc.mode).toBe("daemon");
+      expect(proc.command).toContain("s3:my-bucket/configs/");
+      expect(proc.command).toContain("/workspace/s3-configs");
+      expect(proc.environment).toEqual({
         RCLONE_S3_ACCESS_KEY_ID: "AKIAIOSFODNN7EXAMPLE",
         RCLONE_S3_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}",
       });
@@ -729,18 +724,6 @@ describe("SandboxContext", () => {
       expect(() =>
         ctx.addVolume({ name: "s3", type: "s3", target: "/workspace/s3" } as any)
       ).toThrow(/S3 volumes require a bucket/);
-    });
-
-    it("rejects s3-file volumes without a key", () => {
-      const ctx = new SandboxContext("/tmp", "test");
-      expect(() =>
-        ctx.addVolume({
-          name: "s3",
-          type: "s3-file",
-          bucket: "my-bucket",
-          target: "/workspace/s3",
-        } as any)
-      ).toThrow(/s3-file volumes require a key/);
     });
 
     it("rejects cloud volumes without a path", () => {

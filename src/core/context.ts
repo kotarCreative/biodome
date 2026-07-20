@@ -350,7 +350,6 @@ export class SandboxContext implements FeatureContext, BuildContext {
       source: validated.source,
       target: validated.target,
       bucket: validated.bucket,
-      key: validated.key,
       prefix: validated.prefix,
       path: validated.path,
       credentials: validated.credentials ? { ...validated.credentials } : undefined,
@@ -369,18 +368,6 @@ export class SandboxContext implements FeatureContext, BuildContext {
     this.addAptPackage("fuse3")
 
     const env = this.buildRcloneEnv(volume)
-
-    if (validated.type === "s3-file") {
-      // Single-file volumes are copied once at container startup.
-      const remote = this.rcloneRemote(volume)
-      this.addHook({
-        name: `rclone-copy-${validated.name}`,
-        command: ["rclone", "copy", remote, validated.target],
-        startOn: "start.post",
-        environment: env,
-      })
-      return
-    }
 
     // Bucket/folder mounts run as a daemon process.
     const remote = this.rcloneRemote(volume)
@@ -411,13 +398,9 @@ export class SandboxContext implements FeatureContext, BuildContext {
         }
         break
       }
-      case "s3":
-      case "s3-file": {
+      case "s3": {
         if (!spec.bucket) {
           throw new ValidationError({ message: `Volume ${spec.name}: S3 volumes require a bucket` })
-        }
-        if (spec.type === "s3-file" && !spec.key) {
-          throw new ValidationError({ message: `Volume ${spec.name}: s3-file volumes require a key` })
         }
         break
       }
@@ -433,9 +416,8 @@ export class SandboxContext implements FeatureContext, BuildContext {
 
   private rcloneRemote(volume: Volume): string {
     switch (volume.type) {
-      case "s3":
-      case "s3-file": {
-        const prefix = volume.type === "s3-file" ? volume.key! : volume.prefix || ""
+      case "s3": {
+        const prefix = volume.prefix || ""
         return `s3:${volume.bucket}/${prefix}`
       }
       case "dropbox":
@@ -453,12 +435,6 @@ export class SandboxContext implements FeatureContext, BuildContext {
 
     const mappings: Record<string, Record<string, string>> = {
       s3: {
-        accessKeyId: "RCLONE_S3_ACCESS_KEY_ID",
-        secretAccessKey: "RCLONE_S3_SECRET_ACCESS_KEY",
-        region: "RCLONE_S3_REGION",
-        sessionToken: "RCLONE_S3_SESSION_TOKEN",
-      },
-      "s3-file": {
         accessKeyId: "RCLONE_S3_ACCESS_KEY_ID",
         secretAccessKey: "RCLONE_S3_SECRET_ACCESS_KEY",
         region: "RCLONE_S3_REGION",

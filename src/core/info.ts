@@ -30,7 +30,6 @@ function formatVolume(volume: Volume): string {
   const parts: string[] = [volume.type];
   if (volume.source) parts.push(`source ${volume.source}`);
   if (volume.bucket) parts.push(`bucket ${volume.bucket}`);
-  if (volume.key) parts.push(`key ${volume.key}`);
   if (volume.prefix) parts.push(`prefix ${volume.prefix}`);
   if (volume.path) parts.push(`path ${volume.path}`);
   return `${volume.name} (${parts.join(", ")}) → ${volume.target}`;

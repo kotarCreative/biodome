@@ -206,7 +206,7 @@ Use `value` for non-secret configuration you're happy to see in the built image 
 
 ## `addVolume(spec)`
 
-Mounts data into the dev container. Supports local bind mounts and cloud-backed mounts via `rclone`.
+Mounts data into the dev container as a live read/write access point. Supports local bind mounts and cloud-backed mounts via `rclone`. No files are copied into the container.
 
 ```javascript
 export default function volumes(ctx) {
@@ -218,7 +218,7 @@ export default function volumes(ctx) {
     target: "/workspace/data",
   });
 
-  // S3 bucket mount
+  // S3 bucket or prefix mount
   ctx.addVolume({
     name: "s3-data",
     type: "s3",
@@ -231,13 +231,13 @@ export default function volumes(ctx) {
     },
   });
 
-  // Single S3 file copied at container startup
+  // Access a specific S3 file by mounting its prefix
   ctx.addVolume({
-    name: "s3-config",
-    type: "s3-file",
+    name: "s3-configs",
+    type: "s3",
     bucket: "my-bucket",
-    key: "config.json",
-    target: "/workspace/config.json",
+    prefix: "configs/",
+    target: "/workspace/s3-configs",
     credentials: {
       accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
       secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
@@ -269,15 +269,15 @@ export default function volumes(ctx) {
 ```
 
 - `name` — unique identifier.
-- `type` — `"local"`, `"s3"`, `"s3-file"`, `"dropbox"`, or `"gdrive"`.
+- `type` — `"local"`, `"s3"`, `"dropbox"`, or `"gdrive"`.
 - `target` — absolute path inside the dev container.
 - `source` — local host path for `type: "local"`. Relative paths are resolved from the project root.
-- `bucket` / `key` / `prefix` — S3 location.
+- `bucket` / `prefix` — S3 location. Mount a prefix to access specific files inside it.
 - `path` — remote folder path for Dropbox or Google Drive.
 - `credentials` — map of provider credentials. Each value is either a literal string or an `{ env: "VAR_NAME" }` reference. Env references are resolved from the host at `up` time and never written to the generated files.
 - `options.readOnly` — set to `"true"` for read-only mounts (local only).
 
-Cloud-backed volumes install `rclone` and `fuse3` in the dev container, enable privileged mode, and run an `rclone mount` daemon process. `s3-file` volumes are copied once at container startup via an `start.post` hook instead of being mounted.
+Cloud-backed volumes install `rclone` and `fuse3` in the dev container, enable privileged mode, and run an `rclone mount` daemon process. Files are read and written directly against the remote source.
 
 ## Health checks
 
