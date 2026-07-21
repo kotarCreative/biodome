@@ -70,6 +70,20 @@ export function generatePlanJson(plan: Plan): string {
       credentials: endpoint.credentials ?? null,
       metadata: endpoint.metadata ?? null,
     })),
+    // Providers are emitted verbatim so the MCP server can expose provider-aware
+    // tools (e.g. Jira issue lookup) without persisting secret values.
+    providers: plan.runtime.providers.map((provider) => ({
+      name: provider.name,
+      type: provider.type,
+      url: provider.url ?? null,
+      project: provider.project ?? null,
+      mcpUrl: provider.mcpUrl ?? null,
+      authHeader: provider.authHeader ?? null,
+      authScheme: provider.authScheme ?? null,
+      authCredential: provider.authCredential ?? null,
+      credentials: provider.credentials ?? null,
+      metadata: provider.metadata ?? null,
+    })),
     // `environment` holds only literal values. Passthrough vars are described
     // structurally below as references, so their secret values never touch disk.
     environment: plan.runtime.environment,
@@ -82,6 +96,19 @@ export function generatePlanJson(plan: Plan): string {
       hasDefault: envVar.default !== undefined,
     })),
     volumes: plan.runtime.volumes.map(serializeVolume),
+    repos: plan.runtime.repos.map((repo) => ({
+      name: repo.name,
+      url: repo.url,
+      path: repo.path,
+      branch: repo.branch,
+      depth: repo.depth ?? null,
+      credentials: repo.credentials
+        ? {
+            token: serializeCredential(repo.credentials.token),
+            sshKey: serializeCredential(repo.credentials.sshKey),
+          }
+        : null,
+    })),
   }
   return JSON.stringify(data, null, 2)
 }

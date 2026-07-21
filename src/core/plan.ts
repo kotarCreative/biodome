@@ -36,6 +36,20 @@ export interface CopyArtifact {
   lines: string[]
 }
 
+export interface Repo {
+  name: string
+  url: string
+  path: string
+  branch: string
+  depth?: number
+  credentials?: RepoCredentials
+}
+
+export interface RepoCredentials {
+  token?: SecretValue
+  sshKey?: SecretValue
+}
+
 export interface RuntimePlan {
   services: Service[]
   networks: Network[]
@@ -45,7 +59,9 @@ export interface RuntimePlan {
   environment: Record<string, string>
   processes: Process[]
   endpoints: Endpoint[]
+  providers: Provider[]
   envVars: EnvVar[]
+  repos: Repo[]
 }
 
 export type EnvScope = "build" | "runtime" | "both"
@@ -79,6 +95,23 @@ export interface Endpoint {
   description?: string
   url?: string
   port?: number
+  credentials?: Record<string, SecretValue>
+  metadata?: Record<string, string>
+}
+
+// A user-declared external provider — e.g. Jira, GitHub, Slack. Providers are
+// well-known SaaS APIs that the agent may call through MCP tools. They capture
+// the instance URL, an optional project/team scope, credentials, and free-form
+// metadata.
+export interface Provider {
+  name: string
+  type: string
+  url?: string
+  project?: string
+  mcpUrl?: string
+  authHeader?: string
+  authScheme?: string
+  authCredential?: string
   credentials?: Record<string, SecretValue>
   metadata?: Record<string, string>
 }
@@ -250,7 +283,9 @@ export function createPlan(project: string): Plan {
       environment: {},
       processes: [],
       endpoints: [],
+      providers: [],
       envVars: [],
+      repos: [],
     },
   }
 }
@@ -336,6 +371,29 @@ export const SecretValueSchema = Schema.Union([
   }),
 ])
 
+export const RepoCredentialsSchema = Schema.Struct({
+  token: Schema.optional(SecretValueSchema),
+  sshKey: Schema.optional(SecretValueSchema),
+})
+
+export const RepoSpecSchema = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1)),
+  url: Schema.String.check(Schema.isMinLength(1)),
+  path: Schema.optional(Schema.String),
+  branch: Schema.optional(Schema.String),
+  depth: Schema.optional(Schema.Number),
+  credentials: Schema.optional(RepoCredentialsSchema),
+})
+
+export const RepoSchema = Schema.Struct({
+  name: Schema.String,
+  url: Schema.String,
+  path: Schema.String,
+  branch: Schema.String,
+  depth: Schema.optional(Schema.Number),
+  credentials: Schema.optional(RepoCredentialsSchema),
+})
+
 export const EndpointCredentialsSchema = Schema.Record(Schema.String, SecretValueSchema)
 
 export const EndpointSpecSchema = Schema.Struct({
@@ -343,6 +401,19 @@ export const EndpointSpecSchema = Schema.Struct({
   description: Schema.optional(Schema.String),
   url: Schema.optional(Schema.String),
   port: Schema.optional(Schema.Number),
+  credentials: Schema.optional(EndpointCredentialsSchema),
+  metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+})
+
+export const ProviderSpecSchema = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1)),
+  type: Schema.String.check(Schema.isMinLength(1)),
+  url: Schema.optional(Schema.String),
+  project: Schema.optional(Schema.String),
+  mcpUrl: Schema.optional(Schema.String),
+  authHeader: Schema.optional(Schema.String),
+  authScheme: Schema.optional(Schema.String),
+  authCredential: Schema.optional(Schema.String),
   credentials: Schema.optional(EndpointCredentialsSchema),
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 })
@@ -463,6 +534,19 @@ export const ServiceSchema = Schema.Struct({
   networks: Schema.Array(Schema.String),
 })
 
+export const ProviderSchema = Schema.Struct({
+  name: Schema.String,
+  type: Schema.String,
+  url: Schema.optional(Schema.String),
+  project: Schema.optional(Schema.String),
+  mcpUrl: Schema.optional(Schema.String),
+  authHeader: Schema.optional(Schema.String),
+  authScheme: Schema.optional(Schema.String),
+  authCredential: Schema.optional(Schema.String),
+  credentials: Schema.optional(EndpointCredentialsSchema),
+  metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+})
+
 export const PlanSchema = Schema.Struct({
   project: Schema.String,
   build: Schema.Struct({
@@ -534,6 +618,8 @@ export const PlanSchema = Schema.Struct({
     environment: Schema.Record(Schema.String, Schema.String),
     processes: Schema.Array(ProcessSchema),
     endpoints: Schema.Array(EndpointSpecSchema),
+    providers: Schema.Array(ProviderSchema),
     envVars: Schema.Array(EnvVarSchema),
+    repos: Schema.Array(RepoSchema),
   }),
 })

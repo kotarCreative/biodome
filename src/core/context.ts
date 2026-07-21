@@ -16,12 +16,16 @@ import {
   HookSpecSchema,
   ServiceOptionsSchema,
   EndpointSpecSchema,
+  ProviderSpecSchema,
   EnvSpecSchema,
   EnvVar,
   ProcessHealthCheckSpecSchema,
   VolumeSpecSchema,
   Volume,
+  Provider,
   SecretValue,
+  RepoSpecSchema,
+  Repo,
 } from "./plan.js"
 import {
   FeatureContext,
@@ -32,6 +36,13 @@ import {
   ToolOptions,
   ServiceOptions,
   EndpointSpec,
+  ProviderSpec,
+  McpProviderSpec,
+  JiraProviderSpec,
+  LinearProviderSpec,
+  SentryProviderSpec,
+  SlackProviderSpec,
+  GithubProviderSpec,
   EnvSpec,
   VolumeSpec,
   LocalVolumeSpec,
@@ -43,6 +54,7 @@ import {
   WebdavVolumeSpec,
   DropboxVolumeSpec,
   GdriveVolumeSpec,
+  RepoSpec,
 } from "./feature.js"
 import { BuildContext } from "./build-context.js"
 import { languageHandlers, getDefaultBaseImage } from "./languages.js"
@@ -292,6 +304,123 @@ export class SandboxContext implements FeatureContext, BuildContext {
     })
   }
 
+  addProvider(spec: ProviderSpec): void {
+    const validated = Schema.decodeSync(ProviderSpecSchema)(spec)
+    if (validated.metadata) {
+      validateEnv(validated.metadata as Record<string, unknown>, `Provider ${validated.name}: metadata`)
+    }
+
+    if (this.plan.runtime.providers.some((p) => p.name === validated.name)) {
+      throw new ValidationError({ message: `Duplicate provider name: ${validated.name}` })
+    }
+
+    const provider: Provider = {
+      name: validated.name,
+      type: validated.type,
+      url: validated.url,
+      project: validated.project,
+      mcpUrl: validated.mcpUrl,
+      authHeader: validated.authHeader,
+      authScheme: validated.authScheme,
+      authCredential: validated.authCredential,
+      credentials: validated.credentials ? { ...validated.credentials } : undefined,
+      metadata: validated.metadata ? { ...validated.metadata } : undefined,
+    }
+    this.plan.runtime.providers.push(provider)
+  }
+
+  addMcpProvider(spec: McpProviderSpec): void {
+    if (!spec.name) throw new ValidationError({ message: "MCP provider requires a name" })
+    if (!spec.mcpUrl) throw new ValidationError({ message: `Provider ${spec.name}: mcpUrl is required` })
+    if (!spec.credentials?.token) {
+      throw new ValidationError({ message: `Provider ${spec.name}: credentials.token is required` })
+    }
+    this.addProvider({
+      name: spec.name,
+      type: spec.type,
+      mcpUrl: spec.mcpUrl,
+      authHeader: spec.authHeader ?? "Authorization",
+      authScheme: spec.authScheme ?? "Bearer ",
+      authCredential: "token",
+      project: spec.project,
+      credentials: { token: spec.credentials.token },
+      metadata: spec.metadata,
+    })
+  }
+
+  addJiraProvider(spec: JiraProviderSpec): void {
+    if (!spec.name) throw new ValidationError({ message: "Jira provider requires a name" })
+    if (!spec.credentials?.token) {
+      throw new ValidationError({ message: `Jira provider ${spec.name}: credentials.token is required` })
+    }
+    this.addMcpProvider({
+      name: spec.name,
+      type: "jira",
+      mcpUrl: spec.mcpUrl ?? "https://mcp.atlassian.com/v1/mcp/authv2",
+      project: spec.project,
+      credentials: spec.credentials,
+      metadata: spec.metadata,
+    })
+  }
+
+  addLinearProvider(spec: LinearProviderSpec): void {
+    if (!spec.name) throw new ValidationError({ message: "Linear provider requires a name" })
+    if (!spec.credentials?.token) {
+      throw new ValidationError({ message: `Linear provider ${spec.name}: credentials.token is required` })
+    }
+    this.addMcpProvider({
+      name: spec.name,
+      type: "linear",
+      mcpUrl: spec.mcpUrl ?? "https://mcp.linear.app/mcp",
+      project: spec.team,
+      credentials: spec.credentials,
+      metadata: spec.metadata,
+    })
+  }
+
+  addSentryProvider(spec: SentryProviderSpec): void {
+    if (!spec.name) throw new ValidationError({ message: "Sentry provider requires a name" })
+    if (!spec.credentials?.token) {
+      throw new ValidationError({ message: `Sentry provider ${spec.name}: credentials.token is required` })
+    }
+    this.addMcpProvider({
+      name: spec.name,
+      type: "sentry",
+      mcpUrl: spec.mcpUrl ?? "https://mcp.sentry.dev/mcp",
+      credentials: spec.credentials,
+      metadata: spec.metadata,
+    })
+  }
+
+  addSlackProvider(spec: SlackProviderSpec): void {
+    if (!spec.name) throw new ValidationError({ message: "Slack provider requires a name" })
+    if (!spec.mcpUrl) throw new ValidationError({ message: `Slack provider ${spec.name}: mcpUrl is required` })
+    if (!spec.credentials?.token) {
+      throw new ValidationError({ message: `Slack provider ${spec.name}: credentials.token is required` })
+    }
+    this.addMcpProvider({
+      name: spec.name,
+      type: "slack",
+      mcpUrl: spec.mcpUrl,
+      credentials: spec.credentials,
+      metadata: spec.metadata,
+    })
+  }
+
+  addGithubProvider(spec: GithubProviderSpec): void {
+    if (!spec.name) throw new ValidationError({ message: "GitHub provider requires a name" })
+    if (!spec.credentials?.token) {
+      throw new ValidationError({ message: `GitHub provider ${spec.name}: credentials.token is required` })
+    }
+    this.addMcpProvider({
+      name: spec.name,
+      type: "github",
+      mcpUrl: spec.mcpUrl ?? "https://api.githubcopilot.com/mcp/",
+      credentials: spec.credentials,
+      metadata: spec.metadata,
+    })
+  }
+
   addEnv(key: string, spec: EnvSpec): void {
     validateEnvKey(key, `Env ${key}: key`)
     const validated = Schema.decodeSync(EnvSpecSchema)(spec)
@@ -417,6 +546,56 @@ export class SandboxContext implements FeatureContext, BuildContext {
       command,
       environment: env,
     })
+  }
+
+  addRepo(spec: RepoSpec): void {
+    const validated = Schema.decodeSync(RepoSpecSchema)(spec)
+
+    if (this.plan.runtime.repos.some((r) => r.name === validated.name)) {
+      throw new ValidationError({ message: `Duplicate repo name: ${validated.name}` })
+    }
+
+    if (validated.credentials) {
+      for (const [key, value] of Object.entries(validated.credentials)) {
+        if (value === undefined) continue
+        if (typeof value === "string") {
+          throw new ValidationError({
+            message: `Repo ${validated.name}: credentials.${key} must be an environment reference ({ env: "VAR" }), not a literal string`,
+          })
+        }
+      }
+    }
+
+    const path = this.normalizeRepoPath(validated.path, validated.name)
+    const branch = validated.branch || "main"
+
+    const repo: Repo = {
+      name: validated.name,
+      url: validated.url,
+      path,
+      branch,
+      depth: validated.depth,
+      credentials: validated.credentials ? { ...validated.credentials } : undefined,
+    }
+    this.plan.runtime.repos.push(repo)
+
+    // Repos need git and ssh clients to clone/pull.
+    this.addAptPackage("git")
+    this.addAptPackage("openssh-client")
+
+    // Run a sync hook after the container starts so the repo is cloned (or
+    // updated) in the live workspace mount.
+    this.addHook({
+      name: `repo-sync-${validated.name}`,
+      command: ["sh", `/workspace/.biodome-build/repos/${validated.name}.sh`],
+      startOn: "start.post",
+    })
+  }
+
+  private normalizeRepoPath(path: string | undefined, name: string): string {
+    if (!path) return `/workspace/repos/${name}`
+    if (path.startsWith("/")) return path
+    return `/workspace/${path}`
   }
 
   private validateVolumeSpec(spec: VolumeSpec): void {
@@ -914,14 +1093,21 @@ export class SandboxContext implements FeatureContext, BuildContext {
       this.addLanguage("node", { version: "20" })
     }
 
-    // Collect proxy-volume credential env references so the MCP server can
-    // resolve them at runtime. Keep them isolated to the MCP process so they
-    // are not merged into the dev service's global environment.
+    // Collect proxy-volume and provider credential env references so the MCP
+    // server can resolve them at runtime. Keep them isolated to the MCP process
+    // so they are not merged into the dev service's global environment.
     const mcpEnvironment: Record<string, string> = {}
     for (const volume of this.plan.runtime.volumes) {
       if (!volume.proxy) continue
       if (!volume.credentials) continue
       for (const value of Object.values(volume.credentials)) {
+        if (typeof value === "string") continue
+        mcpEnvironment[value.env] = `\${${value.env}}`
+      }
+    }
+    for (const provider of this.plan.runtime.providers) {
+      if (!provider.credentials) continue
+      for (const value of Object.values(provider.credentials)) {
         if (typeof value === "string") continue
         mcpEnvironment[value.env] = `\${${value.env}}`
       }

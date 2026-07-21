@@ -1,4 +1,4 @@
-import { Plan, Service, Port, SecretValue, EnvVar, Volume } from "./plan.js";
+import { Plan, Service, Port, SecretValue, EnvVar, Volume, Provider, Repo } from "./plan.js";
 
 function formatPort(p: Port): string {
   const label = p.name ? `${p.name}: ` : "";
@@ -43,6 +43,23 @@ function formatVolume(volume: Volume): string {
   if (volume.url) parts.push(`url ${volume.url}`);
   if (volume.allowedPaths?.length) parts.push(`allowed: ${volume.allowedPaths.join(", ")}`);
   return `${volume.name} (${parts.join(", ")}) → ${volume.target}`;
+}
+
+function formatProvider(provider: Provider): string {
+  const parts: string[] = [provider.type];
+  const displayUrl = provider.url || provider.mcpUrl;
+  if (displayUrl) parts.push(displayUrl);
+  if (provider.project) parts.push(`project ${provider.project}`);
+  return `${provider.name} (${parts.join(", ")})`;
+}
+
+function formatRepo(repo: Repo): string {
+  const parts: string[] = [repo.url];
+  parts.push(`branch ${repo.branch}`);
+  if (repo.depth !== undefined) parts.push(`depth ${repo.depth}`);
+  if (repo.credentials?.token) parts.push("token $VAR");
+  if (repo.credentials?.sshKey) parts.push("ssh key $VAR");
+  return `${repo.name} (${parts.join(", ")}) → ${repo.path}`;
 }
 
 export interface ServiceConnection {
@@ -125,6 +142,14 @@ export function formatInfo(plan: Plan): string {
     }
   }
 
+  if (plan.runtime.repos.length > 0) {
+    lines.push("");
+    lines.push("Repos:");
+    for (const repo of plan.runtime.repos) {
+      lines.push(`  - ${formatRepo(repo)}`);
+    }
+  }
+
   if (plan.runtime.endpoints.length > 0) {
     lines.push("");
     lines.push("Endpoints:");
@@ -142,6 +167,24 @@ export function formatInfo(plan: Plan): string {
       }
       if (endpoint.metadata) {
         for (const [key, value] of Object.entries(endpoint.metadata)) {
+          lines.push(`      ${key}: ${value}`);
+        }
+      }
+    }
+  }
+
+  if (plan.runtime.providers.length > 0) {
+    lines.push("");
+    lines.push("Providers:");
+    for (const provider of plan.runtime.providers) {
+      lines.push(`  - ${formatProvider(provider)}`);
+      if (provider.credentials) {
+        for (const [key, value] of Object.entries(provider.credentials)) {
+          lines.push(`      ${key}: ${formatSecret(value)}`);
+        }
+      }
+      if (provider.metadata) {
+        for (const [key, value] of Object.entries(provider.metadata)) {
           lines.push(`      ${key}: ${value}`);
         }
       }
@@ -242,6 +285,15 @@ export function formatAgentsMd(plan: Plan): string {
     lines.push("");
   }
 
+  if (plan.runtime.repos.length > 0) {
+    lines.push("## Repos");
+    lines.push("");
+    for (const repo of plan.runtime.repos) {
+      lines.push(`- \`${formatRepo(repo)}\``);
+    }
+    lines.push("");
+  }
+
   if (plan.runtime.endpoints.length > 0) {
     lines.push("## Endpoints");
     lines.push("");
@@ -262,6 +314,31 @@ export function formatAgentsMd(plan: Plan): string {
       }
       if (endpoint.metadata) {
         for (const [key, value] of Object.entries(endpoint.metadata)) {
+          lines.push(`- ${key}: \`${value}\``);
+        }
+      }
+      lines.push("");
+    }
+  }
+
+  if (plan.runtime.providers.length > 0) {
+    lines.push("## Providers");
+    lines.push("");
+    for (const provider of plan.runtime.providers) {
+      lines.push(`### ${provider.name}`);
+      lines.push("");
+      lines.push(`- Type: \`${provider.type}\``);
+      const displayUrl = provider.url || provider.mcpUrl;
+      if (displayUrl) lines.push(`- URL: \`${displayUrl}\``);
+      if (provider.project) lines.push(`- Project: \`${provider.project}\``);
+      if (provider.credentials) {
+        lines.push("- Credentials:");
+        for (const [key, value] of Object.entries(provider.credentials)) {
+          lines.push(`  - ${key}: \`${formatSecret(value)}\``);
+        }
+      }
+      if (provider.metadata) {
+        for (const [key, value] of Object.entries(provider.metadata)) {
           lines.push(`- ${key}: \`${value}\``);
         }
       }

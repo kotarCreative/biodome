@@ -166,6 +166,141 @@ Credential values can be plain strings or environment-variable references:
 
 Prefer env references for anything sensitive.
 
+## `addProvider(spec)`
+
+Declares an external provider — a well-known SaaS API such as Jira, GitHub, or Slack. Providers are surfaced in `biodome info`, the generated `AGENTS.md`, `.biodome-build/plan.json`, and the MCP `get_providers` tool. When MCP is enabled, the server exposes three code-mode tools — `provider_search`, `provider_describe`, `provider_execute` — that aggregate all provider tools under a single progressive-discovery interface.
+
+```javascript
+export default function providers(ctx) {
+  ctx.addProvider({
+    name: "github",
+    type: "github",
+    url: "https://api.github.com",
+    credentials: {
+      token: { env: "GITHUB_TOKEN" },
+    },
+    metadata: { org: "acme" },
+  });
+}
+```
+
+- `name` — unique identifier.
+- `type` — provider type, e.g. `"jira"`, `"github"`, `"slack"`.
+- `url` — optional instance/base API URL.
+- `project` — optional project, team, or workspace scope.
+- `mcpUrl` — optional remote MCP endpoint the biodome-mcp aggregator connects to.
+- `authHeader` — header name for the credential (default `"Authorization"`).
+- `authScheme` — prefix prepended to the credential when sending (default `"Bearer "`).
+- `authCredential` — which key in `credentials` holds the token (default `"token"`).
+- `credentials` — map of named credentials. Each value is either a literal string or an `{ env: "VAR_NAME" }` reference.
+- `metadata` — optional map of free-form string key/value pairs.
+
+### Code mode
+
+When MCP is enabled, the server exposes exactly three provider tools regardless of how many providers or upstream tools are connected:
+
+- `provider_search` — discover available tools across all providers by keyword
+- `provider_describe` — get the full input schema for a specific tool
+- `provider_execute` — call a tool by its qualified name (`provider.tool`)
+
+Credentials are attached by the biodome-mcp server and never reach the agent or its container.
+
+## `addMcpProvider(spec)`
+
+Generic helper for declaring a remote MCP provider. Connects to a provider-hosted MCP endpoint and exposes all its tools through the code-mode facade.
+
+```javascript
+export default function sentry(ctx) {
+  ctx.addMcpProvider({
+    name: "sentry",
+    type: "sentry",
+    mcpUrl: "https://mcp.sentry.dev/mcp",
+    credentials: { token: { env: "SENTRY_TOKEN" } },
+  });
+}
+```
+
+- `name` — unique identifier.
+- `type` — provider type label.
+- `mcpUrl` — vendor MCP endpoint URL.
+- `authHeader` — header name (default `"Authorization"`).
+- `authScheme` — scheme prefix (default `"Bearer "`).
+- `project` — optional project or workspace scope.
+- `credentials.token` — the credential value (literal or `{ env }` reference).
+- `metadata` — optional free-form key/value pairs.
+
+## Sugar helpers
+
+These helpers preset the vendor MCP URL and credential key, and delegate to `addMcpProvider`.
+
+### `addJiraProvider(spec)`
+
+```javascript
+export default function jira(ctx) {
+  ctx.addJiraProvider({
+    name: "jira",
+    project: "PROJ",
+    credentials: { token: { env: "JIRA_TOKEN" } },
+  });
+}
+```
+
+Defaults `mcpUrl` to `https://mcp.atlassian.com/v1/mcp/authv2`.
+
+### `addLinearProvider(spec)`
+
+```javascript
+export default function linear(ctx) {
+  ctx.addLinearProvider({
+    name: "linear",
+    team: "TEAM",
+    credentials: { token: { env: "LINEAR_TOKEN" } },
+  });
+}
+```
+
+Defaults `mcpUrl` to `https://mcp.linear.app/mcp`. Accepts `team` (maps to `project`).
+
+### `addSentryProvider(spec)`
+
+```javascript
+export default function sentry(ctx) {
+  ctx.addSentryProvider({
+    name: "sentry",
+    credentials: { token: { env: "SENTRY_TOKEN" } },
+  });
+}
+```
+
+Defaults `mcpUrl` to `https://mcp.sentry.dev/mcp`.
+
+### `addSlackProvider(spec)`
+
+```javascript
+export default function slack(ctx) {
+  ctx.addSlackProvider({
+    name: "slack",
+    mcpUrl: "https://slack.example.com/mcp",
+    credentials: { token: { env: "SLACK_TOKEN" } },
+  });
+}
+```
+
+`mcpUrl` is **required** — there is no stable public default.
+
+### `addGithubProvider(spec)`
+
+```javascript
+export default function github(ctx) {
+  ctx.addGithubProvider({
+    name: "github",
+    credentials: { token: { env: "GITHUB_TOKEN" } },
+  });
+}
+```
+
+Defaults `mcpUrl` to `https://api.githubcopilot.com/mcp/`.
+
 ## `addEnv(key, spec)`
 
 Declares an environment variable. A variable is either a **literal** value or a **passthrough** reference that is resolved from the host at `up` time — the safe way to inject secrets without baking them into the image or `plan.json`.
@@ -393,6 +528,39 @@ export default function volumes(ctx) {
   });
 }
 ```
+
+## `addRepo(spec)`
+
+Declares a Git repository that should be cloned into the sandbox. When the sandbox starts, biodome runs a generated `start.post` hook that clones the repo if it is not present, or fetches, checks out, and pulls the tracked branch if it already is. This is useful for polyglot or microservice projects where the agent needs multiple repositories side by side.
+
+```javascript
+export default function repos(ctx) {
+  ctx.addRepo({
+    name: "backend",
+    url: "https://github.com/acme/backend.git",
+    branch: "main",
+    path: "backend",
+  });
+
+  ctx.addRepo({
+    name: "frontend",
+    url: "https://github.com/acme/frontend.git",
+    branch: "develop",
+    path: "frontend",
+  });
+}
+```
+
+- `name` — unique identifier for the repo.
+- `url` — Git clone URL (`https://...` or `git@...`).
+- `branch` — branch to track. Defaults to `"main"`.
+- `path` — target directory inside the sandbox. Relative paths are resolved under `/workspace`; absolute paths are used as-is. Defaults to `/workspace/repos/<name>`.
+- `depth` — optional shallow clone depth (e.g. `1`).
+- `credentials` — optional authentication. Both values must be environment references (`{ env: "VAR" }`) so secrets never touch `plan.json` or the generated scripts.
+  - `token` — for HTTPS URLs. Injected as `https://$TOKEN@host/...`.
+  - `sshKey` — for SSH URLs. Written to a temporary key file and used via `GIT_SSH_COMMAND`.
+
+Each repo generates a sync script at `.biodome-build/repos/<name>.sh` and a `start.post` hook named `repo-sync-<name>`. `git` and `openssh-client` are automatically installed in the dev image when any repo is declared.
 
 ## Health checks
 

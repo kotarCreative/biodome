@@ -75,6 +75,26 @@ describe("formatInfo", () => {
     expect(info).toContain("Hooks:");
     expect(info).toContain("migrate: python manage.py migrate @ start.post");
   });
+
+  it("lists providers with credentials and metadata", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.providers.push({
+      name: "jira",
+      type: "jira",
+      url: "https://acme.atlassian.net",
+      project: "PROJ",
+      credentials: {
+        token: { env: "JIRA_TOKEN" },
+      },
+      metadata: { team: "platform" },
+    });
+
+    const info = formatInfo(plan);
+    expect(info).toContain("Providers:");
+    expect(info).toContain("jira (jira, https://acme.atlassian.net, project PROJ)");
+    expect(info).toContain("$JIRA_TOKEN");
+    expect(info).toContain("team: platform");
+  });
 });
 
 describe("formatAgentsMd", () => {
@@ -125,5 +145,64 @@ describe("formatAgentsMd", () => {
     expect(md).toContain("- Port: `8000`");
     expect(md).toContain("username: `admin`");
     expect(md).toContain("$DJANGO_API_TOKEN");
+  });
+
+  it("documents providers with URLs, projects, and credentials", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.providers.push({
+      name: "jira",
+      type: "jira",
+      url: "https://acme.atlassian.net",
+      project: "PROJ",
+      credentials: {
+        token: { env: "JIRA_TOKEN" },
+      },
+      metadata: { team: "platform" },
+    });
+
+    const md = formatAgentsMd(plan);
+    expect(md).toContain("## Providers");
+    expect(md).toContain("### jira");
+    expect(md).toContain("- Type: `jira`");
+    expect(md).toContain("- URL: `https://acme.atlassian.net`");
+    expect(md).toContain("- Project: `PROJ`");
+    expect(md).toContain("$JIRA_TOKEN");
+    expect(md).toContain("- team: `platform`");
+  });
+
+  it("documents Linear providers", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.providers.push({
+      name: "linear",
+      type: "linear",
+      url: "https://mcp.linear.app/mcp",
+      project: "TEAM",
+      credentials: {
+        token: { env: "LINEAR_TOKEN" },
+      },
+    });
+
+    const md = formatAgentsMd(plan);
+    expect(md).toContain("### linear");
+    expect(md).toContain("- Type: `linear`");
+    expect(md).toContain("- Project: `TEAM`");
+    expect(md).toContain("$LINEAR_TOKEN");
+  });
+
+  it("falls back to mcpUrl when url is absent", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.providers.push({
+      name: "sentry",
+      type: "sentry",
+      mcpUrl: "https://mcp.sentry.dev/mcp",
+      credentials: { token: { env: "SENTRY_TOKEN" } },
+    });
+
+    const info = formatInfo(plan);
+    expect(info).toContain("sentry (sentry, https://mcp.sentry.dev/mcp)");
+    expect(info).toContain("$SENTRY_TOKEN");
+
+    const md = formatAgentsMd(plan);
+    expect(md).toContain("- URL: `https://mcp.sentry.dev/mcp`");
   });
 });

@@ -490,6 +490,100 @@ describe("SandboxContext", () => {
     );
   });
 
+  it("adds a generic provider with credentials and metadata", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addProvider({
+      name: "github",
+      type: "github",
+      url: "https://api.github.com",
+      credentials: {
+        token: { env: "GITHUB_TOKEN" },
+      },
+      metadata: { org: "acme" },
+    });
+
+    expect(ctx.plan.runtime.providers).toHaveLength(1);
+    const provider = ctx.plan.runtime.providers[0];
+    expect(provider.name).toBe("github");
+    expect(provider.type).toBe("github");
+    expect(provider.url).toBe("https://api.github.com");
+    expect(provider.credentials).toEqual({ token: { env: "GITHUB_TOKEN" } });
+    expect(provider.metadata).toEqual({ org: "acme" });
+  });
+
+  it("adds a Jira provider through the helper", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addJiraProvider({
+      name: "jira",
+      mcpUrl: "https://mcp.atlassian.com/v1/mcp/authv2",
+      project: "PROJ",
+      credentials: {
+        token: { env: "JIRA_TOKEN" },
+      },
+      metadata: { team: "platform" },
+    });
+
+    const provider = ctx.plan.runtime.providers[0];
+    expect(provider.type).toBe("jira");
+    expect(provider.mcpUrl).toBe("https://mcp.atlassian.com/v1/mcp/authv2");
+    expect(provider.authHeader).toBe("Authorization");
+    expect(provider.authScheme).toBe("Bearer ");
+    expect(provider.authCredential).toBe("token");
+    expect(provider.project).toBe("PROJ");
+    expect(provider.credentials).toEqual({
+      token: { env: "JIRA_TOKEN" },
+    });
+  });
+
+  it("rejects a Jira provider without a token", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    expect(() =>
+      ctx.addJiraProvider({
+        name: "jira",
+        credentials: {} as any,
+      })
+    ).toThrow(/credentials.token is required/);
+  });
+
+  it("rejects duplicate provider names", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addProvider({ name: "jira", type: "jira" });
+    expect(() => ctx.addProvider({ name: "jira", type: "jira" })).toThrow(
+      /Duplicate provider name/
+    );
+  });
+
+  it("adds a Linear provider through the helper", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addLinearProvider({
+      name: "linear",
+      team: "TEAM",
+      credentials: {
+        token: { env: "LINEAR_TOKEN" },
+      },
+      metadata: { team: "platform" },
+    });
+
+    const provider = ctx.plan.runtime.providers[0];
+    expect(provider.type).toBe("linear");
+    expect(provider.mcpUrl).toBe("https://mcp.linear.app/mcp");
+    expect(provider.authHeader).toBe("Authorization");
+    expect(provider.authScheme).toBe("Bearer ");
+    expect(provider.authCredential).toBe("token");
+    expect(provider.project).toBe("TEAM");
+    expect(provider.credentials).toEqual({ token: { env: "LINEAR_TOKEN" } });
+  });
+
+  it("rejects a Linear provider without a token", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    expect(() =>
+      ctx.addLinearProvider({
+        name: "linear",
+        credentials: {} as any,
+      })
+    ).toThrow(/credentials.token is required/);
+  });
+
   it("rejects an endpoint with an empty env reference", () => {
     const ctx = new SandboxContext("/tmp", "test");
     expect(() =>
@@ -971,6 +1065,207 @@ describe("SandboxContext", () => {
       expect(ctx.plan.runtime.volumes[6].type).toBe("webdav");
       expect(ctx.plan.runtime.volumes[7].type).toBe("dropbox");
       expect(ctx.plan.runtime.volumes[8].type).toBe("gdrive");
+    });
+  });
+
+  describe("addMcpProvider", () => {
+    it("requires mcpUrl", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      expect(() =>
+        ctx.addMcpProvider({ name: "x", type: "custom", mcpUrl: "", credentials: { token: "abc" } } as any)
+      ).toThrow(/mcpUrl is required/);
+    });
+
+    it("requires credentials.token", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      expect(() =>
+        ctx.addMcpProvider({ name: "x", type: "custom", mcpUrl: "http://example.com/mcp", credentials: {} as any })
+      ).toThrow(/credentials.token is required/);
+    });
+
+    it("sets default auth fields", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addMcpProvider({
+        name: "sentry",
+        type: "sentry",
+        mcpUrl: "https://mcp.sentry.dev/mcp",
+        credentials: { token: { env: "SENTRY_TOKEN" } },
+      });
+      const p = ctx.plan.runtime.providers[0];
+      expect(p.name).toBe("sentry");
+      expect(p.mcpUrl).toBe("https://mcp.sentry.dev/mcp");
+      expect(p.authHeader).toBe("Authorization");
+      expect(p.authScheme).toBe("Bearer ");
+      expect(p.authCredential).toBe("token");
+      expect(p.credentials).toEqual({ token: { env: "SENTRY_TOKEN" } });
+    });
+  });
+
+  it("adds a Sentry provider through the helper", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addSentryProvider({
+      name: "sentry",
+      credentials: { token: { env: "SENTRY_TOKEN" } },
+    });
+
+    const provider = ctx.plan.runtime.providers[0];
+    expect(provider.type).toBe("sentry");
+    expect(provider.mcpUrl).toBe("https://mcp.sentry.dev/mcp");
+    expect(provider.authHeader).toBe("Authorization");
+    expect(provider.authScheme).toBe("Bearer ");
+    expect(provider.credentials).toEqual({ token: { env: "SENTRY_TOKEN" } });
+  });
+
+  it("rejects a Sentry provider without a token", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    expect(() =>
+      ctx.addSentryProvider({ name: "sentry", credentials: {} as any })
+    ).toThrow(/credentials.token is required/);
+  });
+
+  it("adds a Slack provider through the helper", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addSlackProvider({
+      name: "slack",
+      mcpUrl: "https://slack.example.com/mcp",
+      credentials: { token: { env: "SLACK_TOKEN" } },
+    });
+
+    const provider = ctx.plan.runtime.providers[0];
+    expect(provider.type).toBe("slack");
+    expect(provider.mcpUrl).toBe("https://slack.example.com/mcp");
+    expect(provider.credentials).toEqual({ token: { env: "SLACK_TOKEN" } });
+  });
+
+  it("rejects a Slack provider without mcpUrl", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    expect(() =>
+      ctx.addSlackProvider({ name: "slack", credentials: { token: "x" } } as any)
+    ).toThrow(/mcpUrl is required/);
+  });
+
+  it("adds a GitHub provider through the helper", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    ctx.addGithubProvider({
+      name: "github",
+      credentials: { token: { env: "GITHUB_TOKEN" } },
+    });
+
+    const provider = ctx.plan.runtime.providers[0];
+    expect(provider.type).toBe("github");
+    expect(provider.mcpUrl).toBe("https://api.githubcopilot.com/mcp/");
+    expect(provider.credentials).toEqual({ token: { env: "GITHUB_TOKEN" } });
+  });
+
+  it("rejects a GitHub provider without a token", () => {
+    const ctx = new SandboxContext("/tmp", "test");
+    expect(() =>
+      ctx.addGithubProvider({ name: "github", credentials: {} as any })
+    ).toThrow(/credentials.token is required/);
+  });
+
+  describe("provider credential isolation in configureMcp", () => {
+    it("isolates provider credential env refs in the MCP process environment", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addProvider({
+        name: "jira",
+        type: "jira",
+        mcpUrl: "https://mcp.atlassian.com/v1/mcp/authv2",
+        credentials: { token: { env: "JIRA_TOKEN" } },
+      });
+      ctx.configureMcp(3001);
+
+      const mcp = ctx.plan.runtime.processes.find((p) => p.name === "biodome-mcp");
+      expect(mcp).toBeDefined();
+      expect(mcp!.mergeEnv).toBe(false);
+      expect(mcp!.environment.JIRA_TOKEN).toBe("${JIRA_TOKEN}");
+      // Provider credentials must not leak into the dev service's global environment.
+      expect(ctx.plan.runtime.environment.JIRA_TOKEN).toBeUndefined();
+    });
+  });
+
+  describe("addRepo", () => {
+    it("adds a repo with defaults and creates a start.post sync hook", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addRepo({
+        name: "backend",
+        url: "https://github.com/acme/backend.git",
+      });
+
+      expect(ctx.plan.runtime.repos).toHaveLength(1);
+      const repo = ctx.plan.runtime.repos[0];
+      expect(repo.name).toBe("backend");
+      expect(repo.url).toBe("https://github.com/acme/backend.git");
+      expect(repo.path).toBe("/workspace/repos/backend");
+      expect(repo.branch).toBe("main");
+
+      expect(ctx.plan.build.aptPackages).toContain("git");
+      expect(ctx.plan.build.aptPackages).toContain("openssh-client");
+
+      const hook = ctx.plan.runtime.processes[0];
+      expect(hook.name).toBe("repo-sync-backend");
+      expect(hook.mode).toBe("oneshot");
+      expect(hook.startOn).toBe("start.post");
+      expect(hook.command).toEqual(["sh", "/workspace/.biodome-build/repos/backend.sh"]);
+    });
+
+    it("adds a repo with custom path, branch, and depth", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addRepo({
+        name: "frontend",
+        url: "https://github.com/acme/frontend.git",
+        path: "apps/frontend",
+        branch: "develop",
+        depth: 1,
+      });
+
+      const repo = ctx.plan.runtime.repos[0];
+      expect(repo.path).toBe("/workspace/apps/frontend");
+      expect(repo.branch).toBe("develop");
+      expect(repo.depth).toBe(1);
+    });
+
+    it("supports token credentials via environment reference", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addRepo({
+        name: "backend",
+        url: "https://github.com/acme/backend.git",
+        credentials: { token: { env: "GITHUB_TOKEN" } },
+      });
+
+      const repo = ctx.plan.runtime.repos[0];
+      expect(repo.credentials).toEqual({ token: { env: "GITHUB_TOKEN" } });
+    });
+
+    it("supports ssh key credentials via environment reference", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addRepo({
+        name: "backend",
+        url: "git@github.com:acme/backend.git",
+        credentials: { sshKey: { env: "BACKEND_SSH_KEY" } },
+      });
+
+      const repo = ctx.plan.runtime.repos[0];
+      expect(repo.credentials).toEqual({ sshKey: { env: "BACKEND_SSH_KEY" } });
+    });
+
+    it("rejects duplicate repo names", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addRepo({ name: "backend", url: "https://github.com/acme/backend.git" });
+      expect(() =>
+        ctx.addRepo({ name: "backend", url: "https://github.com/acme/backend2.git" })
+      ).toThrow(/Duplicate repo name/);
+    });
+
+    it("rejects literal credential strings for security", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      expect(() =>
+        ctx.addRepo({
+          name: "backend",
+          url: "https://github.com/acme/backend.git",
+          credentials: { token: "ghp_secret" },
+        })
+      ).toThrow(/must be an environment reference/);
     });
   });
 });

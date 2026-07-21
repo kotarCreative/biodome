@@ -88,6 +88,37 @@ describe("generatePlanJson", () => {
     expect(json.endpoints).toEqual([]);
   });
 
+  it("includes providers and preserves env references", () => {
+    const plan = createPlan("app");
+    plan.runtime.providers.push({
+      name: "jira",
+      type: "jira",
+      url: "https://acme.atlassian.net",
+      project: "PROJ",
+      mcpUrl: "https://mcp.atlassian.com/v1/mcp/authv2",
+      authHeader: "Authorization",
+      authScheme: "Bearer ",
+      authCredential: "token",
+      credentials: {
+        token: { env: "JIRA_TOKEN" },
+      },
+      metadata: { team: "platform" },
+    });
+
+    const json = JSON.parse(generatePlanJson(plan));
+    expect(json.providers).toHaveLength(1);
+    expect(json.providers[0].name).toBe("jira");
+    expect(json.providers[0].type).toBe("jira");
+    expect(json.providers[0].url).toBe("https://acme.atlassian.net");
+    expect(json.providers[0].project).toBe("PROJ");
+    expect(json.providers[0].mcpUrl).toBe("https://mcp.atlassian.com/v1/mcp/authv2");
+    expect(json.providers[0].authHeader).toBe("Authorization");
+    expect(json.providers[0].authScheme).toBe("Bearer ");
+    expect(json.providers[0].authCredential).toBe("token");
+    expect(json.providers[0].credentials.token).toEqual({ env: "JIRA_TOKEN" });
+    expect(json.providers[0].metadata).toEqual({ team: "platform" });
+  });
+
   it("includes languages", () => {
     const plan = createPlan("app");
     plan.build.languageRequests.push({
@@ -99,6 +130,57 @@ describe("generatePlanJson", () => {
     expect(json.languages).toHaveLength(1);
     expect(json.languages[0].name).toBe("node");
     expect(json.languages[0].version).toBe("20");
+  });
+
+  it("includes repos and preserves credential env references", () => {
+    const plan = createPlan("app");
+    plan.runtime.repos.push({
+      name: "backend",
+      url: "https://github.com/acme/backend.git",
+      path: "/workspace/repos/backend",
+      branch: "main",
+      depth: 1,
+      credentials: {
+        token: { env: "GITHUB_TOKEN" },
+      },
+    });
+
+    const json = JSON.parse(generatePlanJson(plan));
+    expect(json.repos).toHaveLength(1);
+    expect(json.repos[0].name).toBe("backend");
+    expect(json.repos[0].url).toBe("https://github.com/acme/backend.git");
+    expect(json.repos[0].path).toBe("/workspace/repos/backend");
+    expect(json.repos[0].branch).toBe("main");
+    expect(json.repos[0].depth).toBe(1);
+    expect(json.repos[0].credentials.token).toEqual({ env: "GITHUB_TOKEN" });
+  });
+
+  it("includes Linear providers", () => {
+    const plan = createPlan("app");
+    plan.runtime.providers.push({
+      name: "linear",
+      type: "linear",
+      url: "https://mcp.linear.app/mcp",
+      project: "TEAM",
+      mcpUrl: "https://mcp.linear.app/mcp",
+      authHeader: "Authorization",
+      authScheme: "Bearer ",
+      authCredential: "token",
+      credentials: {
+        token: { env: "LINEAR_TOKEN" },
+      },
+    });
+
+    const json = JSON.parse(generatePlanJson(plan));
+    expect(json.providers).toHaveLength(1);
+    expect(json.providers[0].type).toBe("linear");
+    expect(json.providers[0].url).toBe("https://mcp.linear.app/mcp");
+    expect(json.providers[0].project).toBe("TEAM");
+    expect(json.providers[0].mcpUrl).toBe("https://mcp.linear.app/mcp");
+    expect(json.providers[0].authHeader).toBe("Authorization");
+    expect(json.providers[0].authScheme).toBe("Bearer ");
+    expect(json.providers[0].authCredential).toBe("token");
+    expect(json.providers[0].credentials.token).toEqual({ env: "LINEAR_TOKEN" });
   });
 });
 

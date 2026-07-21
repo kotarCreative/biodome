@@ -17,6 +17,7 @@ import {
   generateCompose,
   generateDockerignore,
   generateHealthcheckScripts,
+  generateRepoScripts,
 } from "../docker/generator.js"
 import { DockerRuntime } from "../docker/runner.js"
 import { formatInfo, formatAgentsMd } from "../core/info.js"
@@ -80,6 +81,14 @@ function writeGeneratedFiles(rootDir: string, plan: Plan): string[] {
     writeFileSync(join(healthcheckDir, name), content)
   }
 
+  const repoDir = join(rootDir, BUILD_DIR, "repos")
+  rmSync(repoDir, { recursive: true, force: true })
+  mkdirSync(repoDir, { recursive: true })
+  const repos = generateRepoScripts(plan)
+  for (const [name, content] of Object.entries(repos)) {
+    writeFileSync(join(repoDir, name), content)
+  }
+
   const dockerignorePath = join(rootDir, ".dockerignore")
   if (!existsSync(dockerignorePath)) {
     writeFileSync(dockerignorePath, generateDockerignore())
@@ -97,6 +106,7 @@ function writeGeneratedFiles(rootDir: string, plan: Plan): string[] {
     join(rootDir, BUILD_DIR, "docker-compose.yaml"),
     join(rootDir, BUILD_DIR, "supervisord.conf"),
     ...Object.keys(healthchecks).map((name) => join(healthcheckDir, name)),
+    ...Object.keys(repos).map((name) => join(repoDir, name)),
   ].filter((p) => existsSync(p))
 }
 

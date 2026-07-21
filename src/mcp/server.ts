@@ -18,6 +18,8 @@ import {
   matchesAllowedPath,
   VolumeAccessError,
 } from "./volumes/adapter.js"
+import { filterProviderTools } from "./provider-tools.js"
+import { UpstreamRegistry, type UpstreamProvider } from "./upstream.js"
 
 async function createVolumeAdapter(config: VolumeConfig): Promise<VolumeAdapter> {
   switch (config.type) {
@@ -153,6 +155,66 @@ function formatFileInfo(file: FileInfo): string {
 const { port, planPath } = parseArgs()
 const plan = readPlan(planPath)
 
+const providers: any[] = plan.providers || []
+
+function toUpstream(p: any): UpstreamProvider | null {
+  if (!p.mcpUrl) return null
+  const credKey = p.authCredential || "token"
+  const token = resolveSecret(p.credentials?.[credKey])
+  if (!token) return null
+  return {
+    name: p.name,
+    type: p.type,
+    mcpUrl: p.mcpUrl,
+    authHeader: p.authHeader || "Authorization",
+    authScheme: p.authScheme || "Bearer ",
+    token,
+  }
+}
+
+function buildUpstreamList(providers: any[]): { upstream: UpstreamProvider[]; skipped: string[] } {
+  const upstream: UpstreamProvider[] = []
+  const skipped: string[] = []
+  for (const p of providers) {
+    const converted = toUpstream(p)
+    if (converted) {
+      upstream.push(converted)
+    } else if (p.mcpUrl) {
+      skipped.push(`${p.name}: credential ${p.authCredential || "token"} not resolvable`)
+    } else {
+      skipped.push(`${p.name}: no mcpUrl configured`)
+    }
+  }
+  return { upstream, skipped }
+}
+
+const { upstream: upstreamProviders, skipped: skippedProviders } = buildUpstreamList(providers)
+const registry = new UpstreamRegistry(upstreamProviders)
+
+function resolveProvider(provider: any) {
+  const credentials = provider.credentials
+    ? Object.fromEntries(
+        Object.entries(provider.credentials).map(([key, value]) => [key, resolveSecret(value)])
+      )
+    : null
+  return {
+    name: provider.name,
+    type: provider.type,
+    url: provider.url ?? null,
+    project: provider.project ?? null,
+    credentials,
+    metadata: provider.metadata ?? null,
+  }
+}
+
+function redactProviderForLog(provider: any) {
+  const credentials = provider.credentials
+    ? Object.fromEntries(Object.keys(provider.credentials).map((key) => [key, "REDACTED"]))
+    : null
+  return { ...provider, credentials }
+}
+
+
 const mcpServer = new Server(
   { name: "biodome-mcp", version: "1.0.0" },
   { capabilities: { tools: {} } }
@@ -191,8 +253,8 @@ function logCall(name: string, args: any, result: any) {
   )
 }
 
-mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [
+mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
+  const allTools = [
     {
       name: "get_sandbox_info",
       description:
@@ -204,6 +266,52 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
       description:
         "List the feature-declared endpoints (custom APIs and services) with their URLs, ports, credentials, and metadata. Credential values that reference an environment variable are resolved from the live container environment.",
       inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "get_providers",
+      description:
+        "List the feature-declared external providers (e.g. Jira, GitHub, Slack) with their type, URL, project, credentials, and metadata. Credential values that reference an environment variable are resolved from the live container environment.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "provider_search",
+      description:
+        "Search across all connected provider tools (Jira, Linear, Sentry, ...). " +
+        "Returns matching tool names (formatted 'provider.tool'), descriptions, and their provider. " +
+        "Use this first to discover which tool to call, then provider_describe for its input schema.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Keywords to match against tool names and descriptions." },
+          provider: { type: "string", description: "Optional: restrict to one provider by name." },
+          limit: { type: "number", description: "Max results (default 20)." },
+        },
+      },
+    },
+    {
+      name: "provider_describe",
+      description:
+        "Get the full input schema and description for one provider tool. " +
+        "Pass the qualified name from provider_search, e.g. 'linear.create_issue'.",
+      inputSchema: {
+        type: "object",
+        properties: { tool: { type: "string", description: "Qualified tool name 'provider.tool'." } },
+        required: ["tool"],
+      },
+    },
+    {
+      name: "provider_execute",
+      description:
+        "Execute one provider tool by its qualified name with arguments. " +
+        "Credentials are attached by the server; you never need a token.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tool: { type: "string", description: "Qualified tool name 'provider.tool'." },
+          arguments: { type: "object", description: "Arguments object matching the tool's input schema." },
+        },
+        required: ["tool"],
+      },
     },
     {
       name: "get_process_status",
@@ -329,8 +437,10 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ["path"],
       },
     },
-  ],
-}))
+  ]
+  const tools = filterProviderTools(allTools, providers)
+  return { tools }
+})
 
 mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params
@@ -353,6 +463,69 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         const redacted = {
           content: [{ type: "text", text: JSON.stringify(endpoints.map(redactEndpointForLog), null, 2) }],
         }
+        logCall(name, args, redacted)
+        return result
+      }
+
+      case "get_providers": {
+        const resolved = providers.map(resolveProvider)
+        const result = {
+          content: [{ type: "text", text: JSON.stringify(resolved, null, 2) }],
+        }
+        const redacted = {
+          content: [{ type: "text", text: JSON.stringify(resolved.map(redactProviderForLog), null, 2) }],
+        }
+        logCall(name, args, redacted)
+        return result
+      }
+
+      case "provider_search": {
+        const query = typeof args?.query === "string" ? args.query.toLowerCase() : ""
+        const providerFilter = typeof args?.provider === "string" ? args.provider : undefined
+        const limit = typeof args?.limit === "number" ? Math.min(Math.max(1, args.limit), 100) : 20
+        const catalog = await registry.listCatalog()
+        let matches = catalog
+        if (providerFilter) matches = matches.filter((e) => e.provider === providerFilter)
+        if (query) {
+          matches = matches.filter((e) =>
+            e.qualified.toLowerCase().includes(query) ||
+            (e.description || "").toLowerCase().includes(query)
+          )
+        }
+        const results = matches.slice(0, limit).map((e) => ({
+          tool: e.qualified, provider: e.provider, description: e.description,
+        }))
+        const result = {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              results,
+              errors: registry.getErrors(),
+              skipped: skippedProviders,
+            }, null, 2),
+          }],
+        }
+        logCall(name, args, result)
+        return result
+      }
+
+      case "provider_describe": {
+        const tool = typeof args?.tool === "string" ? args.tool : ""
+        if (!tool) throw new McpError(ErrorCode.InvalidParams, "tool is required")
+        const entry = await registry.describe(tool)
+        const result = { content: [{ type: "text", text: JSON.stringify(entry, null, 2) }] }
+        logCall(name, args, result)
+        return result
+      }
+
+      case "provider_execute": {
+        const tool = typeof args?.tool === "string" ? args.tool : ""
+        if (!tool) throw new McpError(ErrorCode.InvalidParams, "tool is required")
+        const toolArgs = (args?.arguments && typeof args.arguments === "object") ? args.arguments : {}
+        const data = await registry.call(tool, toolArgs)
+        const result = { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] }
+        const text = result.content[0]?.text ?? ""
+        const redacted = { content: [{ type: "text", text: `<result ${Buffer.byteLength(text, "utf8")} bytes>` }] }
         logCall(name, args, redacted)
         return result
       }

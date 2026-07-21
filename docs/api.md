@@ -51,6 +51,34 @@ Add a backing service. See [File layout](file-layout.md).
 
 Declare an agent-discoverable endpoint with a name, optional URL/port, credentials (plain or env-referenced), and free-form metadata. Endpoints are surfaced in `biodome info`, `AGENTS.md`, `.biodome-build/plan.json`, and the MCP `get_endpoints` tool. See [Primitives](primitives.md#addendpointspec).
 
+### `addProvider(spec)`
+
+Declare an external provider with a name, type, optional URL/project/mcpUrl, credentials (plain or env-referenced), and free-form metadata. Providers are surfaced in `biodome info`, `AGENTS.md`, `.biodome-build/plan.json`, and the MCP `get_providers` tool. See [Primitives](primitives.md#addproviderspec).
+
+### `addMcpProvider(spec)`
+
+Declare a remote MCP provider. Requires `name`, `type`, `mcpUrl`, and `credentials.token`. The biodome-mcp server connects to the provider's MCP endpoint and exposes all its tools through a code-mode facade (`provider_search`, `provider_describe`, `provider_execute`). See [Primitives](primitives.md#addmcpproviderspec).
+
+### `addJiraProvider(spec)`
+
+Sugar for a Jira MCP provider. Defaults `mcpUrl` to `https://mcp.atlassian.com/v1/mcp/authv2`. Requires `credentials.token`. See [Primitives](primitives.md#addjiraproviderspec).
+
+### `addLinearProvider(spec)`
+
+Sugar for a Linear MCP provider. Defaults `mcpUrl` to `https://mcp.linear.app/mcp`. Accepts `team` (maps to `project`). Requires `credentials.token`. See [Primitives](primitives.md#addlinearproviderspec).
+
+### `addSentryProvider(spec)`
+
+Sugar for a Sentry MCP provider. Defaults `mcpUrl` to `https://mcp.sentry.dev/mcp`. Requires `credentials.token`. See [Primitives](primitives.md#addsentryproviderspec).
+
+### `addSlackProvider(spec)`
+
+Sugar for a Slack MCP provider. `mcpUrl` is required (no stable public default). Requires `credentials.token`. See [Primitives](primitives.md#addslackproviderspec).
+
+### `addGithubProvider(spec)`
+
+Sugar for a GitHub MCP provider. Defaults `mcpUrl` to `https://api.githubcopilot.com/mcp/`. Requires `credentials.token`. See [Primitives](primitives.md#addgithubproviderspec).
+
 ### `addEnv(key, spec)`
 
 Declare an environment variable. Provide exactly one of `value` (literal) or `from: { env }` (host passthrough). Optional: `scope` (`"build" | "runtime" | "both"`, default `"runtime"`), and for passthrough vars `required` and `default`. Passthrough values are resolved from the host at `up` time and never written to the image or `plan.json`. See [Primitives](primitives.md#addenvkey-spec).
@@ -58,6 +86,10 @@ Declare an environment variable. Provide exactly one of `value` (literal) or `fr
 ### `addVolume(spec)`
 
 Mount a local directory or cloud/network storage into the dev container as a live read/write access point, or declare a proxy volume for agent-safe access through the MCP server. Supported types: `"local"`, `"s3"`, `"gcs"`, `"azure"`, `"sftp"`, `"smb"`, `"webdav"`, `"dropbox"`, `"gdrive"`. Credentials can be literal strings or env references. See [Primitives](primitives.md#addvolumespec).
+
+### `addRepo(spec)`
+
+Declare a Git repository to clone into the sandbox and keep up to date on startup. Supports multiple repos, custom branches/paths, and token or SSH-key authentication via environment references. See [Primitives](primitives.md#addrepospec).
 
 ### `addLocalVolume(spec)`
 
@@ -88,6 +120,15 @@ When proxy volumes are enabled, the MCP server exposes these tools for agent acc
 - `read_file` — read a file as base64 (`s3-data:reports/file.pdf`).
 - `write_file` — write a file from base64 content.
 - `stat_file` — get file metadata.
+
+### MCP provider tools (code mode)
+
+When providers are declared, the MCP server exposes a progressive-discovery interface instead of per-provider tools. The agent uses these three tools to search, inspect, and call any upstream tool:
+
+- `get_providers` — list declared providers with resolved credentials.
+- `provider_search` — search across all connected provider tools by keyword, provider name, or both. Returns tool names formatted as `provider.tool`.
+- `provider_describe` — get the full input schema and description for one provider tool (e.g. `linear.create_issue`).
+- `provider_execute` — call a tool by its qualified name with arguments. Credentials are attached by the server and never reach the agent.
 
 ### `fileExists(path)`
 
@@ -161,6 +202,24 @@ interface ProcessSpec {
 }
 ```
 
+## Repo specification
+
+```typescript
+interface RepoSpec {
+  name: string;
+  url: string;
+  branch?: string;
+  path?: string;
+  depth?: number;
+  credentials?: {
+    token?: { env: string };
+    sshKey?: { env: string };
+  };
+}
+```
+
+`credentials.token` is used with HTTPS URLs; `credentials.sshKey` is used with SSH URLs. Both must be environment references (`{ env: "VAR" }`) — literal credential strings are rejected to keep secrets out of `plan.json` and generated scripts.
+
 ## Lifecycle points
 
 ```typescript
@@ -203,7 +262,7 @@ biodome exec npm test
 
 ### `biodome info`
 
-Print a summary of the project: base image, languages, services, endpoints, environment, connection strings, processes, and hooks.
+Print a summary of the project: base image, languages, services, endpoints, providers, environment, connection strings, processes, and hooks.
 
 ### `biodome config validate`
 
@@ -211,7 +270,7 @@ Validate the `.biodome/` configuration and feature modules without building. Thi
 
 ### `biodome generate agents.md`
 
-Generate an `AGENTS.md` file with base image, languages, services, endpoints, environment, connection info, processes, and available commands for AI coding agents.
+Generate an `AGENTS.md` file with base image, languages, services, endpoints, providers, environment, connection info, processes, and available commands for AI coding agents.
 
 ### `biodome logs [process]`
 
