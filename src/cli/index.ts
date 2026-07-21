@@ -25,6 +25,7 @@ import { generatePlanJson } from "../mcp/generator.js"
 import type { SandboxRuntime } from "../core/runtime.js"
 import { PlanError, SandboxError } from "../core/errors.js"
 import { NodeRuntime } from "../core/runtime-node.js"
+import { BiodomeTelemetry } from "../core/telemetry.js"
 import {
   detectStarterLanguages,
   generateStarterFeature,
@@ -131,7 +132,10 @@ function withLayers<E>(
   enabled: boolean,
   runId: string
 ): Effect.Effect<void, E, never> {
-  return program.pipe(Effect.provide(buildLayers(rootDir, enabled, runId))) as Effect.Effect<void, E, never>
+  return program.pipe(
+    Effect.provide(buildLayers(rootDir, enabled, runId)),
+    Effect.provide(BiodomeTelemetry)
+  ) as Effect.Effect<void, E, never>
 }
 
 function wrapRunEvents(
@@ -233,7 +237,7 @@ program
           }),
       })
 
-      console.log(`Initialized .biodome config for ${projectName}`)
+      yield* Effect.logInfo(`Initialized .biodome config for ${projectName}`)
     })
 
     runSafe(cliProgram)
@@ -255,7 +259,7 @@ program
       yield* runHooks(plan, "build.pre", runtime, rootDir)
       yield* runtime.build(rootDir)
       yield* runHooks(plan, "build.post", runtime, rootDir)
-      console.log(`Environment ready for ${plan.project}`)
+      yield* Effect.logInfo(`Environment ready for ${plan.project}`)
     }).pipe(Effect.scoped)
 
     const wrapped = wrapRunEvents("build", cliProgram)
@@ -282,13 +286,12 @@ program
       yield* runtime.start(rootDir, options.build)
       yield* runHooks(plan, "start.post", runtime, rootDir)
 
-      console.log(`Workspace ${plan.project} is running`)
+      yield* Effect.logInfo(`Workspace ${plan.project} is running`)
 
       if (options.wait) {
-        console.log("Press Ctrl+C to stop")
+        yield* Effect.logInfo("Press Ctrl+C to stop")
         yield* Effect.callback<void, never, never>((resume) => {
           process.on("SIGINT", () => {
-            console.log("\nStopping...")
             resume(Effect.void)
           })
         })
@@ -314,7 +317,7 @@ program
       yield* runHooks(plan, "stop.pre", runtime, rootDir)
       yield* runtime.stop(rootDir)
       yield* runHooks(plan, "stop.post", runtime, rootDir)
-      console.log("Stopped")
+      yield* Effect.logInfo("Stopped")
     }).pipe(Effect.scoped)
 
     const wrapped = wrapRunEvents("down", cliProgram)
@@ -489,7 +492,7 @@ configCmd
       const plan = yield* buildPlanEffect(rootDir, { dryRun: true })
       yield* validatePlan(plan)
       yield* emitConfigValidated(plan.project, true)
-      console.log("Configuration is valid")
+      yield* Effect.logInfo("Configuration is valid")
     })
 
     const wrapped = wrapRunEvents("config validate", cliProgram)
@@ -506,7 +509,7 @@ generateCmd
       const rootDir = process.cwd()
       const plan = yield* buildPlanEffect(rootDir, { dryRun: true })
       writeFileSync(join(rootDir, "AGENTS.md"), formatAgentsMd(plan))
-      console.log("Generated AGENTS.md")
+      yield* Effect.logInfo("Generated AGENTS.md")
     })
 
     runSafe(cliProgram)

@@ -152,7 +152,7 @@ export function createFileEventStore(options: FileEventStoreOptions): EventStore
       }
       ensureDir()
       appendFileSync(path, JSON.stringify(event) + "\n")
-      yield* Effect.void
+      yield* Effect.logInfo(`event:${type}`)
     })
 
   const events: EventStore["events"] = () =>

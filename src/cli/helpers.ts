@@ -72,7 +72,7 @@ export const runHooks = Effect.fnUntraced(
         command: hook.command,
         location,
       })
-      console.log(`[hook] ${hook.name} (${point})`)
+      yield* Effect.logInfo(`[hook] ${hook.name} (${point})`)
 
       if (location === "host") {
         const [cmd, ...args] = hook.command
