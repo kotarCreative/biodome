@@ -26,6 +26,8 @@ import {
   SecretValue,
   RepoSpecSchema,
   Repo,
+  AgentHarnessSpecSchema,
+  AgentHarness,
 } from "./plan.js"
 import {
   FeatureContext,
@@ -55,6 +57,7 @@ import {
   DropboxVolumeSpec,
   GdriveVolumeSpec,
   RepoSpec,
+  AgentHarnessSpec,
 } from "./feature.js"
 import { BuildContext } from "./build-context.js"
 import { languageHandlers, getDefaultBaseImage } from "./languages.js"
@@ -592,6 +595,63 @@ export class SandboxContext implements FeatureContext, BuildContext {
     })
   }
 
+  addOpencodeHarness(spec: AgentHarnessSpec): void {
+    const validated = Schema.decodeSync(AgentHarnessSpecSchema)(spec)
+
+    if (this.plan.runtime.agentHarnesses.some((h) => h.name === validated.name)) {
+      throw new ValidationError({ message: `Duplicate agent harness name: ${validated.name}` })
+    }
+
+    const port = validated.port ?? 3002
+    validatePort(port, `Agent harness ${validated.name}: port`)
+
+    const mcpServers = validated.mcpServers ?? {
+      biodome: { url: `http://localhost:${this.plan.build.mcpPort}` },
+    }
+
+    const telemetry = {
+      enabled: validated.telemetry?.enabled ?? true,
+      path: validated.telemetry?.path ?? "/workspace/.biodome-build/logs/opencode-events.jsonl",
+    }
+
+    const harness: AgentHarness = {
+      name: validated.name,
+      type: "opencode",
+      port,
+      mcpServers,
+      telemetry,
+      config: validated.config ? { ...validated.config } : {},
+    }
+    this.plan.runtime.agentHarnesses.push(harness)
+
+    // OpenCode CLI runs on Bun and is distributed through npm as opencode-ai.
+    this.addLanguage("node", { version: "20" })
+    this.addAptPackage("curl")
+    this.addLanguageSnippet("RUN npm install -g opencode-ai")
+    this.addLanguageSnippet(
+      "RUN curl -fsSL https://bun.sh/install | bash && ln -sf /root/.bun/bin/bun /usr/local/bin/bun"
+    )
+
+    this.addProcess({
+      name: `opencode-agent-${validated.name}`,
+      command: [
+        "opencode",
+        "serve",
+        "--port",
+        String(port),
+        "--hostname",
+        "0.0.0.0",
+        "--print-logs",
+      ],
+      port,
+      healthCheck: { type: "http", url: `http://localhost:${port}/health` },
+      environment: {
+        OPENCODE_CONFIG_DIR: "/workspace/.biodome-build/opencode",
+        OPENCODE_TELEMETRY_PATH: telemetry.path,
+      },
+    })
+  }
+
   private normalizeRepoPath(path: string | undefined, name: string): string {
     if (!path) return `/workspace/repos/${name}`
     if (path.startsWith("/")) return path
@@ -1123,7 +1183,10 @@ export class SandboxContext implements FeatureContext, BuildContext {
       ],
       port,
       healthCheck: { type: "http", url: `http://localhost:${port}/health` },
-      environment: mcpEnvironment,
+      environment: {
+        ...mcpEnvironment,
+        MCP_EVENTS_LOG: "/workspace/.biodome-build/logs/mcp-events.jsonl",
+      },
       mergeEnv: false,
     })
   }

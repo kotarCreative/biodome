@@ -6,6 +6,7 @@ import {
   generateDockerignore,
   generateHealthcheckScripts,
   generateRepoScripts,
+  generateHarnessFiles,
 } from "../../docker/generator.js";
 import { createPlan } from "../../core/plan.js";
 
@@ -397,6 +398,34 @@ describe("Docker generators", () => {
       expect(scripts["backend.sh"]).toContain("if [ -z \"$BACKEND_SSH_KEY\" ]");
       expect(scripts["backend.sh"]).toContain("/tmp/biodome-repo-keys/backend");
       expect(scripts["backend.sh"]).toContain("GIT_SSH_COMMAND");
+    });
+  });
+
+  describe("generateHarnessFiles", () => {
+    it("generates opencode config and telemetry plugin", () => {
+      const plan = createPlan("my-app");
+      plan.runtime.agentHarnesses.push({
+        name: "agent",
+        type: "opencode",
+        port: 3002,
+        mcpServers: { biodome: { url: "http://localhost:3001" } },
+        telemetry: { enabled: true, path: "/workspace/.biodome-build/logs/opencode-events.jsonl" },
+        config: {},
+      });
+
+      const files = generateHarnessFiles(plan);
+      expect(files["opencode/agent.jsonc"]).toContain('"$schema": "https://opencode.ai/config.json"');
+      expect(files["opencode/agent.jsonc"]).toContain('"mcp"');
+      expect(files["opencode/agent.jsonc"]).toContain('"biodome"');
+      expect(files["opencode/agent.jsonc"]).toContain('"type": "remote"');
+      expect(files["opencode/agent.jsonc"]).toContain("http://localhost:3001");
+
+      const plugin = files["opencode/plugins/agent-telemetry.js"];
+      expect(plugin).toContain("export default async () =>");
+      expect(plugin).toContain("tool.execute.before");
+      expect(plugin).toContain("tool.execute.after");
+      expect(plugin).toContain("chat.message");
+      expect(plugin).toContain("/workspace/.biodome-build/logs/opencode-events.jsonl");
     });
   });
 });

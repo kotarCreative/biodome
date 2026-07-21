@@ -1,5 +1,6 @@
 import http from "node:http"
 import fs from "node:fs"
+import path from "node:path"
 import { execSync, execFileSync } from "node:child_process"
 import net from "node:net"
 import { randomUUID } from "node:crypto"
@@ -241,16 +242,38 @@ function assertReadAllowed(volume: VolumeConfig, subPath: string) {
   }
 }
 
-function logCall(name: string, args: any, result: any) {
-  console.log(
-    JSON.stringify({
-      type: "mcp_call",
-      tool: name,
-      args,
+const MCP_EVENTS_LOG = process.env.MCP_EVENTS_LOG || "/workspace/.biodome-build/logs/mcp-events.jsonl"
+
+function logMcpEvent(type: string, data: any) {
+  try {
+    const dir = path.dirname(MCP_EVENTS_LOG)
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true })
+    }
+    const event = {
+      id: randomUUID(),
       timestamp: new Date().toISOString(),
-      result,
-    })
-  )
+      source: "mcp",
+      type,
+      data,
+    }
+    fs.appendFileSync(MCP_EVENTS_LOG, JSON.stringify(event) + "\n")
+  } catch (err) {
+    console.error("[biodome-mcp] failed to write event log:", (err as Error).message)
+  }
+}
+
+function logCall(name: string, args: any, result: any) {
+  const entry = {
+    type: "mcp_call",
+    tool: name,
+    args,
+    timestamp: new Date().toISOString(),
+    result,
+  }
+  console.log(JSON.stringify(entry))
+  logMcpEvent("tool.call", { tool: name, args })
+  logMcpEvent("tool.result", { tool: name, result })
 }
 
 mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {

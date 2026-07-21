@@ -1268,4 +1268,55 @@ describe("SandboxContext", () => {
       ).toThrow(/must be an environment reference/);
     });
   });
+
+  describe("addOpencodeHarness", () => {
+    it("adds an opencode harness with defaults", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.configureMcp(3001);
+      ctx.addOpencodeHarness({ name: "agent" });
+
+      expect(ctx.plan.runtime.agentHarnesses).toHaveLength(1);
+      const harness = ctx.plan.runtime.agentHarnesses[0];
+      expect(harness.name).toBe("agent");
+      expect(harness.type).toBe("opencode");
+      expect(harness.port).toBe(3002);
+      expect(harness.mcpServers).toEqual({ biodome: { url: "http://localhost:3001" } });
+      expect(harness.telemetry.enabled).toBe(true);
+      expect(harness.telemetry.path).toBe("/workspace/.biodome-build/logs/opencode-events.jsonl");
+
+      const proc = ctx.plan.runtime.processes.find((p) => p.name === "opencode-agent-agent");
+      expect(proc).toBeDefined();
+      expect(proc!.mode).toBe("daemon");
+      expect(proc!.command).toContain("opencode");
+      expect(proc!.command).toContain("serve");
+      expect(proc!.command).toContain("3002");
+      expect(proc!.environment!.OPENCODE_CONFIG_DIR).toBe("/workspace/.biodome-build/opencode");
+
+      expect(ctx.plan.build.aptPackages).toContain("curl");
+    });
+
+    it("uses custom port and mcp servers", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addOpencodeHarness({
+        name: "agent",
+        port: 4000,
+        mcpServers: {
+          custom: { url: "http://localhost:5000" },
+        },
+      });
+
+      const harness = ctx.plan.runtime.agentHarnesses[0];
+      expect(harness.port).toBe(4000);
+      expect(harness.mcpServers).toEqual({ custom: { url: "http://localhost:5000" } });
+
+      const proc = ctx.plan.runtime.processes.find((p) => p.name === "opencode-agent-agent");
+      expect(proc!.command).toContain("4000");
+    });
+
+    it("rejects duplicate harness names", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addOpencodeHarness({ name: "agent" });
+      expect(() => ctx.addOpencodeHarness({ name: "agent" })).toThrow(/Duplicate agent harness name/);
+    });
+  });
 });

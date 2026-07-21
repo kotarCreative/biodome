@@ -91,6 +91,10 @@ Mount a local directory or cloud/network storage into the dev container as a liv
 
 Declare a Git repository to clone into the sandbox and keep up to date on startup. Supports multiple repos, custom branches/paths, and token or SSH-key authentication via environment references. See [Primitives](primitives.md#addrepospec).
 
+### `addOpencodeHarness(spec)`
+
+Run a headless OpenCode agent inside the sandbox with telemetry capture. See [Primitives](primitives.md#addopencodeharnessspec).
+
 ### `addLocalVolume(spec)`
 
 ### `addS3Volume(spec)`
@@ -219,6 +223,21 @@ interface RepoSpec {
 ```
 
 `credentials.token` is used with HTTPS URLs; `credentials.sshKey` is used with SSH URLs. Both must be environment references (`{ env: "VAR" }`) — literal credential strings are rejected to keep secrets out of `plan.json` and generated scripts.
+
+## Agent harness specification
+
+```typescript
+interface AgentHarnessSpec {
+  name: string;
+  port?: number;
+  mcpServers?: Record<string, { url: string }>;
+  telemetry?: {
+    enabled?: boolean;
+    path?: string;
+  };
+  config?: Record<string, unknown>;
+}
+```
 
 ## Lifecycle points
 

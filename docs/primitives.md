@@ -562,6 +562,36 @@ export default function repos(ctx) {
 
 Each repo generates a sync script at `.biodome-build/repos/<name>.sh` and a `start.post` hook named `repo-sync-<name>`. `git` and `openssh-client` are automatically installed in the dev image when any repo is declared.
 
+## `addOpencodeHarness(spec)`
+
+Runs a headless OpenCode agent inside the sandbox. The harness installs the OpenCode CLI (`opencode-ai`), the Bun runtime, and starts `opencode serve` as a daemon process. It also generates an OpenCode config that registers `biodome-mcp` as an MCP server and a telemetry plugin that records every message, tool call, and event the agent emits.
+
+```javascript
+export default function agent(ctx) {
+  ctx.addOpencodeHarness({
+    name: "coder",
+    port: 3002,
+    mcpServers: {
+      biodome: { url: "http://localhost:3001" },
+    },
+    telemetry: {
+      enabled: true,
+      path: "/workspace/.biodome-build/logs/opencode-events.jsonl",
+    },
+  });
+}
+```
+
+- `name` — unique identifier for the harness.
+- `port` — port for `opencode serve`. Defaults to `3002`.
+- `mcpServers` — map of MCP servers the agent can use. Defaults to `{ biodome: { url: "http://localhost:<mcpPort>" } }`.
+- `telemetry` —
+  - `enabled` — whether to install the telemetry plugin. Defaults to `true`.
+  - `path` — JSONL file where OpenCode events are written. Defaults to `/workspace/.biodome-build/logs/opencode-events.jsonl`.
+- `config` — arbitrary extra values merged into `opencode.jsonc`.
+
+The MCP server (`biodome-mcp`) writes its own structured events to `/workspace/.biodome-build/logs/mcp-events.jsonl`. Together, the two logs give a holistic view of the agent's activity: OpenCode events show the agent's reasoning and tool calls, while the MCP log shows the exact sandbox actions those tool calls performed.
+
 ## Health checks
 
 Health checks are attached to daemon processes. Each daemon with a health check gets a generated shell script in `.biodome-build/healthchecks/<name>.sh`, and `supervisord` runs a companion `<name>-healthcheck` program that restarts the process after repeated failures. The dev service health check in the generated compose file runs all daemon health checks via `.biodome-build/healthchecks/all.sh`.

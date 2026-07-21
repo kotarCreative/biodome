@@ -50,6 +50,24 @@ export interface RepoCredentials {
   sshKey?: SecretValue
 }
 
+export interface AgentHarnessMcpServer {
+  url: string
+}
+
+export interface AgentHarnessTelemetry {
+  enabled: boolean
+  path: string
+}
+
+export interface AgentHarness {
+  name: string
+  type: string
+  port: number
+  mcpServers: Record<string, AgentHarnessMcpServer>
+  telemetry: AgentHarnessTelemetry
+  config: Record<string, unknown>
+}
+
 export interface RuntimePlan {
   services: Service[]
   networks: Network[]
@@ -62,6 +80,7 @@ export interface RuntimePlan {
   providers: Provider[]
   envVars: EnvVar[]
   repos: Repo[]
+  agentHarnesses: AgentHarness[]
 }
 
 export type EnvScope = "build" | "runtime" | "both"
@@ -286,6 +305,7 @@ export function createPlan(project: string): Plan {
       providers: [],
       envVars: [],
       repos: [],
+      agentHarnesses: [],
     },
   }
 }
@@ -392,6 +412,37 @@ export const RepoSchema = Schema.Struct({
   branch: Schema.String,
   depth: Schema.optional(Schema.Number),
   credentials: Schema.optional(RepoCredentialsSchema),
+})
+
+export const AgentHarnessMcpServerSchema = Schema.Struct({
+  url: Schema.String,
+})
+
+export const AgentHarnessTelemetrySchema = Schema.Struct({
+  enabled: Schema.Boolean,
+  path: Schema.String,
+})
+
+export const AgentHarnessSpecSchema = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1)),
+  port: Schema.optional(Schema.Number),
+  mcpServers: Schema.optional(Schema.Record(Schema.String, AgentHarnessMcpServerSchema)),
+  telemetry: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean),
+      path: Schema.optional(Schema.String),
+    })
+  ),
+  config: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+})
+
+export const AgentHarnessSchema = Schema.Struct({
+  name: Schema.String,
+  type: Schema.String,
+  port: Schema.Number,
+  mcpServers: Schema.Record(Schema.String, AgentHarnessMcpServerSchema),
+  telemetry: AgentHarnessTelemetrySchema,
+  config: Schema.Record(Schema.String, Schema.Unknown),
 })
 
 export const EndpointCredentialsSchema = Schema.Record(Schema.String, SecretValueSchema)
@@ -621,5 +672,6 @@ export const PlanSchema = Schema.Struct({
     providers: Schema.Array(ProviderSchema),
     envVars: Schema.Array(EnvVarSchema),
     repos: Schema.Array(RepoSchema),
+    agentHarnesses: Schema.Array(AgentHarnessSchema),
   }),
 })

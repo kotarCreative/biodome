@@ -1,5 +1,5 @@
 import { stringify } from "yaml";
-import { Plan, Process, Service, ProcessHealthCheck, PortMapping, VolumeMapping, Repo } from "../core/plan.js";
+import { Plan, Process, Service, ProcessHealthCheck, PortMapping, VolumeMapping, Repo, AgentHarness } from "../core/plan.js";
 
 interface ComposeService {
   image?: string;
@@ -168,6 +168,17 @@ export function generateRepoScripts(plan: Plan): Record<string, string> {
     scripts[`${repo.name}.sh`] = repoSyncScript(repo);
   }
   return scripts;
+}
+
+export function generateHarnessFiles(plan: Plan): Record<string, string> {
+  const files: Record<string, string> = {};
+  for (const harness of plan.runtime.agentHarnesses) {
+    if (harness.type === "opencode") {
+      files[`opencode/${harness.name}.jsonc`] = opencodeConfig(harness);
+      files[`opencode/plugins/${harness.name}-telemetry.js`] = opencodeTelemetryPlugin(harness);
+    }
+  }
+  return files;
 }
 
 export function generateSupervisordConf(plan: Plan): string {
@@ -600,6 +611,75 @@ function repoSyncScript(repo: Repo): string {
   lines.push("fi");
 
   return lines.join("\n") + "\n";
+}
+
+function opencodeConfig(harness: AgentHarness): string {
+  const mcp: Record<string, any> = {};
+  for (const [name, server] of Object.entries(harness.mcpServers)) {
+    mcp[name] = { type: "remote", url: server.url };
+  }
+
+  const config = {
+    $schema: "https://opencode.ai/config.json",
+    autoupdate: false,
+    plugin: [
+      [`/workspace/.biodome-build/opencode/plugins/${harness.name}-telemetry.js`, {}],
+    ],
+    mcp,
+    ...harness.config,
+  };
+
+  return JSON.stringify(config, null, 2) + "\n";
+}
+
+function opencodeTelemetryPlugin(harness: AgentHarness): string {
+  const logPath = harness.telemetry.path;
+  return [
+    "// Auto-generated OpenCode telemetry plugin for biodome",
+    "import { randomUUID } from 'node:crypto'",
+    "import fs from 'node:fs'",
+    "import path from 'node:path'",
+    "",
+    `const LOG_PATH = process.env.OPENCODE_TELEMETRY_PATH || ${JSON.stringify(logPath)}`,
+    "",
+    "function appendEvent(event) {",
+    "  try {",
+    "    const dir = path.dirname(LOG_PATH)",
+    "    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })",
+    "    fs.appendFileSync(LOG_PATH, JSON.stringify(event) + '\\n')",
+    "  } catch (err) {",
+    "    console.error('[biodome-telemetry] failed to write event:', err.message)",
+    "  }",
+    "}",
+    "",
+    "function baseEvent(type, data) {",
+    "  return {",
+    "    id: randomUUID(),",
+    "    timestamp: new Date().toISOString(),",
+    "    source: 'opencode',",
+    "    type,",
+    "    data,",
+    "  }",
+    "}",
+    "",
+    "export default async () => {",
+    "  return {",
+    "    event: async ({ event }) => {",
+    "      appendEvent(baseEvent('event', { name: event.name, payload: event.payload }))",
+    "    },",
+    "    'tool.execute.before': async ({ tool, sessionID, callID, args }) => {",
+    "      appendEvent(baseEvent('tool.execute.before', { tool, sessionID, callID, args }))",
+    "    },",
+    "    'tool.execute.after': async ({ tool, sessionID, callID, args, output, title }) => {",
+    "      appendEvent(baseEvent('tool.execute.after', { tool, sessionID, callID, args, output, title }))",
+    "    },",
+    "    'chat.message': async ({ sessionID, message, parts }) => {",
+    "      appendEvent(baseEvent('chat.message', { sessionID, message, parts }))",
+    "    },",
+    "  }",
+    "}",
+    "",
+  ].join("\n");
 }
 
 function shellHealthCheck(hc: ProcessHealthCheck): string {

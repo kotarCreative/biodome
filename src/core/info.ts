@@ -1,4 +1,4 @@
-import { Plan, Service, Port, SecretValue, EnvVar, Volume, Provider, Repo } from "./plan.js";
+import { Plan, Service, Port, SecretValue, EnvVar, Volume, Provider, Repo, AgentHarness } from "./plan.js";
 
 function formatPort(p: Port): string {
   const label = p.name ? `${p.name}: ` : "";
@@ -60,6 +60,18 @@ function formatRepo(repo: Repo): string {
   if (repo.credentials?.token) parts.push("token $VAR");
   if (repo.credentials?.sshKey) parts.push("ssh key $VAR");
   return `${repo.name} (${parts.join(", ")}) → ${repo.path}`;
+}
+
+function formatAgentHarness(harness: AgentHarness): string {
+  const parts: string[] = [harness.type];
+  parts.push(`port ${harness.port}`);
+  if (Object.keys(harness.mcpServers).length > 0) {
+    parts.push(`mcp ${Object.keys(harness.mcpServers).join(", ")}`);
+  }
+  if (harness.telemetry.enabled) {
+    parts.push(`telemetry → ${harness.telemetry.path}`);
+  }
+  return `${harness.name} (${parts.join(", ")})`;
 }
 
 export interface ServiceConnection {
@@ -147,6 +159,14 @@ export function formatInfo(plan: Plan): string {
     lines.push("Repos:");
     for (const repo of plan.runtime.repos) {
       lines.push(`  - ${formatRepo(repo)}`);
+    }
+  }
+
+  if (plan.runtime.agentHarnesses.length > 0) {
+    lines.push("");
+    lines.push("Agent harnesses:");
+    for (const harness of plan.runtime.agentHarnesses) {
+      lines.push(`  - ${formatAgentHarness(harness)}`);
     }
   }
 
@@ -290,6 +310,15 @@ export function formatAgentsMd(plan: Plan): string {
     lines.push("");
     for (const repo of plan.runtime.repos) {
       lines.push(`- \`${formatRepo(repo)}\``);
+    }
+    lines.push("");
+  }
+
+  if (plan.runtime.agentHarnesses.length > 0) {
+    lines.push("## Agent harnesses");
+    lines.push("");
+    for (const harness of plan.runtime.agentHarnesses) {
+      lines.push(`- \`${formatAgentHarness(harness)}\``);
     }
     lines.push("");
   }
