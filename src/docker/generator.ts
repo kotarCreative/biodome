@@ -174,8 +174,9 @@ export function generateHarnessFiles(plan: Plan): Record<string, string> {
   const files: Record<string, string> = {};
   for (const harness of plan.runtime.agentHarnesses) {
     if (harness.type === "opencode") {
-      files[`opencode/${harness.name}.jsonc`] = opencodeConfig(harness);
-      files[`opencode/plugins/${harness.name}-telemetry.js`] = opencodeTelemetryPlugin(harness);
+      const homeDir = `opencode-homes/${harness.name}`;
+      files[`${homeDir}/.config/opencode/opencode.json`] = opencodeConfig(harness);
+      files[`${homeDir}/.config/opencode/plugins/${harness.name}-telemetry.js`] = opencodeTelemetryPlugin(harness);
     }
   }
   return files;
@@ -619,11 +620,11 @@ function opencodeConfig(harness: AgentHarness): string {
     mcp[name] = { type: "remote", url: server.url };
   }
 
-  const config = {
+  const config: Record<string, any> = {
     $schema: "https://opencode.ai/config.json",
     autoupdate: false,
     plugin: [
-      [`/workspace/.biodome-build/opencode/plugins/${harness.name}-telemetry.js`, {}],
+      [`plugins/${harness.name}-telemetry.js`, {}],
     ],
     mcp,
     ...harness.config,

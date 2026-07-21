@@ -414,13 +414,17 @@ describe("Docker generators", () => {
       });
 
       const files = generateHarnessFiles(plan);
-      expect(files["opencode/agent.jsonc"]).toContain('"$schema": "https://opencode.ai/config.json"');
-      expect(files["opencode/agent.jsonc"]).toContain('"mcp"');
-      expect(files["opencode/agent.jsonc"]).toContain('"biodome"');
-      expect(files["opencode/agent.jsonc"]).toContain('"type": "remote"');
-      expect(files["opencode/agent.jsonc"]).toContain("http://localhost:3001");
+      const configPath = "opencode-homes/agent/.config/opencode/opencode.json";
+      const pluginPath = "opencode-homes/agent/.config/opencode/plugins/agent-telemetry.js";
 
-      const plugin = files["opencode/plugins/agent-telemetry.js"];
+      expect(files[configPath]).toContain('"$schema": "https://opencode.ai/config.json"');
+      expect(files[configPath]).toContain('"mcp"');
+      expect(files[configPath]).toContain('"biodome"');
+      expect(files[configPath]).toContain('"type": "remote"');
+      expect(files[configPath]).toContain("http://localhost:3001");
+      expect(files[configPath]).toContain("plugins/agent-telemetry.js");
+
+      const plugin = files[pluginPath];
       expect(plugin).toContain("export default async () =>");
       expect(plugin).toContain("tool.execute.before");
       expect(plugin).toContain("tool.execute.after");

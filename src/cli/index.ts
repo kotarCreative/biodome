@@ -90,12 +90,9 @@ function writeGeneratedFiles(rootDir: string, plan: Plan): string[] {
     writeFileSync(join(repoDir, name), content)
   }
 
-  const harnessDir = join(rootDir, BUILD_DIR, "opencode")
-  rmSync(harnessDir, { recursive: true, force: true })
-  mkdirSync(harnessDir, { recursive: true })
   const harnessFiles = generateHarnessFiles(plan)
   for (const [name, content] of Object.entries(harnessFiles)) {
-    const filePath = join(harnessDir, name)
+    const filePath = join(rootDir, BUILD_DIR, name)
     mkdirSync(dirname(filePath), { recursive: true })
     writeFileSync(filePath, content)
   }
@@ -118,7 +115,7 @@ function writeGeneratedFiles(rootDir: string, plan: Plan): string[] {
     join(rootDir, BUILD_DIR, "supervisord.conf"),
     ...Object.keys(healthchecks).map((name) => join(healthcheckDir, name)),
     ...Object.keys(repos).map((name) => join(repoDir, name)),
-    ...Object.keys(harnessFiles).map((name) => join(harnessDir, name)),
+    ...Object.keys(harnessFiles).map((name) => join(rootDir, BUILD_DIR, name)),
   ].filter((p) => existsSync(p))
 }
 

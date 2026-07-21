@@ -1290,7 +1290,7 @@ describe("SandboxContext", () => {
       expect(proc!.command).toContain("opencode");
       expect(proc!.command).toContain("serve");
       expect(proc!.command).toContain("3002");
-      expect(proc!.environment!.OPENCODE_CONFIG_DIR).toBe("/workspace/.biodome-build/opencode");
+      expect(proc!.environment!.HOME).toBe("/workspace/.biodome-build/opencode-homes/agent");
 
       expect(ctx.plan.build.aptPackages).toContain("curl");
     });

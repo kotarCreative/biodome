@@ -627,9 +627,11 @@ export class SandboxContext implements FeatureContext, BuildContext {
     // OpenCode CLI runs on Bun and is distributed through npm as opencode-ai.
     this.addLanguage("node", { version: "20" })
     this.addAptPackage("curl")
+    this.addAptPackage("ca-certificates")
+    this.addAptPackage("unzip")
     this.addLanguageSnippet("RUN npm install -g opencode-ai")
     this.addLanguageSnippet(
-      "RUN curl -fsSL https://bun.sh/install | bash && ln -sf /root/.bun/bin/bun /usr/local/bin/bun"
+      "RUN curl -fsSL -o /tmp/bun-install.sh https://bun.sh/install && bash /tmp/bun-install.sh && rm /tmp/bun-install.sh && ln -sf /root/.bun/bin/bun /usr/local/bin/bun"
     )
 
     this.addProcess({
@@ -646,7 +648,11 @@ export class SandboxContext implements FeatureContext, BuildContext {
       port,
       healthCheck: { type: "http", url: `http://localhost:${port}/health` },
       environment: {
-        OPENCODE_CONFIG_DIR: "/workspace/.biodome-build/opencode",
+        // OpenCode hard-codes config paths under ~/.config/opencode. Point
+        // HOME at a generated per-harness directory so the sandbox ships its
+        // own isolated config (plugins, MCP servers, provider) instead of
+        // relying on the host's ~/.config.
+        HOME: `/workspace/.biodome-build/opencode-homes/${validated.name}`,
         OPENCODE_TELEMETRY_PATH: telemetry.path,
       },
     })
