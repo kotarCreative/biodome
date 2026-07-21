@@ -1,5 +1,5 @@
 import { stringify } from "yaml";
-import { Plan, Process, Service, ProcessHealthCheck, PortMapping, VolumeMapping, Repo, AgentHarness, LlmProvider } from "../core/plan.js";
+import { Plan, Process, Service, ProcessHealthCheck, PortMapping, VolumeMapping, Repo, AgentHarness, PiHarness, LlmProvider } from "../core/plan.js";
 
 interface ComposeService {
   image?: string;
@@ -178,6 +178,19 @@ export function generateHarnessFiles(plan: Plan): Record<string, string> {
       files[`${homeDir}/.config/opencode/opencode.json`] = opencodeConfig(harness, plan.runtime.llmProviders);
       files[`${homeDir}/.config/opencode/plugins/${harness.name}-telemetry.js`] = opencodeTelemetryPlugin(harness);
       files[`${homeDir}/start.sh`] = opencodeStartScript(harness);
+    }
+  }
+  return files;
+}
+
+export function generatePiHarnessFiles(plan: Plan): Record<string, string> {
+  const files: Record<string, string> = {};
+  for (const harness of plan.runtime.piHarnesses) {
+    const homeDir = `pi-homes/${harness.name}`;
+    files[`${homeDir}/settings.json`] = piSettings(harness);
+    files[`${homeDir}/pi`] = piWrapperScript(harness);
+    if (harness.telemetry.enabled) {
+      files[`${homeDir}/extensions/biodome-telemetry.ts`] = piTelemetryExtension(harness);
     }
   }
   return files;
@@ -722,6 +735,103 @@ function opencodeTelemetryPlugin(harness: AgentHarness): string {
     "      appendEvent(baseEvent('chat.message', { sessionID, message, parts }))",
     "    },",
     "  }",
+    "}",
+    "",
+  ].join("\n");
+}
+
+function piSettings(harness: PiHarness): string {
+  const settings: Record<string, unknown> = {
+    ...harness.config,
+  };
+
+  if (harness.provider) settings.defaultProvider = harness.provider;
+  if (harness.model) settings.defaultModel = harness.model;
+
+  const resources: string[] = [];
+  if (harness.telemetry.enabled) {
+    resources.push(`/workspace/.biodome-build/pi-homes/${harness.name}/extensions/biodome-telemetry.ts`);
+  }
+  if (harness.extensions) resources.push(...harness.extensions);
+  if (resources.length > 0) settings.extensions = resources;
+  if (harness.skills) settings.skills = harness.skills;
+  if (harness.prompts) settings.prompts = harness.prompts;
+  if (harness.themes) settings.themes = harness.themes;
+  if (harness.packages) settings.packages = harness.packages;
+
+  return JSON.stringify(settings, null, 2) + "\n";
+}
+
+function piWrapperScript(harness: PiHarness): string {
+  const homeDir = `/workspace/.biodome-build/pi-homes/${harness.name}`;
+  const envExports: string[] = [`export PI_CODING_AGENT_DIR=${homeDir}`];
+  if (harness.apiKey && typeof harness.apiKey === "object" && "env" in harness.apiKey) {
+    envExports.push(`export ${harness.apiKey.env}="$${harness.apiKey.env}"`);
+  }
+
+  const args: string[] = [];
+  if (harness.tools && harness.tools.length > 0) {
+    args.push(`--tools ${harness.tools.join(",")}`);
+  }
+
+  return [
+    "#!/bin/sh",
+    `# Auto-generated Pi wrapper for ${harness.name}`,
+    "set -e",
+    "",
+    ...envExports,
+    "",
+    `exec pi ${args.join(" ")} "$@"`,
+    "",
+  ].join("\n");
+}
+
+function piTelemetryExtension(harness: PiHarness): string {
+  const logPath = harness.telemetry.path;
+  return [
+    "// Auto-generated Pi telemetry extension for biodome",
+    "import { randomUUID } from 'node:crypto'",
+    "import fs from 'node:fs'",
+    "import path from 'node:path'",
+    "",
+    `const LOG_PATH = process.env.PI_BIODOME_TELEMETRY_PATH || ${JSON.stringify(logPath)}`,
+    "",
+    "function appendEvent(event) {",
+    "  try {",
+    "    const dir = path.dirname(LOG_PATH)",
+    "    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })",
+    "    fs.appendFileSync(LOG_PATH, JSON.stringify(event) + '\\n')",
+    "  } catch (err) {",
+    "    console.error('[biodome-pi-telemetry] failed to write event:', err.message)",
+    "  }",
+    "}",
+    "",
+    "function baseEvent(type, data) {",
+    "  return {",
+    "    id: randomUUID(),",
+    "    timestamp: new Date().toISOString(),",
+    "    source: 'pi',",
+    "    type,",
+    "    data,",
+    "  }",
+    "}",
+    "",
+    "export default function (pi) {",
+    "  pi.on('agent_start', async (event) => {",
+    "    appendEvent(baseEvent('agent_start', {}))",
+    "  })",
+    "",
+    "  pi.on('agent_end', async (event) => {",
+    "    appendEvent(baseEvent('agent_end', { messages: event.messages, willRetry: event.willRetry }))",
+    "  })",
+    "",
+    "  pi.on('tool_execution_start', async (event) => {",
+    "    appendEvent(baseEvent('tool_execution_start', { toolCallId: event.toolCallId, toolName: event.toolName, args: event.args }))",
+    "  })",
+    "",
+    "  pi.on('tool_execution_end', async (event) => {",
+    "    appendEvent(baseEvent('tool_execution_end', { toolCallId: event.toolCallId, toolName: event.toolName, isError: event.isError }))",
+    "  })",
     "}",
     "",
   ].join("\n");

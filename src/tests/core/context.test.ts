@@ -1363,4 +1363,57 @@ describe("SandboxContext", () => {
       ).toThrow(/must be an environment reference/);
     });
   });
+
+  describe("addPiHarness", () => {
+    it("adds a Pi harness with defaults", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addPiHarness({ name: "coder" });
+
+      expect(ctx.plan.runtime.piHarnesses).toHaveLength(1);
+      const harness = ctx.plan.runtime.piHarnesses[0];
+      expect(harness.name).toBe("coder");
+      expect(harness.type).toBe("pi");
+      expect(harness.telemetry.enabled).toBe(true);
+      expect(harness.telemetry.path).toBe("/workspace/.biodome-build/logs/pi-coder-events.jsonl");
+
+      expect(ctx.plan.build.languageSnippets.some((s) => s.includes("@earendil-works/pi-coding-agent"))).toBe(true);
+    });
+
+    it("supports provider, model, tools and resources", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addPiHarness({
+        name: "coder",
+        provider: "anthropic",
+        model: "claude-sonnet-4-20250514",
+        apiKey: { env: "ANTHROPIC_API_KEY" },
+        tools: ["read", "bash", "edit", "write"],
+        extensions: ["/workspace/ext.ts"],
+        skills: ["/workspace/skills"],
+        packages: ["pi-skills"],
+      });
+
+      const harness = ctx.plan.runtime.piHarnesses[0];
+      expect(harness.provider).toBe("anthropic");
+      expect(harness.model).toBe("claude-sonnet-4-20250514");
+      expect(harness.tools).toEqual(["read", "bash", "edit", "write"]);
+      expect(harness.extensions).toEqual(["/workspace/ext.ts"]);
+      expect(harness.skills).toEqual(["/workspace/skills"]);
+      expect(harness.packages).toEqual(["pi-skills"]);
+
+      const envVar = ctx.plan.runtime.envVars.find((e) => e.key === "ANTHROPIC_API_KEY");
+      expect(envVar).toBeDefined();
+      expect(envVar!.from).toEqual({ env: "ANTHROPIC_API_KEY" });
+    });
+
+    it("rejects duplicate Pi harness names", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addPiHarness({ name: "coder" });
+      expect(() => ctx.addPiHarness({ name: "coder" })).toThrow(/Duplicate Pi harness name/);
+    });
+
+    it("rejects literal apiKey strings", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      expect(() => ctx.addPiHarness({ name: "coder", apiKey: "sk-secret" })).toThrow(/must be an environment reference/);
+    });
+  });
 });

@@ -76,6 +76,22 @@ export interface LlmProvider {
   models: Record<string, { name?: string }>
 }
 
+export interface PiHarness {
+  name: string
+  type: "pi"
+  provider?: string
+  model?: string
+  apiKey?: SecretValue
+  tools?: string[]
+  extensions?: string[]
+  skills?: string[]
+  prompts?: string[]
+  themes?: string[]
+  packages?: string[]
+  telemetry: { enabled: boolean; path: string }
+  config: Record<string, unknown>
+}
+
 export interface RuntimePlan {
   services: Service[]
   networks: Network[]
@@ -89,6 +105,7 @@ export interface RuntimePlan {
   envVars: EnvVar[]
   repos: Repo[]
   agentHarnesses: AgentHarness[]
+  piHarnesses: PiHarness[]
   llmProviders: LlmProvider[]
 }
 
@@ -315,6 +332,7 @@ export function createPlan(project: string): Plan {
       envVars: [],
       repos: [],
       agentHarnesses: [],
+      piHarnesses: [],
       llmProviders: [],
     },
   }
@@ -451,6 +469,42 @@ export const AgentHarnessSchema = Schema.Struct({
   type: Schema.String,
   port: Schema.Number,
   mcpServers: Schema.Record(Schema.String, AgentHarnessMcpServerSchema),
+  telemetry: AgentHarnessTelemetrySchema,
+  config: Schema.Record(Schema.String, Schema.Unknown),
+})
+
+export const PiHarnessSpecSchema = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1)),
+  provider: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
+  apiKey: Schema.optional(SecretValueSchema),
+  tools: Schema.optional(Schema.Array(Schema.String)),
+  extensions: Schema.optional(Schema.Array(Schema.String)),
+  skills: Schema.optional(Schema.Array(Schema.String)),
+  prompts: Schema.optional(Schema.Array(Schema.String)),
+  themes: Schema.optional(Schema.Array(Schema.String)),
+  packages: Schema.optional(Schema.Array(Schema.String)),
+  telemetry: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean),
+      path: Schema.optional(Schema.String),
+    })
+  ),
+  config: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+})
+
+export const PiHarnessSchema = Schema.Struct({
+  name: Schema.String,
+  type: Schema.Literals(["pi"]),
+  provider: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
+  apiKey: Schema.optional(SecretValueSchema),
+  tools: Schema.optional(Schema.Array(Schema.String)),
+  extensions: Schema.optional(Schema.Array(Schema.String)),
+  skills: Schema.optional(Schema.Array(Schema.String)),
+  prompts: Schema.optional(Schema.Array(Schema.String)),
+  themes: Schema.optional(Schema.Array(Schema.String)),
+  packages: Schema.optional(Schema.Array(Schema.String)),
   telemetry: AgentHarnessTelemetrySchema,
   config: Schema.Record(Schema.String, Schema.Unknown),
 })
@@ -699,6 +753,7 @@ export const PlanSchema = Schema.Struct({
     envVars: Schema.Array(EnvVarSchema),
     repos: Schema.Array(RepoSchema),
     agentHarnesses: Schema.Array(AgentHarnessSchema),
+    piHarnesses: Schema.Array(PiHarnessSchema),
     llmProviders: Schema.Array(
       Schema.Struct({
         name: Schema.String,

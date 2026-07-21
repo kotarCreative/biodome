@@ -619,6 +619,42 @@ export default function llm(ctx) {
 - `options` — provider options such as `baseURL` and `apiKey`. Credential-like option keys (containing `key`) must be env references.
 - `models` — map of model IDs to display names.
 
+## `addPiHarness(spec)`
+
+Installs and configures the [Pi](https://pi.dev) coding agent inside the sandbox. Pi is a terminal/RPC agent rather than a persistent server, so this harness creates an isolated Pi home directory with settings, a telemetry extension, and a wrapper script you can run through `biodome exec`.
+
+```javascript
+export default function pi(ctx) {
+  ctx.addPiHarness({
+    name: "coder",
+    provider: "anthropic",
+    model: "claude-sonnet-4-20250514",
+    apiKey: { env: "ANTHROPIC_API_KEY" },
+    tools: ["read", "bash", "edit", "write"],
+    packages: ["pi-skills"],
+  });
+}
+```
+
+Run it with:
+
+```bash
+biodome exec /workspace/.biodome-build/pi-homes/coder/pi -p "Refactor src/utils.ts"
+```
+
+- `name` — unique identifier for the harness.
+- `provider` — default LLM provider.
+- `model` — default model ID.
+- `apiKey` — API key as an env reference.
+- `tools` — allowlist of built-in tools (default: all).
+- `extensions`, `skills`, `prompts`, `themes`, `packages` — Pi resources to load.
+- `telemetry` —
+  - `enabled` — whether to install the telemetry extension. Defaults to `true`.
+  - `path` — JSONL file where Pi events are written. Defaults to `/workspace/.biodome-build/logs/pi-<name>-events.jsonl`.
+- `config` — arbitrary extra values merged into `settings.json`.
+
+The telemetry extension captures `agent_start`, `agent_end`, and `tool_execution_*` events so Pi activity can be correlated with other sandbox telemetry.
+
 ## Health checks
 
 Health checks are attached to daemon processes. Each daemon with a health check gets a generated shell script in `.biodome-build/healthchecks/<name>.sh`, and `supervisord` runs a companion `<name>-healthcheck` program that restarts the process after repeated failures. The dev service health check in the generated compose file runs all daemon health checks via `.biodome-build/healthchecks/all.sh`.

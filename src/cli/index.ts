@@ -19,6 +19,7 @@ import {
   generateHealthcheckScripts,
   generateRepoScripts,
   generateHarnessFiles,
+  generatePiHarnessFiles,
 } from "../docker/generator.js"
 import { DockerRuntime } from "../docker/runner.js"
 import { formatInfo, formatAgentsMd } from "../core/info.js"
@@ -97,6 +98,13 @@ function writeGeneratedFiles(rootDir: string, plan: Plan): string[] {
     writeFileSync(filePath, content)
   }
 
+  const piHarnessFiles = generatePiHarnessFiles(plan)
+  for (const [name, content] of Object.entries(piHarnessFiles)) {
+    const filePath = join(rootDir, BUILD_DIR, name)
+    mkdirSync(dirname(filePath), { recursive: true })
+    writeFileSync(filePath, content)
+  }
+
   const dockerignorePath = join(rootDir, ".dockerignore")
   if (!existsSync(dockerignorePath)) {
     writeFileSync(dockerignorePath, generateDockerignore())
@@ -116,6 +124,7 @@ function writeGeneratedFiles(rootDir: string, plan: Plan): string[] {
     ...Object.keys(healthchecks).map((name) => join(healthcheckDir, name)),
     ...Object.keys(repos).map((name) => join(repoDir, name)),
     ...Object.keys(harnessFiles).map((name) => join(rootDir, BUILD_DIR, name)),
+    ...Object.keys(piHarnessFiles).map((name) => join(rootDir, BUILD_DIR, name)),
   ].filter((p) => existsSync(p))
 }
 

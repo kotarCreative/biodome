@@ -99,6 +99,10 @@ Run a headless OpenCode agent inside the sandbox with telemetry capture. See [Pr
 
 Configure an LLM provider for OpenCode harnesses. See [Primitives](primitives.md#addllmproviderspec).
 
+### `addPiHarness(spec)`
+
+Install and configure the Pi coding agent. See [Primitives](primitives.md#addpiharnessspec).
+
 ### `addLocalVolume(spec)`
 
 ### `addS3Volume(spec)`
@@ -256,6 +260,28 @@ interface LlmProviderSpec {
 ```
 
 Credential-like option keys (e.g. `apiKey`) must be environment references (`{ env: "VAR" }`), not literal strings.
+
+## Pi harness specification
+
+```typescript
+interface PiHarnessSpec {
+  name: string;
+  provider?: string;
+  model?: string;
+  apiKey?: { env: string };
+  tools?: string[];
+  extensions?: string[];
+  skills?: string[];
+  prompts?: string[];
+  themes?: string[];
+  packages?: string[];
+  telemetry?: {
+    enabled?: boolean;
+    path?: string;
+  };
+  config?: Record<string, unknown>;
+}
+```
 
 ## Lifecycle points
 

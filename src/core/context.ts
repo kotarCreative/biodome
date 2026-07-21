@@ -30,6 +30,8 @@ import {
   AgentHarness,
   LlmProviderSpecSchema,
   LlmProvider,
+  PiHarnessSpecSchema,
+  PiHarness,
 } from "./plan.js"
 import {
   FeatureContext,
@@ -60,6 +62,7 @@ import {
   GdriveVolumeSpec,
   RepoSpec,
   AgentHarnessSpec,
+  PiHarnessSpec,
   LlmProviderSpec,
 } from "./feature.js"
 import { BuildContext } from "./build-context.js"
@@ -654,6 +657,52 @@ export class SandboxContext implements FeatureContext, BuildContext {
         OPENCODE_TELEMETRY_PATH: telemetry.path,
       },
     })
+  }
+
+  addPiHarness(spec: PiHarnessSpec): void {
+    const validated = Schema.decodeSync(PiHarnessSpecSchema)(spec)
+
+    if (this.plan.runtime.piHarnesses.some((h) => h.name === validated.name)) {
+      throw new ValidationError({ message: `Duplicate Pi harness name: ${validated.name}` })
+    }
+
+    if (validated.apiKey && typeof validated.apiKey === "string") {
+      throw new ValidationError({
+        message: `Pi harness ${validated.name}: apiKey must be an environment reference ({ env: "VAR" }), not a literal string`,
+      })
+    }
+
+    const telemetry = {
+      enabled: validated.telemetry?.enabled ?? true,
+      path: validated.telemetry?.path ?? `/workspace/.biodome-build/logs/pi-${validated.name}-events.jsonl`,
+    }
+
+    const harness: PiHarness = {
+      name: validated.name,
+      type: "pi",
+      provider: validated.provider,
+      model: validated.model,
+      apiKey: validated.apiKey,
+      tools: validated.tools ? [...validated.tools] : undefined,
+      extensions: validated.extensions ? [...validated.extensions] : undefined,
+      skills: validated.skills ? [...validated.skills] : undefined,
+      prompts: validated.prompts ? [...validated.prompts] : undefined,
+      themes: validated.themes ? [...validated.themes] : undefined,
+      packages: validated.packages ? [...validated.packages] : undefined,
+      telemetry,
+      config: validated.config ? { ...validated.config } : {},
+    }
+    this.plan.runtime.piHarnesses.push(harness)
+
+    // Pi is distributed as an npm package.
+    this.addLanguage("node", { version: "20" })
+    this.addLanguageSnippet("RUN npm install -g @earendil-works/pi-coding-agent")
+
+    // Passthrough the API key env reference so Docker Compose injects it into
+    // the container; the wrapper script then exports it for pi.
+    if (validated.apiKey && typeof validated.apiKey === "object" && "env" in validated.apiKey) {
+      this.addEnv(validated.apiKey.env, { from: { env: validated.apiKey.env } })
+    }
   }
 
   addLlmProvider(spec: LlmProviderSpec): void {

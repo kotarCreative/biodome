@@ -1,4 +1,4 @@
-import { Plan, Service, Port, SecretValue, EnvVar, Volume, Provider, Repo, AgentHarness, LlmProvider } from "./plan.js";
+import { Plan, Service, Port, SecretValue, EnvVar, Volume, Provider, Repo, AgentHarness, PiHarness, LlmProvider } from "./plan.js";
 
 function formatPort(p: Port): string {
   const label = p.name ? `${p.name}: ` : "";
@@ -81,6 +81,15 @@ function formatLlmProvider(provider: LlmProvider): string {
   const modelNames = Object.keys(provider.models);
   if (modelNames.length > 0) parts.push(`models ${modelNames.join(", ")}`);
   return `${provider.name} (${parts.join(", ")})`;
+}
+
+function formatPiHarness(harness: PiHarness): string {
+  const parts: string[] = [];
+  if (harness.provider) parts.push(`provider ${harness.provider}`);
+  if (harness.model) parts.push(`model ${harness.model}`);
+  if (harness.tools && harness.tools.length > 0) parts.push(`tools ${harness.tools.join(", ")}`);
+  if (harness.telemetry.enabled) parts.push(`telemetry → ${harness.telemetry.path}`);
+  return `${harness.name} (${parts.join(", ")})`;
 }
 
 export interface ServiceConnection {
@@ -184,6 +193,14 @@ export function formatInfo(plan: Plan): string {
     lines.push("LLM providers:");
     for (const provider of plan.runtime.llmProviders) {
       lines.push(`  - ${formatLlmProvider(provider)}`);
+    }
+  }
+
+  if (plan.runtime.piHarnesses.length > 0) {
+    lines.push("");
+    lines.push("Pi harnesses:");
+    for (const harness of plan.runtime.piHarnesses) {
+      lines.push(`  - ${formatPiHarness(harness)}`);
     }
   }
 
@@ -345,6 +362,15 @@ export function formatAgentsMd(plan: Plan): string {
     lines.push("");
     for (const provider of plan.runtime.llmProviders) {
       lines.push(`- \`${formatLlmProvider(provider)}\``);
+    }
+    lines.push("");
+  }
+
+  if (plan.runtime.piHarnesses.length > 0) {
+    lines.push("## Pi harnesses");
+    lines.push("");
+    for (const harness of plan.runtime.piHarnesses) {
+      lines.push(`- \`${formatPiHarness(harness)}\``);
     }
     lines.push("");
   }
