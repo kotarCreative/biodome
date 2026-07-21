@@ -92,6 +92,28 @@ export interface PiHarness {
   config: Record<string, unknown>
 }
 
+export interface CodexHarness {
+  name: string
+  type: "codex"
+  port: number
+  mcpServers: Record<string, AgentHarnessMcpServer>
+  apiKey?: SecretValue
+  model?: string
+  telemetry: { enabled: boolean; path: string }
+  config: Record<string, unknown>
+}
+
+export interface ClaudeHarness {
+  name: string
+  type: "claude"
+  apiKey?: SecretValue
+  model?: string
+  tools?: string[]
+  permissions?: string
+  telemetry: { enabled: boolean; path: string }
+  config: Record<string, unknown>
+}
+
 export interface RuntimePlan {
   services: Service[]
   networks: Network[]
@@ -106,6 +128,8 @@ export interface RuntimePlan {
   repos: Repo[]
   agentHarnesses: AgentHarness[]
   piHarnesses: PiHarness[]
+  codexHarnesses: CodexHarness[]
+  claudeHarnesses: ClaudeHarness[]
   llmProviders: LlmProvider[]
 }
 
@@ -333,6 +357,8 @@ export function createPlan(project: string): Plan {
       repos: [],
       agentHarnesses: [],
       piHarnesses: [],
+      codexHarnesses: [],
+      claudeHarnesses: [],
       llmProviders: [],
     },
   }
@@ -505,6 +531,58 @@ export const PiHarnessSchema = Schema.Struct({
   prompts: Schema.optional(Schema.Array(Schema.String)),
   themes: Schema.optional(Schema.Array(Schema.String)),
   packages: Schema.optional(Schema.Array(Schema.String)),
+  telemetry: AgentHarnessTelemetrySchema,
+  config: Schema.Record(Schema.String, Schema.Unknown),
+})
+
+export const CodexHarnessSpecSchema = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1)),
+  port: Schema.optional(Schema.Number),
+  mcpServers: Schema.optional(Schema.Record(Schema.String, AgentHarnessMcpServerSchema)),
+  apiKey: Schema.optional(SecretValueSchema),
+  model: Schema.optional(Schema.String),
+  telemetry: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean),
+      path: Schema.optional(Schema.String),
+    })
+  ),
+  config: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+})
+
+export const CodexHarnessSchema = Schema.Struct({
+  name: Schema.String,
+  type: Schema.Literals(["codex"]),
+  port: Schema.Number,
+  mcpServers: Schema.Record(Schema.String, AgentHarnessMcpServerSchema),
+  apiKey: Schema.optional(SecretValueSchema),
+  model: Schema.optional(Schema.String),
+  telemetry: AgentHarnessTelemetrySchema,
+  config: Schema.Record(Schema.String, Schema.Unknown),
+})
+
+export const ClaudeHarnessSpecSchema = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1)),
+  apiKey: Schema.optional(SecretValueSchema),
+  model: Schema.optional(Schema.String),
+  tools: Schema.optional(Schema.Array(Schema.String)),
+  permissions: Schema.optional(Schema.String),
+  telemetry: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean),
+      path: Schema.optional(Schema.String),
+    })
+  ),
+  config: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+})
+
+export const ClaudeHarnessSchema = Schema.Struct({
+  name: Schema.String,
+  type: Schema.Literals(["claude"]),
+  apiKey: Schema.optional(SecretValueSchema),
+  model: Schema.optional(Schema.String),
+  tools: Schema.optional(Schema.Array(Schema.String)),
+  permissions: Schema.optional(Schema.String),
   telemetry: AgentHarnessTelemetrySchema,
   config: Schema.Record(Schema.String, Schema.Unknown),
 })
@@ -754,6 +832,8 @@ export const PlanSchema = Schema.Struct({
     repos: Schema.Array(RepoSchema),
     agentHarnesses: Schema.Array(AgentHarnessSchema),
     piHarnesses: Schema.Array(PiHarnessSchema),
+    codexHarnesses: Schema.Array(CodexHarnessSchema),
+    claudeHarnesses: Schema.Array(ClaudeHarnessSchema),
     llmProviders: Schema.Array(
       Schema.Struct({
         name: Schema.String,

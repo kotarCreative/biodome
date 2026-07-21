@@ -655,6 +655,78 @@ biodome exec /workspace/.biodome-build/pi-homes/coder/pi -p "Refactor src/utils.
 
 The telemetry extension captures `agent_start`, `agent_end`, and `tool_execution_*` events so Pi activity can be correlated with other sandbox telemetry.
 
+## `addCodexHarness(spec)`
+
+Runs a headless [Codex](https://github.com/openai/codex) agent inside the sandbox. The harness installs the Codex CLI (`@openai/codex`) and starts `codex exec-server` as a daemon process. It generates an isolated Codex home directory with a TOML config, MCP server registration, lifecycle hooks for telemetry, and a start script.
+
+```javascript
+export default function agent(ctx) {
+  ctx.addCodexHarness({
+    name: "coder",
+    port: 3003,
+    model: "gpt-5.6",
+    apiKey: { env: "OPENAI_API_KEY" },
+    mcpServers: {
+      biodome: { url: "http://localhost:3001" },
+    },
+    telemetry: {
+      enabled: true,
+      path: "/workspace/.biodome-build/logs/codex-events.jsonl",
+    },
+  });
+}
+```
+
+- `name` — unique identifier for the harness.
+- `port` — port for `codex exec-server`. Defaults to `3003`.
+- `model` — default model ID.
+- `apiKey` — API key as an env reference (defaults to `OPENAI_API_KEY` from the container environment if not specified).
+- `mcpServers` — map of MCP servers the agent can use. Defaults to `{ biodome: { url: "http://localhost:<mcpPort>" } }`.
+- `telemetry` —
+  - `enabled` — whether to install telemetry hooks. Defaults to `true`.
+  - `path` — JSONL file where Codex events are written. Defaults to `/workspace/.biodome-build/logs/codex-<name>-events.jsonl`.
+- `config` — arbitrary extra values merged into `~/.codex/config.toml`.
+
+The generated config defaults `approval_policy` to `"never"` and `sandbox_mode` to `"workspace-write"` so the headless server can act without interactive prompts inside the sandbox. Lifecycle hooks capture `session_start`, `user_prompt_submit`, `pre_tool_use`, and `post_tool_use` events to the telemetry log.
+
+## `addClaudeHarness(spec)`
+
+Installs and configures [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) inside the sandbox. Claude Code is a terminal/RPC agent rather than a persistent server, so this harness creates an isolated Claude home directory with settings, MCP configuration, telemetry hooks, and a wrapper script you can run through `biodome exec`.
+
+```javascript
+export default function agent(ctx) {
+  ctx.addClaudeHarness({
+    name: "assistant",
+    model: "claude-sonnet-4-20250514",
+    apiKey: { env: "ANTHROPIC_API_KEY" },
+    tools: ["Bash", "Read", "Edit"],
+    permissions: "acceptEdits",
+    telemetry: {
+      enabled: true,
+      path: "/workspace/.biodome-build/logs/claude-events.jsonl",
+    },
+  });
+}
+```
+
+Run it with:
+
+```bash
+biodome exec /workspace/.biodome-build/claude-homes/assistant/claude -p "Refactor src/utils.ts"
+```
+
+- `name` — unique identifier for the harness.
+- `model` — default model ID.
+- `apiKey` — API key as an env reference.
+- `tools` — list of tools to allow without prompting. Written to `permissions.allow` in settings and passed as `--allowedTools`.
+- `permissions` — permission mode for non-interactive runs. Use `"acceptEdits"`, `"dontAsk"`, `"plan"`, or `"bypassPermissions"`.
+- `telemetry` —
+  - `enabled` — whether to install telemetry hooks. Defaults to `true`.
+  - `path` — JSONL file where Claude events are written. Defaults to `/workspace/.biodome-build/logs/claude-<name>-events.jsonl`.
+- `config` — arbitrary extra values merged into `~/.claude/settings.json`.
+
+The wrapper sets `HOME` to the isolated Claude home so settings and MCP config are loaded from the generated directory, and exports the API key from the host environment. Lifecycle hooks capture `SessionStart`, `UserPromptSubmit`, `PreToolUse`, and `PostToolUse` events.
+
 ## Health checks
 
 Health checks are attached to daemon processes. Each daemon with a health check gets a generated shell script in `.biodome-build/healthchecks/<name>.sh`, and `supervisord` runs a companion `<name>-healthcheck` program that restarts the process after repeated failures. The dev service health check in the generated compose file runs all daemon health checks via `.biodome-build/healthchecks/all.sh`.

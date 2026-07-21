@@ -103,6 +103,14 @@ Configure an LLM provider for OpenCode harnesses. See [Primitives](primitives.md
 
 Install and configure the Pi coding agent. See [Primitives](primitives.md#addpiharnessspec).
 
+### `addCodexHarness(spec)`
+
+Run a headless Codex agent inside the sandbox. See [Primitives](primitives.md#addcodexharnessspec).
+
+### `addClaudeHarness(spec)`
+
+Install and configure Claude Code inside the sandbox. See [Primitives](primitives.md#addclaudeharnessspec).
+
 ### `addLocalVolume(spec)`
 
 ### `addS3Volume(spec)`
@@ -275,6 +283,40 @@ interface PiHarnessSpec {
   prompts?: string[];
   themes?: string[];
   packages?: string[];
+  telemetry?: {
+    enabled?: boolean;
+    path?: string;
+  };
+  config?: Record<string, unknown>;
+}
+```
+
+## Codex harness specification
+
+```typescript
+interface CodexHarnessSpec {
+  name: string;
+  port?: number;
+  model?: string;
+  apiKey?: { env: string };
+  mcpServers?: Record<string, { url: string }>;
+  telemetry?: {
+    enabled?: boolean;
+    path?: string;
+  };
+  config?: Record<string, unknown>;
+}
+```
+
+## Claude harness specification
+
+```typescript
+interface ClaudeHarnessSpec {
+  name: string;
+  model?: string;
+  apiKey?: { env: string };
+  tools?: string[];
+  permissions?: string;
   telemetry?: {
     enabled?: boolean;
     path?: string;

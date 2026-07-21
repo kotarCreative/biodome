@@ -1,5 +1,5 @@
 import { Command } from "commander"
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, copyFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, copyFileSync, chmodSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { randomUUID } from "node:crypto"
@@ -20,6 +20,8 @@ import {
   generateRepoScripts,
   generateHarnessFiles,
   generatePiHarnessFiles,
+  generateCodexHarnessFiles,
+  generateClaudeHarnessFiles,
 } from "../docker/generator.js"
 import { DockerRuntime } from "../docker/runner.js"
 import { formatInfo, formatAgentsMd } from "../core/info.js"
@@ -64,6 +66,14 @@ function ensureGitignore(rootDir: string): void {
   }
 }
 
+function writeBuildFile(filePath: string, content: string): void {
+  mkdirSync(dirname(filePath), { recursive: true })
+  writeFileSync(filePath, content)
+  if (content.startsWith("#!/")) {
+    chmodSync(filePath, 0o755)
+  }
+}
+
 function writeGeneratedFiles(rootDir: string, plan: Plan): string[] {
   ensureBuildDir(rootDir)
   writeFileSync(join(rootDir, BUILD_DIR, "Dockerfile"), generateDockerfile(plan))
@@ -93,16 +103,22 @@ function writeGeneratedFiles(rootDir: string, plan: Plan): string[] {
 
   const harnessFiles = generateHarnessFiles(plan)
   for (const [name, content] of Object.entries(harnessFiles)) {
-    const filePath = join(rootDir, BUILD_DIR, name)
-    mkdirSync(dirname(filePath), { recursive: true })
-    writeFileSync(filePath, content)
+    writeBuildFile(join(rootDir, BUILD_DIR, name), content)
   }
 
   const piHarnessFiles = generatePiHarnessFiles(plan)
   for (const [name, content] of Object.entries(piHarnessFiles)) {
-    const filePath = join(rootDir, BUILD_DIR, name)
-    mkdirSync(dirname(filePath), { recursive: true })
-    writeFileSync(filePath, content)
+    writeBuildFile(join(rootDir, BUILD_DIR, name), content)
+  }
+
+  const codexHarnessFiles = generateCodexHarnessFiles(plan)
+  for (const [name, content] of Object.entries(codexHarnessFiles)) {
+    writeBuildFile(join(rootDir, BUILD_DIR, name), content)
+  }
+
+  const claudeHarnessFiles = generateClaudeHarnessFiles(plan)
+  for (const [name, content] of Object.entries(claudeHarnessFiles)) {
+    writeBuildFile(join(rootDir, BUILD_DIR, name), content)
   }
 
   const dockerignorePath = join(rootDir, ".dockerignore")
@@ -125,6 +141,8 @@ function writeGeneratedFiles(rootDir: string, plan: Plan): string[] {
     ...Object.keys(repos).map((name) => join(repoDir, name)),
     ...Object.keys(harnessFiles).map((name) => join(rootDir, BUILD_DIR, name)),
     ...Object.keys(piHarnessFiles).map((name) => join(rootDir, BUILD_DIR, name)),
+    ...Object.keys(codexHarnessFiles).map((name) => join(rootDir, BUILD_DIR, name)),
+    ...Object.keys(claudeHarnessFiles).map((name) => join(rootDir, BUILD_DIR, name)),
   ].filter((p) => existsSync(p))
 }
 

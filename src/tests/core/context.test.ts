@@ -1416,4 +1416,108 @@ describe("SandboxContext", () => {
       expect(() => ctx.addPiHarness({ name: "coder", apiKey: "sk-secret" })).toThrow(/must be an environment reference/);
     });
   });
+
+  describe("addCodexHarness", () => {
+    it("adds a Codex harness with defaults", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.configureMcp(3001);
+      ctx.addCodexHarness({ name: "coder" });
+
+      expect(ctx.plan.runtime.codexHarnesses).toHaveLength(1);
+      const harness = ctx.plan.runtime.codexHarnesses[0];
+      expect(harness.name).toBe("coder");
+      expect(harness.type).toBe("codex");
+      expect(harness.port).toBe(3003);
+      expect(harness.mcpServers).toEqual({ biodome: { url: "http://localhost:3001" } });
+      expect(harness.telemetry.enabled).toBe(true);
+      expect(harness.telemetry.path).toBe("/workspace/.biodome-build/logs/codex-coder-events.jsonl");
+
+      const proc = ctx.plan.runtime.processes.find((p) => p.name === "codex-agent-coder");
+      expect(proc).toBeDefined();
+      expect(proc!.mode).toBe("daemon");
+      expect(proc!.command).toContain("/workspace/.biodome-build/codex-homes/coder/start.sh");
+      expect(proc!.environment!.HOME).toBe("/workspace/.biodome-build/codex-homes/coder");
+      expect(proc!.mergeEnv).toBe(false);
+
+      expect(ctx.plan.build.languageSnippets.some((s) => s.includes("@openai/codex"))).toBe(true);
+    });
+
+    it("supports custom port, model, and apiKey", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addCodexHarness({
+        name: "coder",
+        port: 4000,
+        model: "gpt-5.6",
+        apiKey: { env: "OPENAI_API_KEY" },
+        mcpServers: { custom: { url: "http://localhost:5000" } },
+      });
+
+      const harness = ctx.plan.runtime.codexHarnesses[0];
+      expect(harness.port).toBe(4000);
+      expect(harness.model).toBe("gpt-5.6");
+      expect(harness.mcpServers).toEqual({ custom: { url: "http://localhost:5000" } });
+
+      const envVar = ctx.plan.runtime.envVars.find((e) => e.key === "OPENAI_API_KEY");
+      expect(envVar).toBeDefined();
+      expect(envVar!.from).toEqual({ env: "OPENAI_API_KEY" });
+    });
+
+    it("rejects duplicate Codex harness names", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addCodexHarness({ name: "coder" });
+      expect(() => ctx.addCodexHarness({ name: "coder" })).toThrow(/Duplicate Codex harness name/);
+    });
+
+    it("rejects literal apiKey strings", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      expect(() => ctx.addCodexHarness({ name: "coder", apiKey: "sk-secret" })).toThrow(/must be an environment reference/);
+    });
+  });
+
+  describe("addClaudeHarness", () => {
+    it("adds a Claude harness with defaults", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addClaudeHarness({ name: "assistant" });
+
+      expect(ctx.plan.runtime.claudeHarnesses).toHaveLength(1);
+      const harness = ctx.plan.runtime.claudeHarnesses[0];
+      expect(harness.name).toBe("assistant");
+      expect(harness.type).toBe("claude");
+      expect(harness.telemetry.enabled).toBe(true);
+      expect(harness.telemetry.path).toBe("/workspace/.biodome-build/logs/claude-assistant-events.jsonl");
+
+      expect(ctx.plan.build.languageSnippets.some((s) => s.includes("@anthropic-ai/claude-code"))).toBe(true);
+    });
+
+    it("supports model, tools, permissions, and apiKey", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addClaudeHarness({
+        name: "assistant",
+        model: "claude-sonnet-4-20250514",
+        apiKey: { env: "ANTHROPIC_API_KEY" },
+        tools: ["Bash", "Read", "Edit"],
+        permissions: "acceptEdits",
+      });
+
+      const harness = ctx.plan.runtime.claudeHarnesses[0];
+      expect(harness.model).toBe("claude-sonnet-4-20250514");
+      expect(harness.tools).toEqual(["Bash", "Read", "Edit"]);
+      expect(harness.permissions).toBe("acceptEdits");
+
+      const envVar = ctx.plan.runtime.envVars.find((e) => e.key === "ANTHROPIC_API_KEY");
+      expect(envVar).toBeDefined();
+      expect(envVar!.from).toEqual({ env: "ANTHROPIC_API_KEY" });
+    });
+
+    it("rejects duplicate Claude harness names", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addClaudeHarness({ name: "assistant" });
+      expect(() => ctx.addClaudeHarness({ name: "assistant" })).toThrow(/Duplicate Claude harness name/);
+    });
+
+    it("rejects literal apiKey strings", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      expect(() => ctx.addClaudeHarness({ name: "assistant", apiKey: "sk-secret" })).toThrow(/must be an environment reference/);
+    });
+  });
 });

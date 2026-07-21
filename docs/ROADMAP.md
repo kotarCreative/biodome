@@ -11,6 +11,7 @@ Biodome is a TypeScript/Node CLI that turns a `.biodome/` directory into a repro
 - Feature files are plain ESM modules that export a default function receiving a typed `SandboxContext`.
 - Dockerfile, `docker-compose.yaml`, `.dockerignore`, `supervisord.conf`, and per-process health check scripts are generated from the plan.
 - Integration tests assert generated images build for Python, Node, and Go, that a Postgres service becomes healthy, and that a daemon process becomes healthy and is monitored by `supervisord`.
+- Agent harnesses are available for OpenCode (`addOpencodeHarness`), Pi (`addPiHarness`), Codex (`addCodexHarness`), and Claude Code (`addClaudeHarness`), each producing an isolated home directory, config files, lifecycle hooks for telemetry, and a daemon process with health checks.
 
 ## Known gaps
 
@@ -28,6 +29,7 @@ Biodome is a TypeScript/Node CLI that turns a `.biodome/` directory into a repro
 4. ~~Per-process health checks in `supervisord`.~~ Done — each daemon process with a health check now gets a generated check script and a `supervisord` monitor program that restarts the process after repeated failures. The dev service health check now aggregates all daemon checks, and `supervisorctl` is configured to use the generated `supervisord.conf`.
 5. ~~Multi-language / multi-base-image support.~~ Done — multiple `addLanguage` calls now install all requested runtimes on a shared `debian:12-slim` base image, enabling Python + Node, Go + Rust, or any other combination in a single container.
  6. ~~CLI polish.~~ Done — `biodome init` now auto-detects languages and generates a starter `.biodome/features/auto-detect.mjs` feature by default, `biodome status` reports container health and running processes, and `biodome config validate` runs `validatePlan` to catch port conflicts without building.
+ 7. ~~Headless agent harnesses for Codex and Claude Code.~~ Done — Added `addCodexHarness` and `addClaudeHarness` primitives alongside the existing OpenCode and Pi harnesses. Each generates isolated home directories, config files (TOML/JSON), lifecycle hooks for correlated telemetry, and daemon processes with TCP health checks. Codex uses `codex exec-server` with `approval_policy = "never"`; Claude uses a wrapper script and `claude -p` with configurable tools and permissions.
 
 ## Next steps
 

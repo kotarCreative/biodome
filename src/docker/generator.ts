@@ -1,5 +1,5 @@
 import { stringify } from "yaml";
-import { Plan, Process, Service, ProcessHealthCheck, PortMapping, VolumeMapping, Repo, AgentHarness, PiHarness, LlmProvider } from "../core/plan.js";
+import { Plan, Process, Service, ProcessHealthCheck, PortMapping, VolumeMapping, Repo, AgentHarness, PiHarness, CodexHarness, ClaudeHarness, LlmProvider } from "../core/plan.js";
 
 interface ComposeService {
   image?: string;
@@ -192,6 +192,30 @@ export function generatePiHarnessFiles(plan: Plan): Record<string, string> {
     if (harness.telemetry.enabled) {
       files[`${homeDir}/extensions/biodome-telemetry.ts`] = piTelemetryExtension(harness);
     }
+  }
+  return files;
+}
+
+export function generateCodexHarnessFiles(plan: Plan): Record<string, string> {
+  const files: Record<string, string> = {};
+  for (const harness of plan.runtime.codexHarnesses) {
+    const homeDir = `codex-homes/${harness.name}`;
+    files[`${homeDir}/.codex/config.toml`] = codexConfig(harness);
+    files[`${homeDir}/.codex/hooks.json`] = codexHooks(harness);
+    files[`${homeDir}/hooks/telemetry.js`] = codexTelemetryScript(harness);
+    files[`${homeDir}/start.sh`] = codexStartScript(harness);
+  }
+  return files;
+}
+
+export function generateClaudeHarnessFiles(plan: Plan): Record<string, string> {
+  const files: Record<string, string> = {};
+  for (const harness of plan.runtime.claudeHarnesses) {
+    const homeDir = `claude-homes/${harness.name}`;
+    files[`${homeDir}/.claude/settings.json`] = claudeSettings(harness);
+    files[`${homeDir}/.claude.json`] = claudeMcpConfig(plan.build.mcpPort);
+    files[`${homeDir}/hooks/telemetry.js`] = claudeTelemetryScript(harness);
+    files[`${homeDir}/claude`] = claudeWrapperScript(harness);
   }
   return files;
 }
@@ -835,6 +859,249 @@ function piTelemetryExtension(harness: PiHarness): string {
     "}",
     "",
   ].join("\n");
+}
+
+function tomlValue(value: unknown): string {
+  if (value === null || value === undefined) return "\"\"";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return String(value);
+  if (Array.isArray(value)) return `[${value.map(tomlValue).join(", ")}]`;
+  return JSON.stringify(String(value));
+}
+
+function codexConfig(harness: CodexHarness): string {
+  const topLevel: Record<string, unknown> = {
+    approval_policy: "never",
+    sandbox_mode: "workspace-write",
+    ...harness.config,
+  };
+  if (harness.model && topLevel.model === undefined) {
+    topLevel.model = harness.model;
+  }
+
+  const lines: string[] = ["# Auto-generated Codex config for biodome"];
+
+  const tables: Record<string, Record<string, unknown>> = {};
+  for (const [key, value] of Object.entries(topLevel)) {
+    if (value === undefined) continue;
+    if (typeof value === "object" && !Array.isArray(value) && value !== null) {
+      tables[key] = value as Record<string, unknown>;
+      continue;
+    }
+    lines.push(`${key} = ${tomlValue(value)}`);
+  }
+
+  for (const [name, server] of Object.entries(harness.mcpServers)) {
+    lines.push(`[mcp_servers.${name}]`);
+    lines.push(`url = ${JSON.stringify(server.url)}`);
+  }
+
+  for (const [key, value] of Object.entries(tables)) {
+    lines.push(`[${key}]`);
+    for (const [k, v] of Object.entries(value)) {
+      lines.push(`${k} = ${tomlValue(v)}`);
+    }
+  }
+
+  return lines.join("\n") + "\n";
+}
+
+function codexHooks(harness: CodexHarness): string {
+  const homeDir = `/workspace/.biodome-build/codex-homes/${harness.name}`;
+  const script = `${homeDir}/hooks/telemetry.js`;
+  const events = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse"];
+  const hooks: Record<string, unknown> = {};
+  for (const event of events) {
+    hooks[event] = [
+      {
+        hooks: [
+          {
+            type: "command",
+            command: "node",
+            args: [script, eventToSnakeCase(event)],
+          },
+        ],
+      },
+    ];
+  }
+  return JSON.stringify({ hooks }, null, 2) + "\n";
+}
+
+function codexTelemetryScript(harness: CodexHarness): string {
+  const logPath = harness.telemetry.path;
+  return [
+    "// Auto-generated Codex telemetry hook script for biodome",
+    "const fs = require('node:fs')",
+    "const path = require('node:path')",
+    "const { randomUUID } = require('node:crypto')",
+    "",
+    `const LOG_PATH = process.env.CODEX_BIODOME_TELEMETRY_PATH || ${JSON.stringify(logPath)}`,
+    "",
+    "function appendEvent(type, data) {",
+    "  try {",
+    "    const dir = path.dirname(LOG_PATH)",
+    "    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })",
+    "    const event = { id: randomUUID(), timestamp: new Date().toISOString(), source: 'codex', type, data }",
+    "    fs.appendFileSync(LOG_PATH, JSON.stringify(event) + '\\n')",
+    "  } catch (err) {",
+    "    console.error('[biodome-codex-telemetry] failed to write event:', err.message)",
+    "  }",
+    "}",
+    "",
+    "let input = ''",
+    "process.stdin.on('data', (chunk) => { input += chunk })",
+    "process.stdin.on('end', () => {",
+    "  const data = input ? JSON.parse(input) : {}",
+    "  appendEvent(process.argv[2] || 'unknown', data)",
+    "})",
+    "",
+  ].join("\n");
+}
+
+function codexStartScript(harness: CodexHarness): string {
+  const homeDir = `/workspace/.biodome-build/codex-homes/${harness.name}`;
+  const configPath = `${homeDir}/.codex/config.toml`;
+  return [
+    "#!/bin/sh",
+    `# Auto-generated Codex start script for ${harness.name}`,
+    "set -e",
+    "",
+    `export HOME=${homeDir}`,
+    "",
+    `# Substitute \${VAR} references in the generated config with runtime env vars.`,
+    "node -e '",
+    "const fs = require(\"fs\");",
+    `const file = ${JSON.stringify(configPath)};`,
+    "let text = fs.readFileSync(file, \"utf8\");",
+    "text = text.replace(/\\\$\\{([A-Za-z_][A-Za-z0-9_]*)\\}/g, (_, name) => process.env[name] || \"\");",
+    "fs.writeFileSync(file, text);",
+    "'",
+    "",
+    `exec codex --dangerously-bypass-hook-trust exec-server --listen ws://0.0.0.0:${harness.port}`,
+    "",
+  ].join("\n");
+}
+
+function claudeSettings(harness: ClaudeHarness): string {
+  const settings: Record<string, unknown> = {
+    ...harness.config,
+  };
+
+  if (harness.model) settings.model = harness.model;
+  if (harness.tools && harness.tools.length > 0) {
+    settings.permissions = { allow: harness.tools };
+  }
+
+  const homeDir = `/workspace/.biodome-build/claude-homes/${harness.name}`;
+  const script = `${homeDir}/hooks/telemetry.js`;
+  const events = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse"];
+  const hooks: Record<string, unknown> = {};
+  for (const event of events) {
+    hooks[event] = [
+      {
+        hooks: [
+          {
+            type: "command",
+            command: "node",
+            args: [script, eventToSnakeCase(event)],
+          },
+        ],
+      },
+    ];
+  }
+  settings.hooks = hooks;
+
+  return JSON.stringify(settings, null, 2) + "\n";
+}
+
+function claudeMcpConfig(mcpPort: number): string {
+  return (
+    JSON.stringify(
+      {
+        mcpServers: {
+          biodome: {
+            type: "http",
+            url: `http://localhost:${mcpPort}`,
+          },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+}
+
+function claudeTelemetryScript(harness: ClaudeHarness): string {
+  const logPath = harness.telemetry.path;
+  return [
+    "// Auto-generated Claude telemetry hook script for biodome",
+    "const fs = require('node:fs')",
+    "const path = require('node:path')",
+    "const { randomUUID } = require('node:crypto')",
+    "",
+    `const LOG_PATH = process.env.CLAUDE_BIODOME_TELEMETRY_PATH || ${JSON.stringify(logPath)}`,
+    "",
+    "function appendEvent(type, data) {",
+    "  try {",
+    "    const dir = path.dirname(LOG_PATH)",
+    "    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })",
+    "    const event = { id: randomUUID(), timestamp: new Date().toISOString(), source: 'claude', type, data }",
+    "    fs.appendFileSync(LOG_PATH, JSON.stringify(event) + '\\n')",
+    "  } catch (err) {",
+    "    console.error('[biodome-claude-telemetry] failed to write event:', err.message)",
+    "  }",
+    "}",
+    "",
+    "let input = ''",
+    "process.stdin.on('data', (chunk) => { input += chunk })",
+    "process.stdin.on('end', () => {",
+    "  const data = input ? JSON.parse(input) : {}",
+    "  appendEvent(process.argv[2] || 'unknown', data)",
+    "})",
+    "",
+  ].join("\n");
+}
+
+function claudeWrapperScript(harness: ClaudeHarness): string {
+  const homeDir = `/workspace/.biodome-build/claude-homes/${harness.name}`;
+  const envExports: string[] = [
+    `HOME=${homeDir}`,
+    "export HOME",
+    `CLAUDE_BIODOME_TELEMETRY_PATH=${harness.telemetry.path}`,
+    "export CLAUDE_BIODOME_TELEMETRY_PATH",
+  ];
+  if (harness.apiKey && typeof harness.apiKey === "object" && "env" in harness.apiKey) {
+    envExports.push(`${harness.apiKey.env}="$${harness.apiKey.env}"`);
+    envExports.push(`export ${harness.apiKey.env}`);
+  }
+
+  const flags: string[] = [];
+  if (harness.model) flags.push(`--model ${harness.model}`);
+  if (harness.permissions) {
+    if (harness.permissions === "bypassPermissions") {
+      flags.push("--dangerously-skip-permissions");
+    } else {
+      flags.push(`--permission-mode ${harness.permissions}`);
+    }
+  }
+  if (harness.tools && harness.tools.length > 0) {
+    flags.push(`--allowedTools ${harness.tools.join(",")}`);
+  }
+
+  return [
+    "#!/bin/sh",
+    `# Auto-generated Claude wrapper for ${harness.name}`,
+    "set -e",
+    "",
+    ...envExports,
+    "",
+    `exec claude ${flags.join(" ")} "$@"`,
+    "",
+  ].join("\n");
+}
+
+function eventToSnakeCase(name: string): string {
+  return name.split(/(?=[A-Z])/).join("_").toLowerCase();
 }
 
 function shellHealthCheck(hc: ProcessHealthCheck): string {

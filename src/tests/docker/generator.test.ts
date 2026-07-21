@@ -8,6 +8,8 @@ import {
   generateRepoScripts,
   generateHarnessFiles,
   generatePiHarnessFiles,
+  generateCodexHarnessFiles,
+  generateClaudeHarnessFiles,
 } from "../../docker/generator.js";
 import { createPlan } from "../../core/plan.js";
 
@@ -518,6 +520,78 @@ describe("Docker generators", () => {
 
       const files = generatePiHarnessFiles(plan);
       expect(files["pi-homes/coder/extensions/biodome-telemetry.ts"]).toBeUndefined();
+    });
+  });
+
+  describe("generateCodexHarnessFiles", () => {
+    it("generates Codex config, hooks, telemetry script, and start script", () => {
+      const plan = createPlan("test");
+      plan.build.mcpPort = 3001;
+      plan.runtime.codexHarnesses.push({
+        name: "coder",
+        type: "codex",
+        port: 3003,
+        mcpServers: { biodome: { url: "http://localhost:3001" } },
+        model: "gpt-5.6",
+        telemetry: { enabled: true, path: "/workspace/.biodome-build/logs/codex-coder-events.jsonl" },
+        config: {},
+      });
+
+      const files = generateCodexHarnessFiles(plan);
+      const config = files["codex-homes/coder/.codex/config.toml"];
+      expect(config).toContain("# Auto-generated Codex config for biodome");
+      expect(config).toContain('model = "gpt-5.6"');
+      expect(config).toContain("[mcp_servers.biodome]");
+      expect(config).toContain('url = "http://localhost:3001"');
+
+      const hooks = JSON.parse(files["codex-homes/coder/.codex/hooks.json"]);
+      expect(hooks.hooks.SessionStart).toBeDefined();
+      expect(hooks.hooks.PreToolUse).toBeDefined();
+
+      const telemetry = files["codex-homes/coder/hooks/telemetry.js"];
+      expect(telemetry).toContain("source: 'codex'");
+      expect(telemetry).toContain("/workspace/.biodome-build/logs/codex-coder-events.jsonl");
+
+      const start = files["codex-homes/coder/start.sh"];
+      expect(start).toContain("#!/bin/sh");
+      expect(start).toContain("exec-server --listen ws://0.0.0.0:3003");
+      expect(start).toContain("--dangerously-bypass-hook-trust");
+    });
+  });
+
+  describe("generateClaudeHarnessFiles", () => {
+    it("generates Claude settings, mcp config, telemetry script, and wrapper", () => {
+      const plan = createPlan("test");
+      plan.build.mcpPort = 3001;
+      plan.runtime.claudeHarnesses.push({
+        name: "assistant",
+        type: "claude",
+        model: "claude-sonnet-4-20250514",
+        apiKey: { env: "ANTHROPIC_API_KEY" },
+        tools: ["Bash", "Read", "Edit"],
+        permissions: "acceptEdits",
+        telemetry: { enabled: true, path: "/workspace/.biodome-build/logs/claude-assistant-events.jsonl" },
+        config: {},
+      });
+
+      const files = generateClaudeHarnessFiles(plan);
+      const settings = JSON.parse(files["claude-homes/assistant/.claude/settings.json"]);
+      expect(settings.model).toBe("claude-sonnet-4-20250514");
+      expect(settings.permissions.allow).toEqual(["Bash", "Read", "Edit"]);
+      expect(settings.hooks.PreToolUse).toBeDefined();
+
+      const mcp = JSON.parse(files["claude-homes/assistant/.claude.json"]);
+      expect(mcp.mcpServers.biodome.url).toBe("http://localhost:3001");
+
+      const telemetry = files["claude-homes/assistant/hooks/telemetry.js"];
+      expect(telemetry).toContain("source: 'claude'");
+      expect(telemetry).toContain("/workspace/.biodome-build/logs/claude-assistant-events.jsonl");
+
+      const wrapper = files["claude-homes/assistant/claude"];
+      expect(wrapper).toContain("#!/bin/sh");
+      expect(wrapper).toContain("ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\"");
+      expect(wrapper).toContain("--permission-mode acceptEdits");
+      expect(wrapper).not.toContain("--skip-git-repo-check");
     });
   });
 });

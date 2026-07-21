@@ -32,6 +32,10 @@ import {
   LlmProvider,
   PiHarnessSpecSchema,
   PiHarness,
+  CodexHarnessSpecSchema,
+  CodexHarness,
+  ClaudeHarnessSpecSchema,
+  ClaudeHarness,
 } from "./plan.js"
 import {
   FeatureContext,
@@ -63,6 +67,8 @@ import {
   RepoSpec,
   AgentHarnessSpec,
   PiHarnessSpec,
+  CodexHarnessSpec,
+  ClaudeHarnessSpec,
   LlmProviderSpec,
 } from "./feature.js"
 import { BuildContext } from "./build-context.js"
@@ -702,6 +708,109 @@ export class SandboxContext implements FeatureContext, BuildContext {
     // the container; the wrapper script then exports it for pi.
     if (validated.apiKey && typeof validated.apiKey === "object" && "env" in validated.apiKey) {
       this.addEnv(validated.apiKey.env, { from: { env: validated.apiKey.env } })
+    }
+  }
+
+  addCodexHarness(spec: CodexHarnessSpec): void {
+    const validated = Schema.decodeSync(CodexHarnessSpecSchema)(spec)
+
+    if (this.plan.runtime.codexHarnesses.some((h) => h.name === validated.name)) {
+      throw new ValidationError({ message: `Duplicate Codex harness name: ${validated.name}` })
+    }
+
+    if (validated.apiKey && typeof validated.apiKey === "string") {
+      throw new ValidationError({
+        message: `Codex harness ${validated.name}: apiKey must be an environment reference ({ env: "VAR" }), not a literal string`,
+      })
+    }
+
+    const port = validated.port ?? 3003
+    validatePort(port, `Codex harness ${validated.name}: port`)
+
+    const mcpServers = validated.mcpServers ?? {
+      biodome: { url: `http://localhost:${this.plan.build.mcpPort}` },
+    }
+
+    const telemetry = {
+      enabled: validated.telemetry?.enabled ?? true,
+      path: validated.telemetry?.path ?? `/workspace/.biodome-build/logs/codex-${validated.name}-events.jsonl`,
+    }
+
+    const harness: CodexHarness = {
+      name: validated.name,
+      type: "codex",
+      port,
+      mcpServers,
+      apiKey: validated.apiKey,
+      model: validated.model,
+      telemetry,
+      config: validated.config ? { ...validated.config } : {},
+    }
+    this.plan.runtime.codexHarnesses.push(harness)
+
+    // Codex CLI runs on Node and is distributed through npm as @openai/codex.
+    this.addLanguage("node", { version: "20" })
+    this.addAptPackage("git")
+    this.addLanguageSnippet("RUN npm install -g @openai/codex")
+
+    this.addProcess({
+      name: `codex-agent-${validated.name}`,
+      command: ["sh", `/workspace/.biodome-build/codex-homes/${validated.name}/start.sh`],
+      port,
+      healthCheck: { type: "tcp", port },
+      environment: {
+        HOME: `/workspace/.biodome-build/codex-homes/${validated.name}`,
+        CODEX_BIODOME_TELEMETRY_PATH: telemetry.path,
+      },
+      mergeEnv: false,
+    })
+
+    // Passthrough the API key env reference so Docker Compose injects it into
+    // the container; the harness start script runs Codex with it.
+    if (harness.apiKey && typeof harness.apiKey === "object" && "env" in harness.apiKey) {
+      this.addEnv(harness.apiKey.env, { from: { env: harness.apiKey.env } })
+    }
+  }
+
+  addClaudeHarness(spec: ClaudeHarnessSpec): void {
+    const validated = Schema.decodeSync(ClaudeHarnessSpecSchema)(spec)
+
+    if (this.plan.runtime.claudeHarnesses.some((h) => h.name === validated.name)) {
+      throw new ValidationError({ message: `Duplicate Claude harness name: ${validated.name}` })
+    }
+
+    if (validated.apiKey && typeof validated.apiKey === "string") {
+      throw new ValidationError({
+        message: `Claude harness ${validated.name}: apiKey must be an environment reference ({ env: "VAR" }), not a literal string`,
+      })
+    }
+
+    const telemetry = {
+      enabled: validated.telemetry?.enabled ?? true,
+      path: validated.telemetry?.path ?? `/workspace/.biodome-build/logs/claude-${validated.name}-events.jsonl`,
+    }
+
+    const harness: ClaudeHarness = {
+      name: validated.name,
+      type: "claude",
+      apiKey: validated.apiKey,
+      model: validated.model,
+      tools: validated.tools ? [...validated.tools] : undefined,
+      permissions: validated.permissions,
+      telemetry,
+      config: validated.config ? { ...validated.config } : {},
+    }
+    this.plan.runtime.claudeHarnesses.push(harness)
+
+    // Claude Code runs on Node and is distributed through npm as @anthropic-ai/claude-code.
+    this.addLanguage("node", { version: "20" })
+    this.addAptPackage("git")
+    this.addLanguageSnippet("RUN npm install -g @anthropic-ai/claude-code")
+
+    // Passthrough the API key env reference so Docker Compose injects it into
+    // the container; the wrapper script then exports it for claude.
+    if (harness.apiKey && typeof harness.apiKey === "object" && "env" in harness.apiKey) {
+      this.addEnv(harness.apiKey.env, { from: { env: harness.apiKey.env } })
     }
   }
 

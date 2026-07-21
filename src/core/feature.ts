@@ -13,6 +13,8 @@ import type {
   RepoSpecSchema,
   AgentHarnessSpecSchema,
   PiHarnessSpecSchema,
+  CodexHarnessSpecSchema,
+  ClaudeHarnessSpecSchema,
   LlmProviderSpecSchema,
 } from "./plan.js"
 
@@ -29,6 +31,8 @@ export type VolumeSpec = typeof VolumeSpecSchema.Type
 export type RepoSpec = typeof RepoSpecSchema.Type
 export type AgentHarnessSpec = typeof AgentHarnessSpecSchema.Type
 export type PiHarnessSpec = typeof PiHarnessSpecSchema.Type
+export type CodexHarnessSpec = typeof CodexHarnessSpecSchema.Type
+export type ClaudeHarnessSpec = typeof ClaudeHarnessSpecSchema.Type
 export type LlmProviderSpec = typeof LlmProviderSpecSchema.Type
 
 export type SecretValue = string | { env: string }
@@ -239,6 +243,8 @@ export interface FeatureContext {
   addRepo(spec: RepoSpec): void
   addOpencodeHarness(spec: AgentHarnessSpec): void
   addPiHarness(spec: PiHarnessSpec): void
+  addCodexHarness(spec: CodexHarnessSpec): void
+  addClaudeHarness(spec: ClaudeHarnessSpec): void
   addLlmProvider(spec: LlmProviderSpec): void
 
   // Volume wrappers for a simpler DX.
