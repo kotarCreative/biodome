@@ -1,5 +1,5 @@
 import { stringify } from "yaml";
-import { Plan, Process, Service, ProcessHealthCheck, PortMapping, VolumeMapping, Repo, AgentHarness } from "../core/plan.js";
+import { Plan, Process, Service, ProcessHealthCheck, PortMapping, VolumeMapping, Repo, AgentHarness, LlmProvider } from "../core/plan.js";
 
 interface ComposeService {
   image?: string;
@@ -175,8 +175,9 @@ export function generateHarnessFiles(plan: Plan): Record<string, string> {
   for (const harness of plan.runtime.agentHarnesses) {
     if (harness.type === "opencode") {
       const homeDir = `opencode-homes/${harness.name}`;
-      files[`${homeDir}/.config/opencode/opencode.json`] = opencodeConfig(harness);
+      files[`${homeDir}/.config/opencode/opencode.json`] = opencodeConfig(harness, plan.runtime.llmProviders);
       files[`${homeDir}/.config/opencode/plugins/${harness.name}-telemetry.js`] = opencodeTelemetryPlugin(harness);
+      files[`${homeDir}/start.sh`] = opencodeStartScript(harness);
     }
   }
   return files;
@@ -614,10 +615,31 @@ function repoSyncScript(repo: Repo): string {
   return lines.join("\n") + "\n";
 }
 
-function opencodeConfig(harness: AgentHarness): string {
+function opencodeConfig(harness: AgentHarness, llmProviders: LlmProvider[]): string {
   const mcp: Record<string, any> = {};
   for (const [name, server] of Object.entries(harness.mcpServers)) {
     mcp[name] = { type: "remote", url: server.url };
+  }
+
+  const provider: Record<string, any> = {};
+  const providerEnv: Record<string, string> = {};
+  for (const p of llmProviders) {
+    const options: Record<string, any> = {};
+    for (const [key, value] of Object.entries(p.options)) {
+      if (value !== undefined && typeof value === "object" && "env" in value) {
+        options[key] = `\${${value.env}}`;
+        providerEnv[value.env] = `\${${value.env}}`;
+      } else {
+        options[key] = value;
+      }
+    }
+
+    provider[p.name] = {
+      npm: p.npm,
+      name: p.displayName,
+      options,
+      models: p.models,
+    };
   }
 
   const config: Record<string, any> = {
@@ -627,10 +649,32 @@ function opencodeConfig(harness: AgentHarness): string {
       [`plugins/${harness.name}-telemetry.js`, {}],
     ],
     mcp,
+    provider,
     ...harness.config,
   };
 
   return JSON.stringify(config, null, 2) + "\n";
+}
+
+function opencodeStartScript(harness: AgentHarness): string {
+  const configPath = `/workspace/.biodome-build/opencode-homes/${harness.name}/.config/opencode/opencode.json`;
+  return [
+    "#!/bin/sh",
+    `# Auto-generated OpenCode start script for ${harness.name}`,
+    "set -e",
+    "",
+    `# Substitute \${VAR} references in the generated config with runtime env vars.`,
+    "node -e '",
+    "const fs = require(\"fs\");",
+    `const file = ${JSON.stringify(configPath)};`,
+    "let text = fs.readFileSync(file, \"utf8\");",
+    "text = text.replace(/\\$\\{([A-Za-z_][A-Za-z0-9_]*)\\}/g, (_, name) => process.env[name] || \"\");",
+    "fs.writeFileSync(file, text);",
+    "'",
+    "",
+    `exec opencode serve --port ${harness.port} --hostname 0.0.0.0 --print-logs`,
+    "",
+  ].join("\n");
 }
 
 function opencodeTelemetryPlugin(harness: AgentHarness): string {

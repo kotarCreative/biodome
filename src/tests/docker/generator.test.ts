@@ -416,6 +416,7 @@ describe("Docker generators", () => {
       const files = generateHarnessFiles(plan);
       const configPath = "opencode-homes/agent/.config/opencode/opencode.json";
       const pluginPath = "opencode-homes/agent/.config/opencode/plugins/agent-telemetry.js";
+      const startPath = "opencode-homes/agent/start.sh";
 
       expect(files[configPath]).toContain('"$schema": "https://opencode.ai/config.json"');
       expect(files[configPath]).toContain('"mcp"');
@@ -430,6 +431,47 @@ describe("Docker generators", () => {
       expect(plugin).toContain("tool.execute.after");
       expect(plugin).toContain("chat.message");
       expect(plugin).toContain("/workspace/.biodome-build/logs/opencode-events.jsonl");
+
+      expect(files[startPath]).toContain("#!/bin/sh");
+      expect(files[startPath]).toContain("opencode serve");
+      expect(files[startPath]).toContain("3002");
+    });
+
+    it("renders LLM providers into the OpenCode config", () => {
+      const plan = createPlan("test");
+      plan.runtime.agentHarnesses.push({
+        name: "agent",
+        type: "opencode",
+        port: 3002,
+        mcpServers: {},
+        telemetry: { enabled: true, path: "/workspace/.biodome-build/logs/opencode-events.jsonl" },
+        config: {},
+      });
+      plan.runtime.llmProviders.push({
+        name: "lmstudio",
+        npm: "@ai-sdk/openai-compatible",
+        displayName: "LM Studio",
+        options: {
+          baseURL: "http://localhost:2877/v1",
+          apiKey: { env: "LMSTUDIO_API_KEY" },
+        },
+        models: {
+          "local-model": { name: "Local Model" },
+        },
+      });
+
+      const files = generateHarnessFiles(plan);
+      const config = JSON.parse(files["opencode-homes/agent/.config/opencode/opencode.json"]);
+      expect(config.provider).toBeDefined();
+      expect(config.provider.lmstudio).toEqual({
+        npm: "@ai-sdk/openai-compatible",
+        name: "LM Studio",
+        options: {
+          baseURL: "http://localhost:2877/v1",
+          apiKey: "${LMSTUDIO_API_KEY}",
+        },
+        models: { "local-model": { name: "Local Model" } },
+      });
     });
   });
 });

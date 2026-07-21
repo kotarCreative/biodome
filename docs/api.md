@@ -95,6 +95,10 @@ Declare a Git repository to clone into the sandbox and keep up to date on startu
 
 Run a headless OpenCode agent inside the sandbox with telemetry capture. See [Primitives](primitives.md#addopencodeharnessspec).
 
+### `addLlmProvider(spec)`
+
+Configure an LLM provider for OpenCode harnesses. See [Primitives](primitives.md#addllmproviderspec).
+
 ### `addLocalVolume(spec)`
 
 ### `addS3Volume(spec)`
@@ -238,6 +242,20 @@ interface AgentHarnessSpec {
   config?: Record<string, unknown>;
 }
 ```
+
+## LLM provider specification
+
+```typescript
+interface LlmProviderSpec {
+  name: string;
+  npm?: string;
+  displayName?: string;
+  options?: Record<string, string | number | boolean | { env: string }>;
+  models?: Record<string, { name?: string }>;
+}
+```
+
+Credential-like option keys (e.g. `apiKey`) must be environment references (`{ env: "VAR" }`), not literal strings.
 
 ## Lifecycle points
 

@@ -68,6 +68,14 @@ export interface AgentHarness {
   config: Record<string, unknown>
 }
 
+export interface LlmProvider {
+  name: string
+  npm?: string
+  displayName?: string
+  options: Record<string, SecretValue | string | number | boolean | undefined>
+  models: Record<string, { name?: string }>
+}
+
 export interface RuntimePlan {
   services: Service[]
   networks: Network[]
@@ -81,6 +89,7 @@ export interface RuntimePlan {
   envVars: EnvVar[]
   repos: Repo[]
   agentHarnesses: AgentHarness[]
+  llmProviders: LlmProvider[]
 }
 
 export type EnvScope = "build" | "runtime" | "both"
@@ -306,6 +315,7 @@ export function createPlan(project: string): Plan {
       envVars: [],
       repos: [],
       agentHarnesses: [],
+      llmProviders: [],
     },
   }
 }
@@ -443,6 +453,22 @@ export const AgentHarnessSchema = Schema.Struct({
   mcpServers: Schema.Record(Schema.String, AgentHarnessMcpServerSchema),
   telemetry: AgentHarnessTelemetrySchema,
   config: Schema.Record(Schema.String, Schema.Unknown),
+})
+
+const LlmProviderOptionValueSchema = Schema.Union([
+  Schema.String,
+  Schema.Number,
+  Schema.Boolean,
+  SecretValueSchema,
+  Schema.Undefined,
+])
+
+export const LlmProviderSpecSchema = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1)),
+  npm: Schema.optional(Schema.String),
+  displayName: Schema.optional(Schema.String),
+  options: Schema.optional(Schema.Record(Schema.String, LlmProviderOptionValueSchema)),
+  models: Schema.optional(Schema.Record(Schema.String, Schema.Struct({ name: Schema.optional(Schema.String) }))),
 })
 
 export const EndpointCredentialsSchema = Schema.Record(Schema.String, SecretValueSchema)
@@ -673,5 +699,14 @@ export const PlanSchema = Schema.Struct({
     envVars: Schema.Array(EnvVarSchema),
     repos: Schema.Array(RepoSchema),
     agentHarnesses: Schema.Array(AgentHarnessSchema),
+    llmProviders: Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        npm: Schema.optional(Schema.String),
+        displayName: Schema.optional(Schema.String),
+        options: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Number, Schema.Boolean, SecretValueSchema])),
+        models: Schema.Record(Schema.String, Schema.Struct({ name: Schema.optional(Schema.String) })),
+      })
+    ),
   }),
 })

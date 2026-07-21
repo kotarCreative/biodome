@@ -1287,9 +1287,8 @@ describe("SandboxContext", () => {
       const proc = ctx.plan.runtime.processes.find((p) => p.name === "opencode-agent-agent");
       expect(proc).toBeDefined();
       expect(proc!.mode).toBe("daemon");
-      expect(proc!.command).toContain("opencode");
-      expect(proc!.command).toContain("serve");
-      expect(proc!.command).toContain("3002");
+      expect(proc!.command).toContain("sh");
+      expect(proc!.command).toContain("/workspace/.biodome-build/opencode-homes/agent/start.sh");
       expect(proc!.environment!.HOME).toBe("/workspace/.biodome-build/opencode-homes/agent");
 
       expect(ctx.plan.build.aptPackages).toContain("curl");
@@ -1310,13 +1309,58 @@ describe("SandboxContext", () => {
       expect(harness.mcpServers).toEqual({ custom: { url: "http://localhost:5000" } });
 
       const proc = ctx.plan.runtime.processes.find((p) => p.name === "opencode-agent-agent");
-      expect(proc!.command).toContain("4000");
+      expect(proc!.ports).toContainEqual({ host: 4000, container: 4000 });
     });
 
     it("rejects duplicate harness names", () => {
       const ctx = new SandboxContext("/tmp", "test");
       ctx.addOpencodeHarness({ name: "agent" });
       expect(() => ctx.addOpencodeHarness({ name: "agent" })).toThrow(/Duplicate agent harness name/);
+    });
+  });
+
+  describe("addLlmProvider", () => {
+    it("adds an LLM provider with options and models", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addLlmProvider({
+        name: "lmstudio",
+        npm: "@ai-sdk/openai-compatible",
+        displayName: "LM Studio",
+        options: {
+          baseURL: "http://localhost:2877/v1",
+          apiKey: { env: "LMSTUDIO_API_KEY" },
+        },
+        models: {
+          "local-model": { name: "Local Model" },
+        },
+      });
+
+      expect(ctx.plan.runtime.llmProviders).toHaveLength(1);
+      const provider = ctx.plan.runtime.llmProviders[0];
+      expect(provider.name).toBe("lmstudio");
+      expect(provider.npm).toBe("@ai-sdk/openai-compatible");
+      expect(provider.displayName).toBe("LM Studio");
+      expect(provider.options).toEqual({
+        baseURL: "http://localhost:2877/v1",
+        apiKey: { env: "LMSTUDIO_API_KEY" },
+      });
+      expect(provider.models).toEqual({ "local-model": { name: "Local Model" } });
+    });
+
+    it("rejects duplicate LLM provider names", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      ctx.addLlmProvider({ name: "lmstudio" });
+      expect(() => ctx.addLlmProvider({ name: "lmstudio" })).toThrow(/Duplicate LLM provider name/);
+    });
+
+    it("rejects literal credential strings in options", () => {
+      const ctx = new SandboxContext("/tmp", "test");
+      expect(() =>
+        ctx.addLlmProvider({
+          name: "lmstudio",
+          options: { apiKey: "sk-secret" },
+        })
+      ).toThrow(/must be an environment reference/);
     });
   });
 });

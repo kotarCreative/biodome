@@ -564,7 +564,7 @@ Each repo generates a sync script at `.biodome-build/repos/<name>.sh` and a `sta
 
 ## `addOpencodeHarness(spec)`
 
-Runs a headless OpenCode agent inside the sandbox. The harness installs the OpenCode CLI (`opencode-ai`), the Bun runtime, and starts `opencode serve` as a daemon process. It also generates an OpenCode config that registers `biodome-mcp` as an MCP server and a telemetry plugin that records every message, tool call, and event the agent emits.
+Runs a headless OpenCode agent inside the sandbox. The harness installs the OpenCode CLI (`opencode-ai`), the Bun runtime, and starts `opencode serve` as a daemon process. It also generates an isolated OpenCode config that registers `biodome-mcp` as an MCP server, includes any declared LLM providers, and installs a telemetry plugin that records every message, tool call, and event the agent emits.
 
 ```javascript
 export default function agent(ctx) {
@@ -588,9 +588,36 @@ export default function agent(ctx) {
 - `telemetry` —
   - `enabled` — whether to install the telemetry plugin. Defaults to `true`.
   - `path` — JSONL file where OpenCode events are written. Defaults to `/workspace/.biodome-build/logs/opencode-events.jsonl`.
-- `config` — arbitrary extra values merged into `opencode.jsonc`.
+- `config` — arbitrary extra values merged into `opencode.json`.
 
 The MCP server (`biodome-mcp`) writes its own structured events to `/workspace/.biodome-build/logs/mcp-events.jsonl`. Together, the two logs give a holistic view of the agent's activity: OpenCode events show the agent's reasoning and tool calls, while the MCP log shows the exact sandbox actions those tool calls performed.
+
+## `addLlmProvider(spec)`
+
+Configures an LLM provider for OpenCode harnesses. The provider is written into each generated OpenCode config under the `provider` key, and credential env references are substituted at container startup so secrets never live in `plan.json` or the generated config files.
+
+```javascript
+export default function llm(ctx) {
+  ctx.addLlmProvider({
+    name: "lmstudio",
+    npm: "@ai-sdk/openai-compatible",
+    displayName: "LM Studio",
+    options: {
+      baseURL: "http://localhost:2877/v1",
+      apiKey: { env: "LMSTUDIO_API_KEY" },
+    },
+    models: {
+      "local-model": { name: "Local Model" },
+    },
+  });
+}
+```
+
+- `name` — unique provider key.
+- `npm` — optional npm package for the provider SDK.
+- `displayName` — human-readable provider name.
+- `options` — provider options such as `baseURL` and `apiKey`. Credential-like option keys (containing `key`) must be env references.
+- `models` — map of model IDs to display names.
 
 ## Health checks
 

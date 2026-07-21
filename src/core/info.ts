@@ -1,4 +1,4 @@
-import { Plan, Service, Port, SecretValue, EnvVar, Volume, Provider, Repo, AgentHarness } from "./plan.js";
+import { Plan, Service, Port, SecretValue, EnvVar, Volume, Provider, Repo, AgentHarness, LlmProvider } from "./plan.js";
 
 function formatPort(p: Port): string {
   const label = p.name ? `${p.name}: ` : "";
@@ -72,6 +72,15 @@ function formatAgentHarness(harness: AgentHarness): string {
     parts.push(`telemetry → ${harness.telemetry.path}`);
   }
   return `${harness.name} (${parts.join(", ")})`;
+}
+
+function formatLlmProvider(provider: LlmProvider): string {
+  const parts: string[] = [];
+  if (provider.npm) parts.push(`npm ${provider.npm}`);
+  if (provider.displayName) parts.push(`"${provider.displayName}"`);
+  const modelNames = Object.keys(provider.models);
+  if (modelNames.length > 0) parts.push(`models ${modelNames.join(", ")}`);
+  return `${provider.name} (${parts.join(", ")})`;
 }
 
 export interface ServiceConnection {
@@ -167,6 +176,14 @@ export function formatInfo(plan: Plan): string {
     lines.push("Agent harnesses:");
     for (const harness of plan.runtime.agentHarnesses) {
       lines.push(`  - ${formatAgentHarness(harness)}`);
+    }
+  }
+
+  if (plan.runtime.llmProviders.length > 0) {
+    lines.push("");
+    lines.push("LLM providers:");
+    for (const provider of plan.runtime.llmProviders) {
+      lines.push(`  - ${formatLlmProvider(provider)}`);
     }
   }
 
@@ -319,6 +336,15 @@ export function formatAgentsMd(plan: Plan): string {
     lines.push("");
     for (const harness of plan.runtime.agentHarnesses) {
       lines.push(`- \`${formatAgentHarness(harness)}\``);
+    }
+    lines.push("");
+  }
+
+  if (plan.runtime.llmProviders.length > 0) {
+    lines.push("## LLM providers");
+    lines.push("");
+    for (const provider of plan.runtime.llmProviders) {
+      lines.push(`- \`${formatLlmProvider(provider)}\``);
     }
     lines.push("");
   }

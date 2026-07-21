@@ -12,6 +12,7 @@ import type {
   VolumeSpecSchema,
   RepoSpecSchema,
   AgentHarnessSpecSchema,
+  LlmProviderSpecSchema,
 } from "./plan.js"
 
 export type ProcessSpec = typeof ProcessSpecSchema.Type
@@ -26,6 +27,7 @@ export type EnvSpec = typeof EnvSpecSchema.Type
 export type VolumeSpec = typeof VolumeSpecSchema.Type
 export type RepoSpec = typeof RepoSpecSchema.Type
 export type AgentHarnessSpec = typeof AgentHarnessSpecSchema.Type
+export type LlmProviderSpec = typeof LlmProviderSpecSchema.Type
 
 export type SecretValue = string | { env: string }
 
@@ -234,6 +236,7 @@ export interface FeatureContext {
   addVolume(spec: VolumeSpec): void
   addRepo(spec: RepoSpec): void
   addOpencodeHarness(spec: AgentHarnessSpec): void
+  addLlmProvider(spec: LlmProviderSpec): void
 
   // Volume wrappers for a simpler DX.
   addLocalVolume(spec: LocalVolumeSpec): void

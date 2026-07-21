@@ -28,6 +28,8 @@ import {
   Repo,
   AgentHarnessSpecSchema,
   AgentHarness,
+  LlmProviderSpecSchema,
+  LlmProvider,
 } from "./plan.js"
 import {
   FeatureContext,
@@ -58,6 +60,7 @@ import {
   GdriveVolumeSpec,
   RepoSpec,
   AgentHarnessSpec,
+  LlmProviderSpec,
 } from "./feature.js"
 import { BuildContext } from "./build-context.js"
 import { languageHandlers, getDefaultBaseImage } from "./languages.js"
@@ -637,13 +640,8 @@ export class SandboxContext implements FeatureContext, BuildContext {
     this.addProcess({
       name: `opencode-agent-${validated.name}`,
       command: [
-        "opencode",
-        "serve",
-        "--port",
-        String(port),
-        "--hostname",
-        "0.0.0.0",
-        "--print-logs",
+        "sh",
+        `/workspace/.biodome-build/opencode-homes/${validated.name}/start.sh`,
       ],
       port,
       healthCheck: { type: "http", url: `http://localhost:${port}/health` },
@@ -656,6 +654,43 @@ export class SandboxContext implements FeatureContext, BuildContext {
         OPENCODE_TELEMETRY_PATH: telemetry.path,
       },
     })
+  }
+
+  addLlmProvider(spec: LlmProviderSpec): void {
+    const validated = Schema.decodeSync(LlmProviderSpecSchema)(spec)
+
+    if (this.plan.runtime.llmProviders.some((p) => p.name === validated.name)) {
+      throw new ValidationError({ message: `Duplicate LLM provider name: ${validated.name}` })
+    }
+
+    const provider: LlmProvider = {
+      name: validated.name,
+      npm: validated.npm,
+      displayName: validated.displayName,
+      options: validated.options ? { ...validated.options } : {},
+      models: validated.models ? { ...validated.models } : {},
+    }
+
+    // Reject literal credential strings in provider options to keep secrets out
+    // of plan.json and generated config files.
+    for (const [key, value] of Object.entries(provider.options)) {
+      if (typeof value === "string" && key.toLowerCase().includes("key")) {
+        throw new ValidationError({
+          message: `LLM provider ${validated.name}: option "${key}" looks like a credential and must be an environment reference ({ env: "VAR" }), not a literal string`,
+        })
+      }
+    }
+
+    // Passthrough env-referenced options so Docker Compose injects them into the
+    // container at runtime; the harness start script then substitutes them into
+    // the generated OpenCode config.
+    for (const value of Object.values(provider.options)) {
+      if (value !== undefined && typeof value === "object" && "env" in value) {
+        this.addEnv(value.env, { from: { env: value.env } })
+      }
+    }
+
+    this.plan.runtime.llmProviders.push(provider)
   }
 
   private normalizeRepoPath(path: string | undefined, name: string): string {
