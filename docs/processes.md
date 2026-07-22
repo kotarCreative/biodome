@@ -58,16 +58,16 @@ This runs after the dev container starts. The command executes inside the dev co
 
 ## Lifecycle points
 
-| Point | When it runs | Where it runs |
-|-------|--------------|---------------|
-| `build.pre` | Before `docker compose build` | Host |
-| `build.post` | After `docker compose build` | Host |
-| `start.pre` | Before `docker compose up` | Host |
-| `start.post` | After the dev container starts | Inside the dev container |
-| `stop.pre` | Before `docker compose down` | Inside the dev container |
-| `stop.post` | After `docker compose down` | Host |
-| `exec.pre` | Before `biodome exec <command>` | Inside the dev container |
-| `exec.post` | After `biodome exec <command>` | Inside the dev container |
+| Point        | When it runs                    | Where it runs            |
+| ------------ | ------------------------------- | ------------------------ |
+| `build.pre`  | Before `docker compose build`   | Host                     |
+| `build.post` | After `docker compose build`    | Host                     |
+| `start.pre`  | Before `docker compose up`      | Host                     |
+| `start.post` | After the dev container starts  | Inside the dev container |
+| `stop.pre`   | Before `docker compose down`    | Inside the dev container |
+| `stop.post`  | After `docker compose down`     | Host                     |
+| `exec.pre`   | Before `biodome exec <command>` | Inside the dev container |
+| `exec.post`  | After `biodome exec <command>`  | Inside the dev container |
 
 ## Writing custom processes
 
@@ -92,29 +92,35 @@ export default function vite(ctx) {
 
 ### Built-in MCP server
 
-Biodome ships a built-in MCP (Model Context Protocol) server that exposes sandbox status, logs, and actions to AI agents. When enabled, the server runs inside the dev container as a `supervisord`-managed daemon and listens on a configurable port (default `3001`).
+Biodome ships a built-in MCP (Model Context Protocol) server that exposes sandbox status, logs, and actions to AI agents. When enabled, the server runs inside the dev container as a `supervisord`-managed daemon and listens on `127.0.0.1` (loopback only) at a configurable port (default `3001`).
 
-To enable, add `mcp` to your `.biodome/config.json`:
+To enable, add `mcp` to your `.biodome/config.json` with an environment-referenced token:
 
 ```json
 {
   "project": { "name": "my-project" },
-  "mcp": { "enabled": true, "port": 3001 }
+  "mcp": {
+    "enabled": true,
+    "port": 3001,
+    "token": { "env": "BIODOME_MCP_TOKEN" }
+  }
 }
 ```
 
-The server provides these tools:
+The server provides these tools. Action tools (`exec_command`, `restart_process`) are gated behind `allowExec` and `allowProcessControl` in the MCP config and default to **disabled**:
 
-| Tool | Description | Scope |
-|------|-------------|-------|
-| `get_sandbox_info` | Returns the full sandbox plan: project name, languages, services with connection strings, processes, and environment | Read-only |
-| `get_process_status` | Runs `supervisorctl status` to show running/stopped managed processes | Read-only |
-| `get_service_health` | Attempts a TCP connection to each backing service port and reports reachability | Read-only |
-| `get_logs` | Returns recent lines from `/tmp/<process>.log` for any managed process or `supervisord` | Read-only |
-| `restart_process` | Runs `supervisorctl restart` for a named daemon process | Action |
-| `exec_command` | Runs an arbitrary shell command inside the container (logged to the MCP audit trail) | Action |
+| Tool                 | Description                                                                                                              | Scope     |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------- |
+| `get_sandbox_info`   | Returns the sandbox plan (credential metadata only, never resolved values)                                               | Read-only |
+| `get_process_status` | Runs `supervisorctl status` to show running/stopped managed processes                                                    | Read-only |
+| `get_service_health` | Attempts a TCP connection to each backing service port and reports reachability                                          | Read-only |
+| `get_logs`           | Returns recent lines from `/tmp/<process>.log` for any managed process or `supervisord` (max 500 lines)                  | Read-only |
+| `restart_process`    | Runs `supervisorctl restart` for a named daemon process (requires `allowProcessControl: true`)                           | Action    |
+| `exec_command`       | Runs an arbitrary shell command inside the container (requires `allowExec: true`; bounded at 120s timeout, 10 MB output) | Action    |
 
-Every tool invocation is logged as a JSON line to the MCP server's `stdout`, which `supervisord` captures at `/tmp/biodome-mcp.log`. Use `biodome logs biodome-mcp` to tail the audit trail from the host.
+Every request (except `/health`) requires `Authorization: Bearer <token>`. Authentication uses `timingSafeEqual` to prevent timing attacks. The `/health` endpoint returns a constant status and exposes no configuration.
+
+Every tool invocation is logged as a JSON line to the MCP server's `stdout`, which `supervisord` captures at `/tmp/biodome-mcp.log`. Use `biodome logs biodome-mcp` to tail the audit trail from the host. By default, logs contain only tool names and timestamps — no arguments, output, or credential values. Opt-in payload capture is available for debugging.
 
 **Agent configuration example (OpenCode / Cursor):**
 
@@ -122,7 +128,8 @@ Every tool invocation is logged as a JSON line to the MCP server's `stdout`, whi
 {
   "mcpServers": {
     "biodome": {
-      "url": "http://localhost:3001"
+      "url": "http://localhost:3001",
+      "token": "<BIODOME_MCP_TOKEN>"
     }
   }
 }
@@ -131,7 +138,8 @@ Every tool invocation is logged as a JSON line to the MCP server's `stdout`, whi
 Notes:
 
 - Enabling MCP automatically provisions a Node runtime if your features do not already request `node`. An explicit `ctx.addLanguage("node", ...)` is preserved.
-- The port is published on host loopback only (`127.0.0.1:<port>:<port>`), so the endpoint — including the `exec_command` and `restart_process` action tools — is reachable from the host but not from other machines on the network.
+- The port is published on host loopback only (`127.0.0.1:<port>:<port>`), and the listener binds to `127.0.0.1` inside the container. The endpoint is reachable from the host but not from other machines on the network.
+- MCP configuration supports resource limits: `maxReadBytes`, `maxWriteBytes`, and `maxListEntries`. See the config schema for defaults.
 
 ### Custom MCP server
 

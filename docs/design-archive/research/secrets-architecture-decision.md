@@ -3,6 +3,7 @@
 ## Context
 
 biodome needs to handle secrets in two contexts:
+
 - **Build-time secrets**: SSH keys, Docker credentials, API keys needed during image builds
 - **Runtime secrets**: Database URLs, API keys, service tokens needed when sandboxes run
 
@@ -17,16 +18,18 @@ This document evaluates whether to implement adapters for multiple distinct secr
 Integrate directly with each provider's native API (1Password CLI, SOPS, Fly.io secrets, GitHub Codespaces secrets, etc.).
 
 **Pros:**
+
 - Leverages existing infrastructure — users who already use 1Password or GitHub Codespaces can keep their workflow
 - Each provider handles its own encryption, rotation, and access control
 - Familiar UX for users of each platform
 
 **Cons:**
+
 - High maintenance burden — each provider has a different API, auth model, and secret type support
 - Users must configure and authenticate with each provider separately
 - Provider-specific features leak into the core — e.g., 1Password vault paths, Fly.io env vars, SOPS file paths all become first-class config concepts
 - Lock-in risk — switching providers means rewriting integration code
-- The comparison matrix in `secrets-management.md` shows no single provider covers all secret types, so users would likely need *multiple* integrations anyway
+- The comparison matrix in `secrets-management.md` shows no single provider covers all secret types, so users would likely need _multiple_ integrations anyway
 - Difficult to test — every provider integration requires real credentials and network access
 
 ### Option B: Unified Secret Manager with Pluggable Backends
@@ -59,6 +62,7 @@ Build an internal secret manager with a consistent interface. The manager stores
 ```
 
 **Key design:**
+
 - The core secret manager owns the encryption and storage abstraction
 - Backends are pure I/O providers — they read/write encrypted blobs or resolve secret references
 - Secrets are referenced uniformly in `sandbox/secrets.yaml` as `${{ secrets.MY_KEY }}`
@@ -66,14 +70,16 @@ Build an internal secret manager with a consistent interface. The manager stores
 - The manager caches secrets locally during a sandbox session, avoiding repeated network calls
 
 **Pros:**
+
 - Single API surface — all secrets look the same to biodome regardless of origin
-- Users configure *one* backend, not multiple provider-specific config blocks
+- Users configure _one_ backend, not multiple provider-specific config blocks
 - Easy to test — the local encrypted file backend works offline with no credentials
 - Future-proof — adding a new cloud provider is just implementing the backend interface
 - Secrets can be migrated between backends without changing `sandbox/secrets.yaml`
 - The local backend serves as the "batteries-included" default — biodome works out of the box
 
 **Cons:**
+
 - Does not directly use platform-native secret systems (e.g., GitHub Codespaces secrets would need a sync bridge)
 - Requires maintaining the core encryption and caching layer
 - Users who already have secrets in 1Password or SOPS will need to configure a backend bridge
@@ -84,19 +90,20 @@ The existing Phase 1 approach (Docker BuildKit for build-time secrets) is unchan
 
 For Phase 2+, instead of directly wiring 1Password, SOPS, and platform secrets as independent integrations, the roadmap would:
 
-| Week | Current Plan | Proposed Change |
-|------|-------------|-----------------|
-| Week 7 | Runtime secrets + service discovery | Same, but add the secret manager core with local encrypted backend |
-| Week 8 | 1Password integration | Implement as a backend for the secret manager instead of a standalone integration |
-| Week 9 | Provider abstraction | Unchanged — provider abstraction is about compute, not secrets |
-| Week 11 | Secrets rotation + audit | Built into the secret manager core, applies to all backends uniformly |
-| Week 12 | Documentation | Document the backend interface for third-party contributions |
+| Week    | Current Plan                        | Proposed Change                                                                   |
+| ------- | ----------------------------------- | --------------------------------------------------------------------------------- |
+| Week 7  | Runtime secrets + service discovery | Same, but add the secret manager core with local encrypted backend                |
+| Week 8  | 1Password integration               | Implement as a backend for the secret manager instead of a standalone integration |
+| Week 9  | Provider abstraction                | Unchanged — provider abstraction is about compute, not secrets                    |
+| Week 11 | Secrets rotation + audit            | Built into the secret manager core, applies to all backends uniformly             |
+| Week 12 | Documentation                       | Document the backend interface for third-party contributions                      |
 
 ### Recommendation
 
 **Build the unified secret manager (Option B).**
 
 Rationale:
+
 1. The project is greenfield — no legacy integrations to support
 2. The multi-provider approach multiplies complexity without proportional benefit
 3. A unified interface with pluggable backends gives the same flexibility with lower maintenance
@@ -132,18 +139,18 @@ func (m *SecretManager) Resolve(ctx context.Context, ref string) (string, error)
 
 ### Migration Path
 
-| Phase | Backend | What Works |
-|-------|---------|------------|
-| Phase 1 (MVP) | Local encrypted file (`~/.sandbox/secrets`) | Build-time secrets via Docker BuildKit |
-| Phase 2 | OS keychain backend (macOS Keychain, GNOME Keyring, Windows Credential Manager) | Runtime secrets with local fallback |
-| Phase 2+ | 1Password backend, SOPS/age backend | Enterprise secrets with existing tooling |
-| Phase 3 | Cloud KMS backends (AWS, GCP, Azure) | Production secrets in cloud deployments |
+| Phase         | Backend                                                                         | What Works                               |
+| ------------- | ------------------------------------------------------------------------------- | ---------------------------------------- |
+| Phase 1 (MVP) | Local encrypted file (`~/.sandbox/secrets`)                                     | Build-time secrets via Docker BuildKit   |
+| Phase 2       | OS keychain backend (macOS Keychain, GNOME Keyring, Windows Credential Manager) | Runtime secrets with local fallback      |
+| Phase 2+      | 1Password backend, SOPS/age backend                                             | Enterprise secrets with existing tooling |
+| Phase 3       | Cloud KMS backends (AWS, GCP, Azure)                                            | Production secrets in cloud deployments  |
 
 ---
 
 ## Credential Bootstrapping: How Backends Authenticate
 
-The central challenge: cloud backends (AWS Secrets Manager, 1Password, GCP Secret Manager) each need *their own credentials* to operate. How do we get those credentials into the backend without creating a circular dependency?
+The central challenge: cloud backends (AWS Secrets Manager, 1Password, GCP Secret Manager) each need _their own credentials_ to operate. How do we get those credentials into the backend without creating a circular dependency?
 
 ### Option 1: Environment Variables
 
@@ -187,7 +194,7 @@ secrets:
   backend: "1password"
   backends:
     1password:
-      service_account_token: "${OP_SERVICE_ACCOUNT_TOKEN}"  # resolved at runtime
+      service_account_token: "${OP_SERVICE_ACCOUNT_TOKEN}" # resolved at runtime
       vault: "engineering/sandboxes"
     aws:
       region: "us-east-1"
@@ -233,6 +240,7 @@ func (b *AWSBackend) Init(ctx context.Context) error {
 ```
 
 **Setting up the chain:**
+
 ```bash
 # One-time setup — store cloud backend creds in local backend
 sandbox secrets set aws_access_key_id     "${AWS_ACCESS_KEY_ID}"
@@ -316,6 +324,7 @@ func (b *AWSBackend) Init(ctx context.Context) error {
 ```
 
 **User workflow:**
+
 ```bash
 # CI/CD: env vars just work
 export AWS_ACCESS_KEY_ID=...
@@ -332,6 +341,7 @@ sandbox secrets set aws_secret_access_key "..."
 ```
 
 **Why this works for biodome:**
+
 - Phase 1 (local only): no credentials needed, works out of the box
 - Phase 2 (1Password / cloud): set up once via `sandbox secrets login`, then forget
 - CI/CD: env vars are the universal carrier — backends check them first
@@ -365,7 +375,7 @@ The `Init` method receives the already-initialized local backend, enabling crede
 
 ## Deploying Secrets to Providers
 
-The same architecture that *resolves* secrets can also *deploy* them to providers. `Set` is already on the interface — it doesn't need to return `ErrReadOnly` for cloud backends.
+The same architecture that _resolves_ secrets can also _deploy_ them to providers. `Set` is already on the interface — it doesn't need to return `ErrReadOnly` for cloud backends.
 
 ### Why Deploy to Providers?
 
@@ -438,9 +448,9 @@ Making cloud backends writable raises the stakes on local backend security. Miti
 
 ### Where This Fits in the Roadmap
 
-| Phase | Capability | How It Works |
-|-------|-----------|--------------|
-| Phase 1 (MVP) | Build-time secrets | Docker BuildKit mounts, no cloud backends needed |
-| Phase 2 | Read from cloud backends | `Resolve` only; `Set` returns `ErrReadOnly` as a safe default |
-| Phase 2+ | Write to cloud backends | Full `Set` + `Sync`; gated by IAM permissions and optional config flag |
-| Phase 3 | Enterprise sync | Cross-provider sync, rotation policies, audit integration |
+| Phase         | Capability               | How It Works                                                           |
+| ------------- | ------------------------ | ---------------------------------------------------------------------- |
+| Phase 1 (MVP) | Build-time secrets       | Docker BuildKit mounts, no cloud backends needed                       |
+| Phase 2       | Read from cloud backends | `Resolve` only; `Set` returns `ErrReadOnly` as a safe default          |
+| Phase 2+      | Write to cloud backends  | Full `Set` + `Sync`; gated by IAM permissions and optional config flag |
+| Phase 3       | Enterprise sync          | Cross-provider sync, rotation policies, audit integration              |

@@ -11,17 +11,20 @@ npx @kotarcreative/biodome init
 npx @kotarcreative/biodome build
 npx @kotarcreative/biodome up
 npx @kotarcreative/biodome info
+npx @kotarcreative/biodome down
 ```
 
 ## Commands
 
-- `biodome init [--bare]` — create a `.biodome/` directory with language auto-detection; `--bare` creates a minimal scaffold.
-- `biodome build` — generate Docker files and build the dev image.
-- `biodome up` — start the dev container and backing services.
-- `biodome down` — stop the environment.
-- `biodome exec <command>` — run a command inside the dev container.
+- `biodome init [--bare]` — create a `.biodome/` directory with language auto-detection and a default `local` target; `--bare` creates a minimal scaffold.
+- `biodome build` — render and build the local development sandbox.
+- `biodome up` — start the local development sandbox.
+- `biodome down` — stop the local development sandbox.
+- `biodome exec <command>` — run a command inside the local development sandbox.
+- `biodome run <target> <task>` — execute a named task (e.g. `review-pr`) against a target.
 - `biodome info` — show services, ports, and connection strings.
 - `biodome config validate` — validate `.biodome/`, feature/service module exports, and the computed plan (including port conflicts) without building.
+- `biodome target validate <target>` — validate a named target configuration without building or deploying.
 - `biodome generate agents.md` — create `AGENTS.md` for AI context.
 - `biodome logs [process]` — tail logs from a managed process.
 - `biodome ps` — show running containers for the project.

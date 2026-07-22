@@ -1,4 +1,18 @@
-import { Plan, Service, Port, SecretValue, EnvVar, Volume, Provider, Repo, AgentHarness, PiHarness, CodexHarness, ClaudeHarness, LlmProvider } from "./plan.js";
+import {
+  Plan,
+  Service,
+  Port,
+  SecretValue,
+  EnvVar,
+  Volume,
+  Provider,
+  Repo,
+  AgentHarness,
+  PiHarness,
+  CodexHarness,
+  ClaudeHarness,
+  LlmProvider,
+} from "./plan.js";
 
 function formatPort(p: Port): string {
   const label = p.name ? `${p.name}: ` : "";
@@ -84,33 +98,33 @@ function formatLlmProvider(provider: LlmProvider): string {
 }
 
 function formatPiHarness(harness: PiHarness): string {
-  const parts: string[] = []
-  if (harness.provider) parts.push(`provider ${harness.provider}`)
-  if (harness.model) parts.push(`model ${harness.model}`)
-  if (harness.tools && harness.tools.length > 0) parts.push(`tools ${harness.tools.join(", ")}`)
-  if (harness.telemetry.enabled) parts.push(`telemetry → ${harness.telemetry.path}`)
-  return `${harness.name} (${parts.join(", ")})`
+  const parts: string[] = [];
+  if (harness.provider) parts.push(`provider ${harness.provider}`);
+  if (harness.model) parts.push(`model ${harness.model}`);
+  if (harness.tools && harness.tools.length > 0) parts.push(`tools ${harness.tools.join(", ")}`);
+  if (harness.telemetry.enabled) parts.push(`telemetry → ${harness.telemetry.path}`);
+  return `${harness.name} (${parts.join(", ")})`;
 }
 
 function formatCodexHarness(harness: CodexHarness): string {
-  const parts: string[] = []
-  parts.push("codex")
-  parts.push(`port ${harness.port}`)
-  if (harness.model) parts.push(`model ${harness.model}`)
+  const parts: string[] = [];
+  parts.push("codex");
+  parts.push(`port ${harness.port}`);
+  if (harness.model) parts.push(`model ${harness.model}`);
   if (Object.keys(harness.mcpServers).length > 0) {
-    parts.push(`mcp ${Object.keys(harness.mcpServers).join(", ")}`)
+    parts.push(`mcp ${Object.keys(harness.mcpServers).join(", ")}`);
   }
-  if (harness.telemetry.enabled) parts.push(`telemetry → ${harness.telemetry.path}`)
-  return `${harness.name} (${parts.join(", ")})`
+  if (harness.telemetry.enabled) parts.push(`telemetry → ${harness.telemetry.path}`);
+  return `${harness.name} (${parts.join(", ")})`;
 }
 
 function formatClaudeHarness(harness: ClaudeHarness): string {
-  const parts: string[] = []
-  if (harness.model) parts.push(`model ${harness.model}`)
-  if (harness.tools && harness.tools.length > 0) parts.push(`tools ${harness.tools.join(", ")}`)
-  if (harness.permissions) parts.push(`permissions ${harness.permissions}`)
-  if (harness.telemetry.enabled) parts.push(`telemetry → ${harness.telemetry.path}`)
-  return `${harness.name} (${parts.join(", ")})`
+  const parts: string[] = [];
+  if (harness.model) parts.push(`model ${harness.model}`);
+  if (harness.tools && harness.tools.length > 0) parts.push(`tools ${harness.tools.join(", ")}`);
+  if (harness.permissions) parts.push(`permissions ${harness.permissions}`);
+  if (harness.telemetry.enabled) parts.push(`telemetry → ${harness.telemetry.path}`);
+  return `${harness.name} (${parts.join(", ")})`;
 }
 
 export interface ServiceConnection {
@@ -218,26 +232,26 @@ export function formatInfo(plan: Plan): string {
   }
 
   if (plan.runtime.piHarnesses.length > 0) {
-    lines.push("")
-    lines.push("Pi harnesses:")
+    lines.push("");
+    lines.push("Pi harnesses:");
     for (const harness of plan.runtime.piHarnesses) {
-      lines.push(`  - ${formatPiHarness(harness)}`)
+      lines.push(`  - ${formatPiHarness(harness)}`);
     }
   }
 
   if (plan.runtime.codexHarnesses.length > 0) {
-    lines.push("")
-    lines.push("Codex harnesses:")
+    lines.push("");
+    lines.push("Codex harnesses:");
     for (const harness of plan.runtime.codexHarnesses) {
-      lines.push(`  - ${formatCodexHarness(harness)}`)
+      lines.push(`  - ${formatCodexHarness(harness)}`);
     }
   }
 
   if (plan.runtime.claudeHarnesses.length > 0) {
-    lines.push("")
-    lines.push("Claude harnesses:")
+    lines.push("");
+    lines.push("Claude harnesses:");
     for (const harness of plan.runtime.claudeHarnesses) {
-      lines.push(`  - ${formatClaudeHarness(harness)}`)
+      lines.push(`  - ${formatClaudeHarness(harness)}`);
     }
   }
 
@@ -404,30 +418,30 @@ export function formatAgentsMd(plan: Plan): string {
   }
 
   if (plan.runtime.piHarnesses.length > 0) {
-    lines.push("## Pi harnesses")
-    lines.push("")
+    lines.push("## Pi harnesses");
+    lines.push("");
     for (const harness of plan.runtime.piHarnesses) {
-      lines.push(`- \`${formatPiHarness(harness)}\``)
+      lines.push(`- \`${formatPiHarness(harness)}\``);
     }
-    lines.push("")
+    lines.push("");
   }
 
   if (plan.runtime.codexHarnesses.length > 0) {
-    lines.push("## Codex harnesses")
-    lines.push("")
+    lines.push("## Codex harnesses");
+    lines.push("");
     for (const harness of plan.runtime.codexHarnesses) {
-      lines.push(`- \`${formatCodexHarness(harness)}\``)
+      lines.push(`- \`${formatCodexHarness(harness)}\``);
     }
-    lines.push("")
+    lines.push("");
   }
 
   if (plan.runtime.claudeHarnesses.length > 0) {
-    lines.push("## Claude harnesses")
-    lines.push("")
+    lines.push("## Claude harnesses");
+    lines.push("");
     for (const harness of plan.runtime.claudeHarnesses) {
-      lines.push(`- \`${formatClaudeHarness(harness)}\``)
+      lines.push(`- \`${formatClaudeHarness(harness)}\``);
     }
-    lines.push("")
+    lines.push("");
   }
 
   if (plan.runtime.endpoints.length > 0) {

@@ -21,17 +21,17 @@ export type Capability =
   | "snapshot.restore"
   | "network.policy"
   | "volume.mount"
-  | (string & {})
+  | (string & {});
 
 /** A read-only set of capabilities advertised by a runtime backend. */
-export type Capabilities = ReadonlySet<Capability>
+export type Capabilities = ReadonlySet<Capability>;
 
 /** Check whether a runtime advertises a given capability. */
 export function hasCapability(capabilities: Capabilities, capability: Capability): boolean {
-  return capabilities.has(capability)
+  return capabilities.has(capability);
 }
 
 /** Create a capability set from a list of capability strings. */
 export function capabilitiesOf(...capabilities: Array<Capability>): Capabilities {
-  return new Set(capabilities)
+  return new Set(capabilities);
 }

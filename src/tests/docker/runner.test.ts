@@ -42,14 +42,11 @@ describe("parseServiceStatusOutput", () => {
 
   it("parses a single JSON object on one line", () => {
     const output = '{"Service":"dev","State":"running"}';
-    expect(parseServiceStatusOutput(output)).toEqual([
-      { name: "dev", state: "running" },
-    ]);
+    expect(parseServiceStatusOutput(output)).toEqual([{ name: "dev", state: "running" }]);
   });
 
   it("parses legacy JSON array output", () => {
-    const output =
-      '[{"Service":"dev","State":"running"},{"Service":"redis","State":"exited"}]';
+    const output = '[{"Service":"dev","State":"running"},{"Service":"redis","State":"exited"}]';
     expect(parseServiceStatusOutput(output)).toEqual([
       { name: "dev", state: "running" },
       { name: "redis", state: "exited" },
@@ -62,8 +59,7 @@ describe("parseServiceStatusOutput", () => {
   });
 
   it("skips blank lines between JSON records", () => {
-    const output =
-      '{"Service":"dev","State":"running"}\n\n{"Service":"db","State":"running"}\n';
+    const output = '{"Service":"dev","State":"running"}\n\n{"Service":"db","State":"running"}\n';
     expect(parseServiceStatusOutput(output)).toEqual([
       { name: "dev", state: "running" },
       { name: "db", state: "running" },

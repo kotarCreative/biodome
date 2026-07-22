@@ -14,9 +14,11 @@ A sandbox manager needs to support multiple infrastructure backends. This docume
 **Cost**: Free
 
 ### Description
+
 Docker Engine runs containers natively on Linux. On macOS/Windows, Docker Desktop provides a VM-managed environment. This is the default runtime for almost all dev environment tools.
 
 ### Strengths
+
 - Universal -- runs on every OS
 - Huge ecosystem of base images
 - Docker Compose for multi-service setups
@@ -24,12 +26,14 @@ Docker Engine runs containers natively on Linux. On macOS/Windows, Docker Deskto
 - No cloud dependency
 
 ### Weaknesses
+
 - No multi-tenant isolation (shared kernel)
 - macOS/Windows require a VM (slower)
 - Image management overhead
 - No built-in idle management
 
 ### Best For
+
 - Local development
 - Single-user scenarios
 - CI/CD runners
@@ -45,27 +49,32 @@ Docker Engine runs containers natively on Linux. On macOS/Windows, Docker Deskto
 **Cost**: $0.18/core-hour
 
 ### Description
+
 GitHub-managed cloud development environments. Uses `devcontainer.json` for configuration. Prebuilds available via GitHub Actions.
 
 ### Integration Points
+
 - `devcontainer.json` is the config format
 - Lifecycle hooks via devcontainer spec
 - VS Code in browser or desktop
 - JetBrains Gateway support
 
 ### Strengths
+
 - Seamless GitHub integration
 - Prebuilds for fast startup
 - Managed service (no ops)
 - Rich IDE support
 
 ### Weaknesses
+
 - GitHub-only (no GitLab/Bitbucket)
 - No self-hosted option
 - Limited customization of networking
 - Expensive at scale
 
 ### Best For
+
 - Teams already on GitHub
 - VS Code-heavy workflows
 
@@ -80,9 +89,11 @@ GitHub-managed cloud development environments. Uses `devcontainer.json` for conf
 **Cost**: Variable (pay per resource)
 
 ### Description
+
 Amazon Web Services offers the broadest set of infrastructure options. For sandboxes, the relevant services are EC2 (VMs), ECS (Docker orchestration), and EKS (Kubernetes).
 
 ### Integration Points
+
 - EC2 Instance Connect / SSM for SSH
 - ECS with Fargate for serverless containers
 - EBS snapshots for state persistence
@@ -90,18 +101,21 @@ Amazon Web Services offers the broadest set of infrastructure options. For sandb
 - VPC for network isolation
 
 ### Strengths
+
 - Full control over infrastructure
 - Every possible feature (networking, storage, etc.)
 - Enterprise compliance (SOC, HIPAA, PCI)
 - Spot instances for 60-70% cost savings
 
 ### Weaknesses
+
 - Complex setup
 - Ops burden (unless using higher-level services)
 - Predictable cost management is hard
 - No dev-environment-specific features
 
 ### Best For
+
 - Enterprise deployments
 - Custom infrastructure requirements
 - Teams with DevOps expertise
@@ -117,9 +131,11 @@ Amazon Web Services offers the broadest set of infrastructure options. For sandb
 **Cost**: Usage-based (generous free tier: 3 VMs)
 
 ### Description
+
 Runs applications as lightweight Firecracker microVMs distributed across 35+ global regions. Accepts Docker or OCI-compatible images. Features scale-to-zero, Anycast networking, and persistent volumes.
 
 ### Integration Points
+
 - Dockerfile-first deployment
 - `flyctl` CLI
 - Per-user/per-robot app model
@@ -128,6 +144,7 @@ Runs applications as lightweight Firecracker microVMs distributed across 35+ glo
 - `fly-replay` for smart routing
 
 ### Strengths
+
 - Near-instant cold starts (Firecracker)
 - Global edge deployment (35+ regions)
 - Scale-to-zero for cost control
@@ -135,18 +152,22 @@ Runs applications as lightweight Firecracker microVMs distributed across 35+ glo
 - Simple CLI and DX
 
 ### Weaknesses
+
 - No GPU support (CPU only)
 - Limited to app hosting (not general VM)
 - Volume attach latency
 - No built-in dev environment hooks
 
 ### Best For
+
 - Per-user dev environments
 - Global low-latency access
 - AI coding agent sandboxes (via Sprites)
 
 #### Fly.io Sprites
+
 A newer Fly.io offering specifically for sandbox environments:
+
 - Persistent filesystem across sessions
 - CLI and API access
 - Unlimited runtime (no hard time limits)
@@ -164,27 +185,32 @@ A newer Fly.io offering specifically for sandbox environments:
 **Cost**: Pay-per-second; free tier with $30/month credits
 
 ### Description
+
 Serverless platform for AI/ML workloads. Runs containers with gVisor isolation. Supports CPU and GPU workloads. Python-first SDK, autoscaling, multi-cloud pooling.
 
 ### Integration Points
+
 - Python SDK (`@app.function`, `@app.cls`)
 - Sandbox API for code execution
 - GPU memory snapshotting
 - Multi-cloud (AWS, GCP, Azure pooling)
 
 ### Strengths
+
 - Fastest cold starts in class
 - GPU on demand (H100, A100)
 - Pay-per-second billing (no idle cost)
 - Strong AI/ML focus
 
 ### Weaknesses
+
 - Python-first (less natural for Go/Node tools)
 - No persistent volumes (ephemeral by design)
 - gVisor isolation has syscall limitations
 - No built-in dev environment features
 
 ### Best For
+
 - AI/ML development sandboxes
 - GPU-accelerated workloads
 - Ephemeral code execution needs
@@ -200,9 +226,11 @@ Serverless platform for AI/ML workloads. Runs containers with gVisor isolation. 
 **Cost**: Control plane + node costs
 
 ### Description
+
 Standard container orchestration platform. Can run anywhere (self-hosted, EKS, GKE, AKS). Powerful but complex for dev environments.
 
 ### Integration Points
+
 - Pods for sandbox execution
 - PersistentVolumeClaims for state
 - NetworkPolicies for isolation
@@ -210,18 +238,21 @@ Standard container orchestration platform. Can run anywhere (self-hosted, EKS, G
 - CRDs for sandbox lifecycle management
 
 ### Strengths
+
 - Universal orchestration
 - Rich ecosystem (Helm, operators, etc.)
 - Works with any cloud
 - Strong isolation via Kata/Firecracker containers
 
 ### Weaknesses
+
 - Complex setup and maintenance
 - Overkill for simple dev environments
 - State management is hard (PVCs are not instant)
 - Requires dedicated team for operations
 
 ### Best For
+
 - Large-scale multi-tenant deployments
 - Teams already using K8s
 - Enterprise compliance requirements
@@ -237,26 +268,31 @@ Standard container orchestration platform. Can run anywhere (self-hosted, EKS, G
 **Cost**: Usage-based (BYOC available for enterprise)
 
 ### Description
+
 Managed service for ephemeral, session-based code execution. Firecracker microVMs for isolation. Primarily targets AI agent code execution.
 
 ### Integration Points
+
 - REST API
 - SDKs (Python, TypeScript)
 - BYOC on AWS for enterprise
 - Docker/OCI image support
 
 ### Strengths
+
 - Fast startup
 - Good for ephemeral agent sessions
 - Managed service (no ops)
 
 ### Weaknesses
+
 - Ephemeral only (session length limits)
 - CPU-only (no GPU)
 - Managed only (BYOC is enterprise-only)
 - Limited customization
 
 ### Best For
+
 - Short-lived AI agent code execution
 - Ephemeral sandbox needs
 
@@ -271,25 +307,30 @@ Managed service for ephemeral, session-based code execution. Firecracker microVM
 **Cost**: Usage-based
 
 ### Description
+
 Managed platform with bring-your-own-cloud across AWS, GCP, Azure, and on-premise. Supports both CPU and GPU workloads. Full OCI container support.
 
 ### Integration Points
+
 - Self-serve BYOC
 - Kata Containers for VM-level isolation
 - CPU and GPU workloads
 - Full workload runtime beyond sandboxes
 
 ### Strengths
+
 - BYOC (own cloud, their control plane)
 - VM-level isolation via Kata
 - GPU support
 
 ### Weaknesses
+
 - Managed service (no self-hosted option)
 - Less well-known
 - No dev-specific features
 
 ### Best For
+
 - Teams needing BYOC compliance
 - GPU sandbox workloads
 
@@ -297,16 +338,16 @@ Managed platform with bring-your-own-cloud across AWS, GCP, Azure, and on-premis
 
 ## Comparison Matrix
 
-| Provider | Isolation Model | Startup Time | GPU | Persistent Storage | Multi-Tenant | Self-Hostable | Cost Model |
-|----------|----------------|--------------|-----|-------------------|--------------|---------------|------------|
-| **Local Docker** | Container (shared kernel) | Seconds | Host GPU | Bind mounts | No | Yes | Free |
-| **GitHub Codespaces** | VM | 5-60s | No | Yes (limited) | Yes | No | Per-core-hour |
-| **AWS EC2/ECS** | VM/Container | 10s-2min | Yes | EBS volumes | Yes | Yes | Per-resource |
-| **Fly.io** | Firecracker microVM | 100ms-3s | No | Fly Volumes | Yes | No | Usage-based |
-| **Modal** | gVisor container | Sub-second | Yes (H100) | Ephemeral | Yes | No | Pay-per-sec |
-| **Kubernetes** | Container/Kata | 5-30s | Yes | PVCs | Yes | Yes | Node costs |
-| **E2B** | Firecracker microVM | ~200ms | No | Ephemeral | Yes | Enterprise | Usage-based |
-| **Northflank** | Kata containers | Variable | Yes | Yes | Yes | BYOC | Usage-based |
+| Provider              | Isolation Model           | Startup Time | GPU        | Persistent Storage | Multi-Tenant | Self-Hostable | Cost Model    |
+| --------------------- | ------------------------- | ------------ | ---------- | ------------------ | ------------ | ------------- | ------------- |
+| **Local Docker**      | Container (shared kernel) | Seconds      | Host GPU   | Bind mounts        | No           | Yes           | Free          |
+| **GitHub Codespaces** | VM                        | 5-60s        | No         | Yes (limited)      | Yes          | No            | Per-core-hour |
+| **AWS EC2/ECS**       | VM/Container              | 10s-2min     | Yes        | EBS volumes        | Yes          | Yes           | Per-resource  |
+| **Fly.io**            | Firecracker microVM       | 100ms-3s     | No         | Fly Volumes        | Yes          | No            | Usage-based   |
+| **Modal**             | gVisor container          | Sub-second   | Yes (H100) | Ephemeral          | Yes          | No            | Pay-per-sec   |
+| **Kubernetes**        | Container/Kata            | 5-30s        | Yes        | PVCs               | Yes          | Yes           | Node costs    |
+| **E2B**               | Firecracker microVM       | ~200ms       | No         | Ephemeral          | Yes          | Enterprise    | Usage-based   |
+| **Northflank**        | Kata containers           | Variable     | Yes        | Yes                | Yes          | BYOC          | Usage-based   |
 
 ## Recommendations for Sandbox Manager
 
@@ -322,6 +363,7 @@ Managed platform with bring-your-own-cloud across AWS, GCP, Azure, and on-premis
 ### Important Caveats on Provider Abstraction
 
 The provider abstraction will leak at:
+
 - **Networking**: Fly.io Anycast vs Modal gVisor vs K8s CNI vs local bridge
 - **Storage**: Fly Volumes vs Modal ephemeral vs K8s PVCs vs local bind mounts
 - **Secrets**: Fly secrets vs Modal secrets vs K8s secrets vs Docker secrets

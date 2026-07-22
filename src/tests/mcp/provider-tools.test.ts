@@ -16,11 +16,7 @@ function makeTools(): any[] {
 describe("filterProviderTools", () => {
   it("hides all provider tools when no providers are declared", () => {
     const tools = filterProviderTools(makeTools(), []);
-    expect(tools.map((t) => t.name)).toEqual([
-      "get_sandbox_info",
-      "get_endpoints",
-      "exec_command",
-    ]);
+    expect(tools.map((t) => t.name)).toEqual(["get_sandbox_info", "get_endpoints", "exec_command"]);
   });
 
   it("shows all provider tools when at least one provider is declared", () => {

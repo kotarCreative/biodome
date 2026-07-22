@@ -9,6 +9,7 @@ Startup time is critical for dev environment tools. Developers expect to go from
 ## 1. Docker Build Cache Optimization
 
 ### Layer Ordering (Most Important)
+
 Docker caches layers by instruction. Once a layer is invalidated, all subsequent layers rebuild. Order instructions from least-frequently-changing to most-frequently-changing.
 
 ```
@@ -31,6 +32,7 @@ RUN npm run build
 **Source**: https://docs.docker.com/build/building/best-practices/
 
 ### Cache Mounts (`--mount=type=cache`)
+
 BuildKit cache mounts persist data across builds without including it in any layer. This is the single highest-leverage optimization.
 
 ```dockerfile
@@ -59,6 +61,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 **Source**: https://docs.docker.com/build/cache/optimize
 
 ### External/Registry Cache
+
 For CI environments where builders are ephemeral, push cache to a registry:
 
 ```bash
@@ -73,6 +76,7 @@ docker buildx build --cache-to type=registry,ref=myorg/myapp:cache,mode=max \
 **Source**: https://github.com/moby/buildkit/blob/master/README.md
 
 ### Inline Cache
+
 Embed cache metadata in the image itself -- useful for single-registry workflows:
 
 ```bash
@@ -86,17 +90,20 @@ docker buildx build --cache-to type=inline --push -t myorg/myapp:latest .
 ## 2. Base Image Selection
 
 ### Distroless / Minimal Bases
+
 - **Alpine Linux**: ~5MB. Fast to pull. Uses musl libc (can cause compatibility issues).
 - **Distroless**: Google's minimal images (~20MB). No shell, no package manager. More secure.
 - **Debian Slim**: ~80MB. glibc-based. Good balance of size and compatibility.
 - **Ubuntu LTS**: ~150MB. Largest, most compatible.
 
 ### Specialized Language Images
+
 - `python:3.12-slim` instead of `python:3.12` (saves ~300MB)
 - `node:20-alpine` instead of `node:20` (saves ~400MB)
 - Use `golang:1.22-alpine` for build stages, scratch for runtime
 
 ### Multi-arch Images with Manifests
+
 Use `docker buildx build --platform linux/amd64,linux/arm64` to build once, run anywhere.
 
 ---
@@ -104,6 +111,7 @@ Use `docker buildx build --platform linux/amd64,linux/arm64` to build once, run 
 ## 3. Build Context Minimization
 
 ### .dockerignore
+
 Every file in the build context is sent to the Docker daemon. A large context slows build start.
 
 ```
@@ -123,6 +131,7 @@ __pycache__/
 **Source**: https://docs.docker.com/build/building/best-practices/
 
 ### Bind Mounts for Source
+
 Instead of `COPY . .`, use bind mounts to access source without adding it to layers:
 
 ```dockerfile
@@ -135,6 +144,7 @@ RUN --mount=type=bind,target=. \
 ```
 
 ### Keep Context Directory Clean
+
 Run builds from a directory with only necessary files. Use `docker build -f path/to/Dockerfile .` where `.` is minimal.
 
 ---
@@ -142,6 +152,7 @@ Run builds from a directory with only necessary files. Use `docker build -f path
 ## 4. Prebuilding and Image Caching
 
 ### Prebuilt Dev Images
+
 Build and push dev images to a registry. Users pull instead of building:
 
 ```yaml
@@ -159,6 +170,7 @@ packages:
 ```
 
 ### CI/CD Prebuild Pipelines
+
 Use GitHub Actions or similar to rebuild dev images on config changes:
 
 ```yaml
@@ -166,10 +178,11 @@ Use GitHub Actions or similar to rebuild dev images on config changes:
 on:
   push:
     paths:
-      - 'sandbox/**/*.yaml'
+      - "sandbox/**/*.yaml"
 ```
 
 ### Layer Prefetching
+
 When a user clones a repo and starts the sandbox, the prebuilt image should already be cached from a background pull. Tools can optimize startup by warming the Docker cache for likely images.
 
 ---
@@ -177,6 +190,7 @@ When a user clones a repo and starts the sandbox, the prebuilt image should alre
 ## 5. BuildKit Parallelism
 
 ### Parallel Stage Execution
+
 BuildKit automatically runs independent multi-stage build stages in parallel:
 
 ```dockerfile
@@ -205,6 +219,7 @@ BuildKit runs `frontend` and `backend` stages in parallel, nearly halving build 
 **Source**: https://github.com/moby/buildkit
 
 ### Concurrent Dependency Resolution
+
 BuildKit resolves all dependencies concurrently, not sequentially.
 
 ---
@@ -212,6 +227,7 @@ BuildKit resolves all dependencies concurrently, not sequentially.
 ## 6. Runtime Startup Optimization
 
 ### Application-Level Health Checks
+
 Define health checks for services to signal readiness. Compose waits for dependencies:
 
 ```yaml
@@ -226,6 +242,7 @@ services:
 ```
 
 ### Dependency Ordering
+
 Start services in dependency order (DAG-based), not sequentially:
 
 ```yaml
@@ -239,9 +256,11 @@ services:
 ```
 
 ### Hot Reload vs. Container Rebuild
+
 During active development, prefer bind mounts + hot reload (nodemon, air, etc.) over rebuilding the container image.
 
 ### Snapshot/Restore for Stateful Services
+
 - For services with expensive startup (ML models, large databases), use volume snapshots.
 - Support `docker commit`-style snapshotting or explicit save/restore workflows.
 
@@ -249,16 +268,16 @@ During active development, prefer bind mounts + hot reload (nodemon, air, etc.) 
 
 ## 7. Package Manager Caching Patterns
 
-| Package Manager | Cache Mount Target | Key Flag |
-|----------------|-------------------|----------|
-| apt | `/var/cache/apt` | `--no-install-recommends` |
-| npm | `/root/.npm` | `--prefer-offline` |
-| pip | `/root/.cache/pip` | `--no-cache-dir` (don't cache; use mount) |
-| Go modules | `/go/pkg/mod` | (automatic) |
-| Go build | `/root/.cache/go-build` | (automatic) |
-| Maven/Gradle | `/root/.m2` | `-o` (offline mode) |
-| Rust/Cargo | `/usr/local/cargo/registry` | (automatic) |
-| Bundler | `/usr/local/bundle` | `--deployment` |
+| Package Manager | Cache Mount Target          | Key Flag                                  |
+| --------------- | --------------------------- | ----------------------------------------- |
+| apt             | `/var/cache/apt`            | `--no-install-recommends`                 |
+| npm             | `/root/.npm`                | `--prefer-offline`                        |
+| pip             | `/root/.cache/pip`          | `--no-cache-dir` (don't cache; use mount) |
+| Go modules      | `/go/pkg/mod`               | (automatic)                               |
+| Go build        | `/root/.cache/go-build`     | (automatic)                               |
+| Maven/Gradle    | `/root/.m2`                 | `-o` (offline mode)                       |
+| Rust/Cargo      | `/usr/local/cargo/registry` | (automatic)                               |
+| Bundler         | `/usr/local/bundle`         | `--deployment`                            |
 
 **Source**: https://depot.dev/blog/how-to-use-cache-mount-to-speed-up-docker-builds
 
@@ -275,18 +294,21 @@ During active development, prefer bind mounts + hot reload (nodemon, air, etc.) 
 ### Recommended Strategy
 
 **For first-time setup:**
+
 - Provide prebuilt images in a registry (GitHub Container Registry, Docker Hub)
 - Use `sandbox.{yaml,json}` to define packages, not Dockerfiles
 - Generate Dockerfile from the config automatically
 - Push prebuilt images on config changes (CI/CD)
 
 **For subsequent starts:**
+
 - Keep images cached locally (Docker layer cache)
 - Use BuildKit cache mounts for package manager caches
 - Optimize Dockerfile instruction ordering
 - Keep `.dockerignore` minimal
 
 **For "instant" start (target: <5s):**
+
 - Pull the prebuilt image in the background before the user asks
 - Use image manifests to fetch multi-arch images without specifying platform
 - Consider Firecracker microVMs (Fly.io, E2B) which boot in <500ms from a cached base
@@ -340,7 +362,7 @@ sandbox/ directory
 
 ### Key Design Decisions
 
-1. **Config-driven, not Dockerfile-driven**: Users describe *what* they need (packages, tools), not *how* to install them. The tool generates the optimal Dockerfile.
+1. **Config-driven, not Dockerfile-driven**: Users describe _what_ they need (packages, tools), not _how_ to install them. The tool generates the optimal Dockerfile.
 2. **Automatic Dockerfile optimization**: The generated Dockerfile follows all best practices (layer ordering, cache mounts, `.dockerignore`).
 3. **Prebuild in CI/CD, not CLI**: On config changes, GitHub Actions (or CI of choice) prebuilds the image. The CLI only pulls prebuilt images. Background warmup is a CI concern, not a CLI feature.
 4. **BuildKit Bake for parallel multi-target builds**: Use `docker buildx bake` with HCL/JSON definition for dev/test/prod images in one invocation.
@@ -349,21 +371,21 @@ sandbox/ directory
 
 ### MVP Scope (v1) vs Future
 
-| Feature | v1 | Future |
-|---------|----|--------|
-| Local Docker provider | ✅ | — |
-| Config → Dockerfile generator | ✅ | — |
-| Config → docker-compose.yaml generator | ✅ | — |
-| Config → devcontainer.json generator | ✅ | — |
-| Registry cache (buildx --cache-to/from) | ✅ | — |
-| BuildKit cache mounts (apt, npm, pip, Go) | ✅ | — |
-| Lock file (sandbox.lock) | ✅ | — |
-| Prebuild CI/CD workflow generation | ✅ | — |
-| Background CLI warmup | ❌ | v0.2 |
-| BuildKit Bake multi-target | ❌ | v0.2 |
-| Fly.io / Modal providers | ❌ | v0.3 |
-| stargz/nydus lazy loading | ❌ | v0.3 |
-| Firecracker / Kata Containers | ❌ | v0.4 |
+| Feature                                   | v1  | Future |
+| ----------------------------------------- | --- | ------ |
+| Local Docker provider                     | ✅  | —      |
+| Config → Dockerfile generator             | ✅  | —      |
+| Config → docker-compose.yaml generator    | ✅  | —      |
+| Config → devcontainer.json generator      | ✅  | —      |
+| Registry cache (buildx --cache-to/from)   | ✅  | —      |
+| BuildKit cache mounts (apt, npm, pip, Go) | ✅  | —      |
+| Lock file (sandbox.lock)                  | ✅  | —      |
+| Prebuild CI/CD workflow generation        | ✅  | —      |
+| Background CLI warmup                     | ❌  | v0.2   |
+| BuildKit Bake multi-target                | ❌  | v0.2   |
+| Fly.io / Modal providers                  | ❌  | v0.3   |
+| stargz/nydus lazy loading                 | ❌  | v0.3   |
+| Firecracker / Kata Containers             | ❌  | v0.4   |
 
 ## Sources
 

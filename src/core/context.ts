@@ -1,7 +1,7 @@
-import { existsSync, readFileSync } from "node:fs"
-import { execSync } from "node:child_process"
-import { join } from "node:path"
-import { Schema } from "effect"
+import { existsSync, readFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { join } from "node:path";
+import { Schema } from "effect";
 import {
   createPlan,
   Plan,
@@ -36,7 +36,7 @@ import {
   CodexHarness,
   ClaudeHarnessSpecSchema,
   ClaudeHarness,
-} from "./plan.js"
+} from "./plan.js";
 import {
   FeatureContext,
   ProcessSpec,
@@ -70,155 +70,165 @@ import {
   CodexHarnessSpec,
   ClaudeHarnessSpec,
   LlmProviderSpec,
-} from "./feature.js"
-import { BuildContext } from "./build-context.js"
-import { languageHandlers, getDefaultBaseImage } from "./languages.js"
-import { formatPackage } from "./packages.js"
-import { serviceConfigs, defaultImage } from "./services.js"
-import { toolHandlers } from "./tools.js"
-import { ValidationError } from "./errors.js"
+} from "./feature.js";
+import { BuildContext } from "./build-context.js";
+import { languageHandlers, getDefaultBaseImage } from "./languages.js";
+import { formatPackage } from "./packages.js";
+import { serviceConfigs, defaultImage } from "./services.js";
+import { toolHandlers } from "./tools.js";
+import { ValidationError } from "./errors.js";
 
 function validatePort(value: unknown, label: string): void {
-  if (value === undefined) return
+  if (value === undefined) return;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 65535) {
-    throw new ValidationError({ message: `${label} must be an integer between 1 and 65535` })
+    throw new ValidationError({ message: `${label} must be an integer between 1 and 65535` });
   }
 }
 
 // POSIX-ish env var name: letters, digits, underscore; not starting with a digit.
-const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
+const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function validateEnvKey(key: string, label: string): void {
   if (typeof key !== "string" || !ENV_KEY_PATTERN.test(key)) {
     throw new ValidationError({
       message: `${label} must match ${ENV_KEY_PATTERN.source}`,
-    })
+    });
   }
 }
 
 // Docker Compose interpolation ${VAR:-default} cannot contain characters that
 // terminate or alter the interpolation (}:, :, ?, ${) or control characters.
-const SAFE_INTERPOLATION_DEFAULT = /^[^:${}?\x00-\x1f\x7f]+$/
+const SAFE_INTERPOLATION_DEFAULT = /^[^:${}?\x00-\x1f\x7f]+$/; // oxlint-disable-line no-control-regex
 
 function validateInterpolationDefault(value: string | undefined, label: string): void {
-  if (value === undefined) return
+  if (value === undefined) return;
   if (!SAFE_INTERPOLATION_DEFAULT.test(value)) {
     throw new ValidationError({
       message: `${label} contains characters that are not safe inside a Docker Compose interpolation default`,
-    })
+    });
   }
 }
 
-function validateEnv(env: Record<string, unknown>, label: string): asserts env is Record<string, string> {
+function validateEnv(
+  env: Record<string, unknown>,
+  label: string,
+): asserts env is Record<string, string> {
   if (typeof env !== "object" || env === null || Array.isArray(env)) {
-    throw new ValidationError({ message: `${label} must be a record of strings` })
+    throw new ValidationError({ message: `${label} must be a record of strings` });
   }
   for (const [key, value] of Object.entries(env)) {
     if (typeof value !== "string") {
-      throw new ValidationError({ message: `${label}.${key} must be a string` })
+      throw new ValidationError({ message: `${label}.${key} must be a string` });
     }
   }
 }
 
 export class SandboxContext implements FeatureContext, BuildContext {
-  plan: Plan
-  private rootDir: string
-  private dryRun: boolean
+  plan: Plan;
+  private rootDir: string;
+  private dryRun: boolean;
 
   constructor(rootDir: string, project: string, dryRun = false) {
-    this.rootDir = rootDir
-    this.dryRun = dryRun
-    this.plan = createPlan(project)
+    this.rootDir = rootDir;
+    this.dryRun = dryRun;
+    this.plan = createPlan(project);
   }
 
   addProcess(spec: ProcessSpec): void {
-    const validated = Schema.decodeSync(ProcessSpecSchema)(spec)
-    if (validated.port !== undefined) validatePort(validated.port, `Process ${validated.name}: port`)
+    const validated = Schema.decodeSync(ProcessSpecSchema)(spec);
+    if (validated.port !== undefined)
+      validatePort(validated.port, `Process ${validated.name}: port`);
     if (validated.ports) {
       for (const [portName, port] of Object.entries(validated.ports)) {
-        validatePort(port, `Process ${validated.name}: ports.${portName}`)
+        validatePort(port, `Process ${validated.name}: ports.${portName}`);
       }
     }
     if (validated.environment) {
-      validateEnv(validated.environment as Record<string, unknown>, `Process ${validated.name}: environment`)
+      validateEnv(
+        validated.environment as Record<string, unknown>,
+        `Process ${validated.name}: environment`,
+      );
     }
 
-    this.assertUniqueProcessName(validated.name)
-    const proc = this.normalizeProcess(validated, "daemon", "start.post")
-    this.plan.runtime.processes.push(proc)
-    this.mergeProcessEnv(proc)
+    this.assertUniqueProcessName(validated.name);
+    const proc = this.normalizeProcess(validated, "daemon", "start.post");
+    this.plan.runtime.processes.push(proc);
+    this.mergeProcessEnv(proc);
   }
 
   addHook(spec: HookSpec): void {
-    const validated = Schema.decodeSync(HookSpecSchema)(spec)
-    if (validated.port !== undefined) validatePort(validated.port, `Hook ${validated.name}: port`)
+    const validated = Schema.decodeSync(HookSpecSchema)(spec);
+    if (validated.port !== undefined) validatePort(validated.port, `Hook ${validated.name}: port`);
     if (validated.ports) {
       for (const [portName, port] of Object.entries(validated.ports)) {
-        validatePort(port, `Hook ${validated.name}: ports.${portName}`)
+        validatePort(port, `Hook ${validated.name}: ports.${portName}`);
       }
     }
     if (validated.environment) {
-      validateEnv(validated.environment as Record<string, unknown>, `Hook ${validated.name}: environment`)
+      validateEnv(
+        validated.environment as Record<string, unknown>,
+        `Hook ${validated.name}: environment`,
+      );
     }
 
-    this.assertUniqueProcessName(validated.name)
-    const proc = this.normalizeProcess(validated, "oneshot", validated.startOn as LifecyclePoint)
-    this.plan.runtime.processes.push(proc)
-    this.mergeProcessEnv(proc)
+    this.assertUniqueProcessName(validated.name);
+    const proc = this.normalizeProcess(validated, "oneshot", validated.startOn as LifecyclePoint);
+    this.plan.runtime.processes.push(proc);
+    this.mergeProcessEnv(proc);
   }
 
   private assertUniqueProcessName(name: string): void {
     if (this.plan.runtime.processes.some((p) => p.name === name)) {
-      throw new ValidationError({ message: `Duplicate process or hook name: ${name}` })
+      throw new ValidationError({ message: `Duplicate process or hook name: ${name}` });
     }
   }
 
   addLanguage(name: string, options: LanguageOptions = {}): void {
     if (!languageHandlers[name]) {
-      return
+      return;
     }
-    const existing = this.plan.build.languageRequests.findIndex((r) => r.name === name)
+    const existing = this.plan.build.languageRequests.findIndex((r) => r.name === name);
     if (existing >= 0) {
-      this.plan.build.languageRequests[existing] = { name, options }
+      this.plan.build.languageRequests[existing] = { name, options };
     } else {
-      this.plan.build.languageRequests.push({ name, options })
+      this.plan.build.languageRequests.push({ name, options });
     }
   }
 
   finalizeBuildPlan(): void {
-    const requests = this.plan.build.languageRequests
+    const requests = this.plan.build.languageRequests;
 
     if (requests.length === 0) {
-      this.setBaseImage(getDefaultBaseImage())
-      return
+      this.setBaseImage(getDefaultBaseImage());
+      return;
     }
 
     if (requests.length === 1) {
-      const { name, options } = requests[0]
-      const handler = languageHandlers[name]
+      const { name, options } = requests[0];
+      const handler = languageHandlers[name];
       if (handler) {
-        this.setBaseImage(handler.baseImage(options))
-        handler.installDependencies(this, options)
+        this.setBaseImage(handler.baseImage(options));
+        handler.installDependencies(this, options);
       }
-      return
+      return;
     }
 
     // Multiple languages: use the neutral base image and install every runtime.
-    this.setBaseImage(getDefaultBaseImage())
+    this.setBaseImage(getDefaultBaseImage());
     for (const { name, options } of requests) {
-      const handler = languageHandlers[name]
-      if (!handler) continue
-      handler.installRuntime(this, options)
-      handler.installDependencies(this, options)
+      const handler = languageHandlers[name];
+      if (!handler) continue;
+      handler.installRuntime(this, options);
+      handler.installDependencies(this, options);
     }
   }
 
   addPackage(manager: string, name: string, options: PackageOptions = {}): void {
     if (!name || typeof name !== "string") {
-      throw new ValidationError({ message: "Package requires a non-empty string name" })
+      throw new ValidationError({ message: "Package requires a non-empty string name" });
     }
-    const registryFlag = options.indexUrl ? ` --registry ${options.indexUrl}` : ""
-    const indexUrlFlag = options.indexUrl ? ` --index-url ${options.indexUrl}` : ""
+    const registryFlag = options.indexUrl ? ` --registry ${options.indexUrl}` : "";
+    const indexUrlFlag = options.indexUrl ? ` --index-url ${options.indexUrl}` : "";
 
     const commands: Record<string, string> = {
       npm: `npm install -g${registryFlag} ${formatPackage(name, options)}`,
@@ -226,52 +236,52 @@ export class SandboxContext implements FeatureContext, BuildContext {
       cargo: `cargo install ${name}`,
       go: `go install ${name}@latest`,
       gem: `gem install ${name}`,
-    }
+    };
 
-    const command = commands[manager]
+    const command = commands[manager];
     if (!command) {
-      throw new ValidationError({ message: `Unknown package manager ${manager}` })
+      throw new ValidationError({ message: `Unknown package manager ${manager}` });
     }
-    this.addLanguageSnippet(`RUN ${command}`)
+    this.addLanguageSnippet(`RUN ${command}`);
   }
 
   addTool(name: string, _options: ToolOptions = {}): void {
     if (!name || typeof name !== "string") {
-      throw new ValidationError({ message: "Tool requires a non-empty string name" })
+      throw new ValidationError({ message: "Tool requires a non-empty string name" });
     }
-    const handler = toolHandlers[name]
+    const handler = toolHandlers[name];
     if (handler) {
-      handler(this)
+      handler(this);
     } else {
       // Unknown tools are treated as apt packages.
-      this.addAptPackage(name)
+      this.addAptPackage(name);
     }
   }
 
   addAptPackage(name: string): void {
     if (!this.plan.build.aptPackages.includes(name)) {
-      this.plan.build.aptPackages.push(name)
+      this.plan.build.aptPackages.push(name);
     }
   }
 
   addService(name: string, options: ServiceOptions = {}): void {
     if (!name || typeof name !== "string") {
-      throw new ValidationError({ message: "Service requires a non-empty string name" })
+      throw new ValidationError({ message: "Service requires a non-empty string name" });
     }
-    const validated = Schema.decodeSync(ServiceOptionsSchema)(options)
-    validatePort(validated.port, `Service ${name}: port`)
+    const validated = Schema.decodeSync(ServiceOptionsSchema)(options);
+    validatePort(validated.port, `Service ${name}: port`);
     if (validated.environment) {
-      validateEnv(validated.environment as Record<string, unknown>, `Service ${name}: environment`)
+      validateEnv(validated.environment as Record<string, unknown>, `Service ${name}: environment`);
     }
 
     if (this.plan.runtime.services.some((s) => s.name === name)) {
-      throw new ValidationError({ message: `Duplicate service name: ${name}` })
+      throw new ValidationError({ message: `Duplicate service name: ${name}` });
     }
 
-    let type = name
+    let type = name;
     if (validated.image) {
       // Custom image-based service; treat as a generic container.
-      type = "container"
+      type = "container";
     }
 
     const svc: Service = {
@@ -283,30 +293,34 @@ export class SandboxContext implements FeatureContext, BuildContext {
       ports: validated.port ? [{ host: validated.port, container: validated.port }] : [],
       volumes: [],
       networks: ["biodome"],
-    }
+    };
 
-    const config = serviceConfigs[type]
+    const config = serviceConfigs[type];
     if (config) {
-      config(svc, validated)
+      config(svc, validated);
     }
 
-    this.plan.runtime.services.push(svc)
+    this.plan.runtime.services.push(svc);
     for (const vol of svc.volumes) {
       if (!vol.host.startsWith("/") && !vol.host.startsWith("./") && !vol.host.startsWith("~")) {
-        this.plan.runtime.namedVolumes.push({ name: vol.host })
+        this.plan.runtime.namedVolumes.push({ name: vol.host });
       }
     }
   }
 
   addEndpoint(spec: EndpointSpec): void {
-    const validated = Schema.decodeSync(EndpointSpecSchema)(spec)
-    if (validated.port !== undefined) validatePort(validated.port, `Endpoint ${validated.name}: port`)
+    const validated = Schema.decodeSync(EndpointSpecSchema)(spec);
+    if (validated.port !== undefined)
+      validatePort(validated.port, `Endpoint ${validated.name}: port`);
     if (validated.metadata) {
-      validateEnv(validated.metadata as Record<string, unknown>, `Endpoint ${validated.name}: metadata`)
+      validateEnv(
+        validated.metadata as Record<string, unknown>,
+        `Endpoint ${validated.name}: metadata`,
+      );
     }
 
     if (this.plan.runtime.endpoints.some((e) => e.name === validated.name)) {
-      throw new ValidationError({ message: `Duplicate endpoint name: ${validated.name}` })
+      throw new ValidationError({ message: `Duplicate endpoint name: ${validated.name}` });
     }
 
     this.plan.runtime.endpoints.push({
@@ -316,17 +330,31 @@ export class SandboxContext implements FeatureContext, BuildContext {
       port: validated.port,
       credentials: validated.credentials ? { ...validated.credentials } : undefined,
       metadata: validated.metadata ? { ...validated.metadata } : undefined,
-    })
+    });
   }
 
   addProvider(spec: ProviderSpec): void {
-    const validated = Schema.decodeSync(ProviderSpecSchema)(spec)
+    const validated = Schema.decodeSync(ProviderSpecSchema)(spec);
     if (validated.metadata) {
-      validateEnv(validated.metadata as Record<string, unknown>, `Provider ${validated.name}: metadata`)
+      validateEnv(
+        validated.metadata as Record<string, unknown>,
+        `Provider ${validated.name}: metadata`,
+      );
     }
 
     if (this.plan.runtime.providers.some((p) => p.name === validated.name)) {
-      throw new ValidationError({ message: `Duplicate provider name: ${validated.name}` })
+      throw new ValidationError({ message: `Duplicate provider name: ${validated.name}` });
+    }
+
+    // Reject literal credential values for providers; require env refs.
+    if (validated.credentials) {
+      for (const [key, value] of Object.entries(validated.credentials)) {
+        if (typeof value === "string") {
+          throw new ValidationError({
+            message: `Provider ${validated.name}: credentials.${key} must be an environment reference ({ env: "VAR" }), not a literal string`,
+          });
+        }
+      }
     }
 
     const provider: Provider = {
@@ -340,15 +368,18 @@ export class SandboxContext implements FeatureContext, BuildContext {
       authCredential: validated.authCredential,
       credentials: validated.credentials ? { ...validated.credentials } : undefined,
       metadata: validated.metadata ? { ...validated.metadata } : undefined,
-    }
-    this.plan.runtime.providers.push(provider)
+    };
+    this.plan.runtime.providers.push(provider);
   }
 
   addMcpProvider(spec: McpProviderSpec): void {
-    if (!spec.name) throw new ValidationError({ message: "MCP provider requires a name" })
-    if (!spec.mcpUrl) throw new ValidationError({ message: `Provider ${spec.name}: mcpUrl is required` })
+    if (!spec.name) throw new ValidationError({ message: "MCP provider requires a name" });
+    if (!spec.mcpUrl)
+      throw new ValidationError({ message: `Provider ${spec.name}: mcpUrl is required` });
     if (!spec.credentials?.token) {
-      throw new ValidationError({ message: `Provider ${spec.name}: credentials.token is required` })
+      throw new ValidationError({
+        message: `Provider ${spec.name}: credentials.token is required`,
+      });
     }
     this.addProvider({
       name: spec.name,
@@ -360,13 +391,15 @@ export class SandboxContext implements FeatureContext, BuildContext {
       project: spec.project,
       credentials: { token: spec.credentials.token },
       metadata: spec.metadata,
-    })
+    });
   }
 
   addJiraProvider(spec: JiraProviderSpec): void {
-    if (!spec.name) throw new ValidationError({ message: "Jira provider requires a name" })
+    if (!spec.name) throw new ValidationError({ message: "Jira provider requires a name" });
     if (!spec.credentials?.token) {
-      throw new ValidationError({ message: `Jira provider ${spec.name}: credentials.token is required` })
+      throw new ValidationError({
+        message: `Jira provider ${spec.name}: credentials.token is required`,
+      });
     }
     this.addMcpProvider({
       name: spec.name,
@@ -375,13 +408,15 @@ export class SandboxContext implements FeatureContext, BuildContext {
       project: spec.project,
       credentials: spec.credentials,
       metadata: spec.metadata,
-    })
+    });
   }
 
   addLinearProvider(spec: LinearProviderSpec): void {
-    if (!spec.name) throw new ValidationError({ message: "Linear provider requires a name" })
+    if (!spec.name) throw new ValidationError({ message: "Linear provider requires a name" });
     if (!spec.credentials?.token) {
-      throw new ValidationError({ message: `Linear provider ${spec.name}: credentials.token is required` })
+      throw new ValidationError({
+        message: `Linear provider ${spec.name}: credentials.token is required`,
+      });
     }
     this.addMcpProvider({
       name: spec.name,
@@ -390,13 +425,15 @@ export class SandboxContext implements FeatureContext, BuildContext {
       project: spec.team,
       credentials: spec.credentials,
       metadata: spec.metadata,
-    })
+    });
   }
 
   addSentryProvider(spec: SentryProviderSpec): void {
-    if (!spec.name) throw new ValidationError({ message: "Sentry provider requires a name" })
+    if (!spec.name) throw new ValidationError({ message: "Sentry provider requires a name" });
     if (!spec.credentials?.token) {
-      throw new ValidationError({ message: `Sentry provider ${spec.name}: credentials.token is required` })
+      throw new ValidationError({
+        message: `Sentry provider ${spec.name}: credentials.token is required`,
+      });
     }
     this.addMcpProvider({
       name: spec.name,
@@ -404,14 +441,17 @@ export class SandboxContext implements FeatureContext, BuildContext {
       mcpUrl: spec.mcpUrl ?? "https://mcp.sentry.dev/mcp",
       credentials: spec.credentials,
       metadata: spec.metadata,
-    })
+    });
   }
 
   addSlackProvider(spec: SlackProviderSpec): void {
-    if (!spec.name) throw new ValidationError({ message: "Slack provider requires a name" })
-    if (!spec.mcpUrl) throw new ValidationError({ message: `Slack provider ${spec.name}: mcpUrl is required` })
+    if (!spec.name) throw new ValidationError({ message: "Slack provider requires a name" });
+    if (!spec.mcpUrl)
+      throw new ValidationError({ message: `Slack provider ${spec.name}: mcpUrl is required` });
     if (!spec.credentials?.token) {
-      throw new ValidationError({ message: `Slack provider ${spec.name}: credentials.token is required` })
+      throw new ValidationError({
+        message: `Slack provider ${spec.name}: credentials.token is required`,
+      });
     }
     this.addMcpProvider({
       name: spec.name,
@@ -419,13 +459,15 @@ export class SandboxContext implements FeatureContext, BuildContext {
       mcpUrl: spec.mcpUrl,
       credentials: spec.credentials,
       metadata: spec.metadata,
-    })
+    });
   }
 
   addGithubProvider(spec: GithubProviderSpec): void {
-    if (!spec.name) throw new ValidationError({ message: "GitHub provider requires a name" })
+    if (!spec.name) throw new ValidationError({ message: "GitHub provider requires a name" });
     if (!spec.credentials?.token) {
-      throw new ValidationError({ message: `GitHub provider ${spec.name}: credentials.token is required` })
+      throw new ValidationError({
+        message: `GitHub provider ${spec.name}: credentials.token is required`,
+      });
     }
     this.addMcpProvider({
       name: spec.name,
@@ -433,37 +475,37 @@ export class SandboxContext implements FeatureContext, BuildContext {
       mcpUrl: spec.mcpUrl ?? "https://api.githubcopilot.com/mcp/",
       credentials: spec.credentials,
       metadata: spec.metadata,
-    })
+    });
   }
 
   addEnv(key: string, spec: EnvSpec): void {
-    validateEnvKey(key, `Env ${key}: key`)
-    const validated = Schema.decodeSync(EnvSpecSchema)(spec)
+    validateEnvKey(key, `Env ${key}: key`);
+    const validated = Schema.decodeSync(EnvSpecSchema)(spec);
 
-    const hasValue = validated.value !== undefined
-    const hasFrom = validated.from !== undefined
+    const hasValue = validated.value !== undefined;
+    const hasFrom = validated.from !== undefined;
     if (hasValue === hasFrom) {
       throw new ValidationError({
         message: `Env ${key}: provide exactly one of 'value' (literal) or 'from' (host passthrough)`,
-      })
+      });
     }
     if (hasFrom && validated.scope === "build") {
       throw new ValidationError({
         message: `Env ${key}: passthrough ('from') variables cannot be build-scoped because Docker builds cannot read the host environment. Use scope "runtime" or "both".`,
-      })
+      });
     }
     if (hasValue && (validated.required || validated.default !== undefined)) {
       throw new ValidationError({
         message: `Env ${key}: 'required' and 'default' only apply to passthrough ('from') variables`,
-      })
+      });
     }
-    validateInterpolationDefault(validated.default, `Env ${key}: default`)
+    validateInterpolationDefault(validated.default, `Env ${key}: default`);
 
     if (this.plan.runtime.envVars.some((e) => e.key === key)) {
-      throw new ValidationError({ message: `Duplicate env variable: ${key}` })
+      throw new ValidationError({ message: `Duplicate env variable: ${key}` });
     }
 
-    const scope = validated.scope || "runtime"
+    const scope = validated.scope || "runtime";
     const envVar: EnvVar = hasValue
       ? { key, scope, value: validated.value }
       : {
@@ -472,8 +514,8 @@ export class SandboxContext implements FeatureContext, BuildContext {
           from: { env: validated.from!.env },
           required: validated.required,
           default: validated.default,
-        }
-    this.plan.runtime.envVars.push(envVar)
+        };
+    this.plan.runtime.envVars.push(envVar);
 
     // Literal values are mirrored into the flat environment maps so they flow
     // into the Dockerfile ENV layer / compose exactly as before. Passthrough
@@ -481,24 +523,24 @@ export class SandboxContext implements FeatureContext, BuildContext {
     // or plan.json and are resolved from the host at `up` time.
     if (hasValue) {
       if (scope === "build" || scope === "both") {
-        this.plan.build.environment[key] = validated.value!
+        this.plan.build.environment[key] = validated.value!;
       }
       if (scope === "runtime" || scope === "both") {
-        this.plan.runtime.environment[key] = validated.value!
+        this.plan.runtime.environment[key] = validated.value!;
       }
     }
   }
 
   addVolume(spec: VolumeSpec): void {
-    const validated = Schema.decodeSync(VolumeSpecSchema)(spec)
+    const validated = Schema.decodeSync(VolumeSpecSchema)(spec);
 
     if (this.plan.runtime.volumes.some((v) => v.name === validated.name)) {
-      throw new ValidationError({ message: `Duplicate volume name: ${validated.name}` })
+      throw new ValidationError({ message: `Duplicate volume name: ${validated.name}` });
     }
 
-    this.validateVolumeSpec(validated)
+    this.validateVolumeSpec(validated);
 
-    const readOnly = validated.readOnly || validated.options?.readOnly === "true"
+    const readOnly = validated.readOnly || validated.options?.readOnly === "true";
 
     const volume: Volume = {
       name: validated.name,
@@ -522,28 +564,28 @@ export class SandboxContext implements FeatureContext, BuildContext {
       proxy: validated.proxy,
       readOnly,
       allowedPaths: validated.allowedPaths ? [...validated.allowedPaths] : undefined,
-    }
+    };
 
-    this.plan.runtime.volumes.push(volume)
+    this.plan.runtime.volumes.push(volume);
 
     if (validated.proxy) {
       // Proxy volumes are accessed through the MCP server, not mounted.
-      return
+      return;
     }
 
     if (validated.type === "local") {
       // Local bind mounts are emitted directly in compose; nothing else to do.
-      return
+      return;
     }
 
     // Cloud-backed volumes use rclone. Ensure it and FUSE are available.
-    this.addAptPackage("rclone")
-    this.addAptPackage("fuse3")
+    this.addAptPackage("rclone");
+    this.addAptPackage("fuse3");
 
-    const env = this.buildRcloneEnv(volume)
+    const env = this.buildRcloneEnv(volume);
 
     // Bucket/folder mounts run as a daemon process.
-    const remote = this.rcloneRemote(volume)
+    const remote = this.rcloneRemote(volume);
     const command = [
       "rclone",
       "mount",
@@ -552,37 +594,37 @@ export class SandboxContext implements FeatureContext, BuildContext {
       "--allow-other",
       "--vfs-cache-mode",
       "writes",
-    ]
+    ];
     if (readOnly) {
-      command.push("--read-only")
+      command.push("--read-only");
     }
     this.addProcess({
       name: `rclone-mount-${validated.name}`,
       command,
       environment: env,
-    })
+    });
   }
 
   addRepo(spec: RepoSpec): void {
-    const validated = Schema.decodeSync(RepoSpecSchema)(spec)
+    const validated = Schema.decodeSync(RepoSpecSchema)(spec);
 
     if (this.plan.runtime.repos.some((r) => r.name === validated.name)) {
-      throw new ValidationError({ message: `Duplicate repo name: ${validated.name}` })
+      throw new ValidationError({ message: `Duplicate repo name: ${validated.name}` });
     }
 
     if (validated.credentials) {
       for (const [key, value] of Object.entries(validated.credentials)) {
-        if (value === undefined) continue
+        if (value === undefined) continue;
         if (typeof value === "string") {
           throw new ValidationError({
             message: `Repo ${validated.name}: credentials.${key} must be an environment reference ({ env: "VAR" }), not a literal string`,
-          })
+          });
         }
       }
     }
 
-    const path = this.normalizeRepoPath(validated.path, validated.name)
-    const branch = validated.branch || "main"
+    const path = this.normalizeRepoPath(validated.path, validated.name);
+    const branch = validated.branch || "main";
 
     const repo: Repo = {
       name: validated.name,
@@ -591,12 +633,12 @@ export class SandboxContext implements FeatureContext, BuildContext {
       branch,
       depth: validated.depth,
       credentials: validated.credentials ? { ...validated.credentials } : undefined,
-    }
-    this.plan.runtime.repos.push(repo)
+    };
+    this.plan.runtime.repos.push(repo);
 
     // Repos need git and ssh clients to clone/pull.
-    this.addAptPackage("git")
-    this.addAptPackage("openssh-client")
+    this.addAptPackage("git");
+    this.addAptPackage("openssh-client");
 
     // Run a sync hook after the container starts so the repo is cloned (or
     // updated) in the live workspace mount.
@@ -604,27 +646,27 @@ export class SandboxContext implements FeatureContext, BuildContext {
       name: `repo-sync-${validated.name}`,
       command: ["sh", `/workspace/.biodome-build/repos/${validated.name}.sh`],
       startOn: "start.post",
-    })
+    });
   }
 
   addOpencodeHarness(spec: AgentHarnessSpec): void {
-    const validated = Schema.decodeSync(AgentHarnessSpecSchema)(spec)
+    const validated = Schema.decodeSync(AgentHarnessSpecSchema)(spec);
 
     if (this.plan.runtime.agentHarnesses.some((h) => h.name === validated.name)) {
-      throw new ValidationError({ message: `Duplicate agent harness name: ${validated.name}` })
+      throw new ValidationError({ message: `Duplicate agent harness name: ${validated.name}` });
     }
 
-    const port = validated.port ?? 3002
-    validatePort(port, `Agent harness ${validated.name}: port`)
+    const port = validated.port ?? 3002;
+    validatePort(port, `Agent harness ${validated.name}: port`);
 
     const mcpServers = validated.mcpServers ?? {
       biodome: { url: `http://localhost:${this.plan.build.mcpPort}` },
-    }
+    };
 
     const telemetry = {
       enabled: validated.telemetry?.enabled ?? true,
       path: validated.telemetry?.path ?? "/workspace/.biodome-build/logs/opencode-events.jsonl",
-    }
+    };
 
     const harness: AgentHarness = {
       name: validated.name,
@@ -633,25 +675,22 @@ export class SandboxContext implements FeatureContext, BuildContext {
       mcpServers,
       telemetry,
       config: validated.config ? { ...validated.config } : {},
-    }
-    this.plan.runtime.agentHarnesses.push(harness)
+    };
+    this.plan.runtime.agentHarnesses.push(harness);
 
     // OpenCode CLI runs on Bun and is distributed through npm as opencode-ai.
-    this.addLanguage("node", { version: "20" })
-    this.addAptPackage("curl")
-    this.addAptPackage("ca-certificates")
-    this.addAptPackage("unzip")
-    this.addLanguageSnippet("RUN npm install -g opencode-ai")
+    this.addLanguage("node", { version: "20" });
+    this.addAptPackage("curl");
+    this.addAptPackage("ca-certificates");
+    this.addAptPackage("unzip");
+    this.addLanguageSnippet("RUN npm install -g opencode-ai");
     this.addLanguageSnippet(
-      "RUN curl -fsSL -o /tmp/bun-install.sh https://bun.sh/install && bash /tmp/bun-install.sh && rm /tmp/bun-install.sh && ln -sf /root/.bun/bin/bun /usr/local/bin/bun"
-    )
+      "RUN curl -fsSL -o /tmp/bun-install.sh https://bun.sh/install && bash /tmp/bun-install.sh && rm /tmp/bun-install.sh && ln -sf /root/.bun/bin/bun /usr/local/bin/bun",
+    );
 
     this.addProcess({
       name: `opencode-agent-${validated.name}`,
-      command: [
-        "sh",
-        `/workspace/.biodome-build/opencode-homes/${validated.name}/start.sh`,
-      ],
+      command: ["sh", `/workspace/.biodome-build/opencode-homes/${validated.name}/start.sh`],
       port,
       healthCheck: { type: "http", url: `http://localhost:${port}/health` },
       environment: {
@@ -662,26 +701,28 @@ export class SandboxContext implements FeatureContext, BuildContext {
         HOME: `/workspace/.biodome-build/opencode-homes/${validated.name}`,
         OPENCODE_TELEMETRY_PATH: telemetry.path,
       },
-    })
+    });
   }
 
   addPiHarness(spec: PiHarnessSpec): void {
-    const validated = Schema.decodeSync(PiHarnessSpecSchema)(spec)
+    const validated = Schema.decodeSync(PiHarnessSpecSchema)(spec);
 
     if (this.plan.runtime.piHarnesses.some((h) => h.name === validated.name)) {
-      throw new ValidationError({ message: `Duplicate Pi harness name: ${validated.name}` })
+      throw new ValidationError({ message: `Duplicate Pi harness name: ${validated.name}` });
     }
 
     if (validated.apiKey && typeof validated.apiKey === "string") {
       throw new ValidationError({
         message: `Pi harness ${validated.name}: apiKey must be an environment reference ({ env: "VAR" }), not a literal string`,
-      })
+      });
     }
 
     const telemetry = {
       enabled: validated.telemetry?.enabled ?? true,
-      path: validated.telemetry?.path ?? `/workspace/.biodome-build/logs/pi-${validated.name}-events.jsonl`,
-    }
+      path:
+        validated.telemetry?.path ??
+        `/workspace/.biodome-build/logs/pi-${validated.name}-events.jsonl`,
+    };
 
     const harness: PiHarness = {
       name: validated.name,
@@ -697,44 +738,46 @@ export class SandboxContext implements FeatureContext, BuildContext {
       packages: validated.packages ? [...validated.packages] : undefined,
       telemetry,
       config: validated.config ? { ...validated.config } : {},
-    }
-    this.plan.runtime.piHarnesses.push(harness)
+    };
+    this.plan.runtime.piHarnesses.push(harness);
 
     // Pi is distributed as an npm package.
-    this.addLanguage("node", { version: "20" })
-    this.addLanguageSnippet("RUN npm install -g @earendil-works/pi-coding-agent")
+    this.addLanguage("node", { version: "20" });
+    this.addLanguageSnippet("RUN npm install -g @earendil-works/pi-coding-agent");
 
     // Passthrough the API key env reference so Docker Compose injects it into
     // the container; the wrapper script then exports it for pi.
     if (validated.apiKey && typeof validated.apiKey === "object" && "env" in validated.apiKey) {
-      this.addEnv(validated.apiKey.env, { from: { env: validated.apiKey.env } })
+      this.addEnv(validated.apiKey.env, { from: { env: validated.apiKey.env } });
     }
   }
 
   addCodexHarness(spec: CodexHarnessSpec): void {
-    const validated = Schema.decodeSync(CodexHarnessSpecSchema)(spec)
+    const validated = Schema.decodeSync(CodexHarnessSpecSchema)(spec);
 
     if (this.plan.runtime.codexHarnesses.some((h) => h.name === validated.name)) {
-      throw new ValidationError({ message: `Duplicate Codex harness name: ${validated.name}` })
+      throw new ValidationError({ message: `Duplicate Codex harness name: ${validated.name}` });
     }
 
     if (validated.apiKey && typeof validated.apiKey === "string") {
       throw new ValidationError({
         message: `Codex harness ${validated.name}: apiKey must be an environment reference ({ env: "VAR" }), not a literal string`,
-      })
+      });
     }
 
-    const port = validated.port ?? 3003
-    validatePort(port, `Codex harness ${validated.name}: port`)
+    const port = validated.port ?? 3003;
+    validatePort(port, `Codex harness ${validated.name}: port`);
 
     const mcpServers = validated.mcpServers ?? {
       biodome: { url: `http://localhost:${this.plan.build.mcpPort}` },
-    }
+    };
 
     const telemetry = {
       enabled: validated.telemetry?.enabled ?? true,
-      path: validated.telemetry?.path ?? `/workspace/.biodome-build/logs/codex-${validated.name}-events.jsonl`,
-    }
+      path:
+        validated.telemetry?.path ??
+        `/workspace/.biodome-build/logs/codex-${validated.name}-events.jsonl`,
+    };
 
     const harness: CodexHarness = {
       name: validated.name,
@@ -745,13 +788,13 @@ export class SandboxContext implements FeatureContext, BuildContext {
       model: validated.model,
       telemetry,
       config: validated.config ? { ...validated.config } : {},
-    }
-    this.plan.runtime.codexHarnesses.push(harness)
+    };
+    this.plan.runtime.codexHarnesses.push(harness);
 
     // Codex CLI runs on Node and is distributed through npm as @openai/codex.
-    this.addLanguage("node", { version: "20" })
-    this.addAptPackage("git")
-    this.addLanguageSnippet("RUN npm install -g @openai/codex")
+    this.addLanguage("node", { version: "20" });
+    this.addAptPackage("git");
+    this.addLanguageSnippet("RUN npm install -g @openai/codex");
 
     this.addProcess({
       name: `codex-agent-${validated.name}`,
@@ -763,32 +806,34 @@ export class SandboxContext implements FeatureContext, BuildContext {
         CODEX_BIODOME_TELEMETRY_PATH: telemetry.path,
       },
       mergeEnv: false,
-    })
+    });
 
     // Passthrough the API key env reference so Docker Compose injects it into
     // the container; the harness start script runs Codex with it.
     if (harness.apiKey && typeof harness.apiKey === "object" && "env" in harness.apiKey) {
-      this.addEnv(harness.apiKey.env, { from: { env: harness.apiKey.env } })
+      this.addEnv(harness.apiKey.env, { from: { env: harness.apiKey.env } });
     }
   }
 
   addClaudeHarness(spec: ClaudeHarnessSpec): void {
-    const validated = Schema.decodeSync(ClaudeHarnessSpecSchema)(spec)
+    const validated = Schema.decodeSync(ClaudeHarnessSpecSchema)(spec);
 
     if (this.plan.runtime.claudeHarnesses.some((h) => h.name === validated.name)) {
-      throw new ValidationError({ message: `Duplicate Claude harness name: ${validated.name}` })
+      throw new ValidationError({ message: `Duplicate Claude harness name: ${validated.name}` });
     }
 
     if (validated.apiKey && typeof validated.apiKey === "string") {
       throw new ValidationError({
         message: `Claude harness ${validated.name}: apiKey must be an environment reference ({ env: "VAR" }), not a literal string`,
-      })
+      });
     }
 
     const telemetry = {
       enabled: validated.telemetry?.enabled ?? true,
-      path: validated.telemetry?.path ?? `/workspace/.biodome-build/logs/claude-${validated.name}-events.jsonl`,
-    }
+      path:
+        validated.telemetry?.path ??
+        `/workspace/.biodome-build/logs/claude-${validated.name}-events.jsonl`,
+    };
 
     const harness: ClaudeHarness = {
       name: validated.name,
@@ -799,26 +844,26 @@ export class SandboxContext implements FeatureContext, BuildContext {
       permissions: validated.permissions,
       telemetry,
       config: validated.config ? { ...validated.config } : {},
-    }
-    this.plan.runtime.claudeHarnesses.push(harness)
+    };
+    this.plan.runtime.claudeHarnesses.push(harness);
 
     // Claude Code runs on Node and is distributed through npm as @anthropic-ai/claude-code.
-    this.addLanguage("node", { version: "20" })
-    this.addAptPackage("git")
-    this.addLanguageSnippet("RUN npm install -g @anthropic-ai/claude-code")
+    this.addLanguage("node", { version: "20" });
+    this.addAptPackage("git");
+    this.addLanguageSnippet("RUN npm install -g @anthropic-ai/claude-code");
 
     // Passthrough the API key env reference so Docker Compose injects it into
     // the container; the wrapper script then exports it for claude.
     if (harness.apiKey && typeof harness.apiKey === "object" && "env" in harness.apiKey) {
-      this.addEnv(harness.apiKey.env, { from: { env: harness.apiKey.env } })
+      this.addEnv(harness.apiKey.env, { from: { env: harness.apiKey.env } });
     }
   }
 
   addLlmProvider(spec: LlmProviderSpec): void {
-    const validated = Schema.decodeSync(LlmProviderSpecSchema)(spec)
+    const validated = Schema.decodeSync(LlmProviderSpecSchema)(spec);
 
     if (this.plan.runtime.llmProviders.some((p) => p.name === validated.name)) {
-      throw new ValidationError({ message: `Duplicate LLM provider name: ${validated.name}` })
+      throw new ValidationError({ message: `Duplicate LLM provider name: ${validated.name}` });
     }
 
     const provider: LlmProvider = {
@@ -827,7 +872,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       displayName: validated.displayName,
       options: validated.options ? { ...validated.options } : {},
       models: validated.models ? { ...validated.models } : {},
-    }
+    };
 
     // Reject literal credential strings in provider options to keep secrets out
     // of plan.json and generated config files.
@@ -835,7 +880,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       if (typeof value === "string" && key.toLowerCase().includes("key")) {
         throw new ValidationError({
           message: `LLM provider ${validated.name}: option "${key}" looks like a credential and must be an environment reference ({ env: "VAR" }), not a literal string`,
-        })
+        });
       }
     }
 
@@ -844,74 +889,92 @@ export class SandboxContext implements FeatureContext, BuildContext {
     // the generated OpenCode config.
     for (const value of Object.values(provider.options)) {
       if (value !== undefined && typeof value === "object" && "env" in value) {
-        this.addEnv(value.env, { from: { env: value.env } })
+        this.addEnv(value.env, { from: { env: value.env } });
       }
     }
 
-    this.plan.runtime.llmProviders.push(provider)
+    this.plan.runtime.llmProviders.push(provider);
   }
 
   private normalizeRepoPath(path: string | undefined, name: string): string {
-    if (!path) return `/workspace/repos/${name}`
-    if (path.startsWith("/")) return path
-    return `/workspace/${path}`
+    if (!path) return `/workspace/repos/${name}`;
+    if (path.startsWith("/")) return path;
+    return `/workspace/${path}`;
   }
 
   private validateVolumeSpec(spec: VolumeSpec): void {
     switch (spec.type) {
       case "local": {
         if (!spec.source) {
-          throw new ValidationError({ message: `Volume ${spec.name}: local volumes require a source path` })
+          throw new ValidationError({
+            message: `Volume ${spec.name}: local volumes require a source path`,
+          });
         }
-        break
+        break;
       }
       case "s3":
       case "gcs": {
         if (!spec.bucket) {
-          const label = spec.type === "s3" ? "S3" : "GCS"
-          throw new ValidationError({ message: `Volume ${spec.name}: ${label} volumes require a bucket` })
+          const label = spec.type === "s3" ? "S3" : "GCS";
+          throw new ValidationError({
+            message: `Volume ${spec.name}: ${label} volumes require a bucket`,
+          });
         }
-        break
+        break;
       }
       case "azure": {
         if (!spec.account) {
-          throw new ValidationError({ message: `Volume ${spec.name}: azure volumes require an account` })
+          throw new ValidationError({
+            message: `Volume ${spec.name}: azure volumes require an account`,
+          });
         }
         if (!spec.container) {
-          throw new ValidationError({ message: `Volume ${spec.name}: azure volumes require a container` })
+          throw new ValidationError({
+            message: `Volume ${spec.name}: azure volumes require a container`,
+          });
         }
-        break
+        break;
       }
       case "sftp": {
         if (!spec.host) {
-          throw new ValidationError({ message: `Volume ${spec.name}: sftp volumes require a host` })
+          throw new ValidationError({
+            message: `Volume ${spec.name}: sftp volumes require a host`,
+          });
         }
         if (!spec.path) {
-          throw new ValidationError({ message: `Volume ${spec.name}: sftp volumes require a path` })
+          throw new ValidationError({
+            message: `Volume ${spec.name}: sftp volumes require a path`,
+          });
         }
-        break
+        break;
       }
       case "smb": {
         if (!spec.host) {
-          throw new ValidationError({ message: `Volume ${spec.name}: smb volumes require a host` })
+          throw new ValidationError({ message: `Volume ${spec.name}: smb volumes require a host` });
         }
         if (!spec.share) {
-          throw new ValidationError({ message: `Volume ${spec.name}: smb volumes require a share` })
+          throw new ValidationError({
+            message: `Volume ${spec.name}: smb volumes require a share`,
+          });
         }
-        break
+        break;
       }
       case "webdav": {
         if (!spec.url) {
-          throw new ValidationError({ message: `Volume ${spec.name}: webdav volumes require a url` })
+          throw new ValidationError({
+            message: `Volume ${spec.name}: webdav volumes require a url`,
+          });
         }
-        break
+        break;
       }
       case "dropbox":
       case "gdrive": {
         if (!spec.path) {
-          throw new ValidationError({ message: `Volume ${spec.name}: ${spec.type} volumes require a path` })
+          throw new ValidationError({
+            message: `Volume ${spec.name}: ${spec.type} volumes require a path`,
+          });
         }
-        break
+        break;
       }
     }
   }
@@ -919,39 +982,41 @@ export class SandboxContext implements FeatureContext, BuildContext {
   private rcloneRemote(volume: Volume): string {
     switch (volume.type) {
       case "s3": {
-        const prefix = volume.prefix || ""
-        return `s3:${volume.bucket}/${prefix}`
+        const prefix = volume.prefix || "";
+        return `s3:${volume.bucket}/${prefix}`;
       }
       case "gcs": {
-        const prefix = volume.prefix || ""
-        return `gcs:${volume.bucket}/${prefix}`
+        const prefix = volume.prefix || "";
+        return `gcs:${volume.bucket}/${prefix}`;
       }
       case "azure": {
-        const path = volume.path || ""
-        return `azure:${volume.container}/${path}`
+        const path = volume.path || "";
+        return `azure:${volume.container}/${path}`;
       }
       case "sftp": {
-        return `sftp:${volume.path}`
+        return `sftp:${volume.path}`;
       }
       case "smb": {
-        return `smb:${volume.host}/${volume.share}`
+        return `smb:${volume.host}/${volume.share}`;
       }
       case "webdav": {
-        const path = volume.path || ""
-        return `webdav:${path}`
+        const path = volume.path || "";
+        return `webdav:${path}`;
       }
       case "dropbox":
-        return `dropbox:${volume.path}`
+        return `dropbox:${volume.path}`;
       case "gdrive":
-        return `drive:${volume.path}`
+        return `drive:${volume.path}`;
       default:
-        throw new ValidationError({ message: `Unsupported volume type for rclone: ${volume.type}` })
+        throw new ValidationError({
+          message: `Unsupported volume type for rclone: ${volume.type}`,
+        });
     }
   }
 
   private buildRcloneEnv(volume: Volume): Record<string, string> {
-    const env: Record<string, string> = {}
-    if (!volume.credentials) return env
+    const env: Record<string, string> = {};
+    if (!volume.credentials) return env;
 
     const mappings: Record<string, Record<string, string>> = {
       s3: {
@@ -995,32 +1060,32 @@ export class SandboxContext implements FeatureContext, BuildContext {
         clientSecret: "RCLONE_DRIVE_CLIENT_SECRET",
         token: "RCLONE_DRIVE_TOKEN",
       },
-    }
+    };
 
     // Provider-level settings that are not credentials but still configure rclone.
     if (volume.type === "sftp" && volume.host) {
-      env.RCLONE_SFTP_HOST = volume.host
-      if (volume.port) env.RCLONE_SFTP_PORT = String(volume.port)
+      env.RCLONE_SFTP_HOST = volume.host;
+      if (volume.port) env.RCLONE_SFTP_PORT = String(volume.port);
     }
     if (volume.type === "smb" && volume.host) {
-      env.RCLONE_SMB_HOST = volume.host
+      env.RCLONE_SMB_HOST = volume.host;
     }
     if (volume.type === "azure" && volume.account) {
-      env.RCLONE_AZURE_ACCOUNT = volume.account
+      env.RCLONE_AZURE_ACCOUNT = volume.account;
     }
     if (volume.type === "webdav" && volume.url) {
-      env.RCLONE_WEBDAV_URL = volume.url
-      if (volume.vendor) env.RCLONE_WEBDAV_VENDOR = volume.vendor
+      env.RCLONE_WEBDAV_URL = volume.url;
+      if (volume.vendor) env.RCLONE_WEBDAV_VENDOR = volume.vendor;
     }
 
-    const map = mappings[volume.type]
+    const map = mappings[volume.type];
     for (const [key, value] of Object.entries(volume.credentials)) {
-      const rcloneKey = map[key]
-      if (!rcloneKey) continue
-      env[rcloneKey] = typeof value === "string" ? value : `\${${value.env}}`
+      const rcloneKey = map[key];
+      if (!rcloneKey) continue;
+      env[rcloneKey] = typeof value === "string" ? value : `\${${value.env}}`;
     }
 
-    return env
+    return env;
   }
 
   // Volume wrappers — thin helpers that delegate to addVolume with the right
@@ -1034,7 +1099,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       target: spec.target,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
-    })
+    });
   }
 
   addS3Volume(spec: S3VolumeSpec): void {
@@ -1048,7 +1113,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       proxy: spec.proxy,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
-    })
+    });
   }
 
   addGcsVolume(spec: GcsVolumeSpec): void {
@@ -1062,7 +1127,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       proxy: spec.proxy,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
-    })
+    });
   }
 
   addAzureVolume(spec: AzureVolumeSpec): void {
@@ -1077,7 +1142,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       proxy: spec.proxy,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
-    })
+    });
   }
 
   addSftpVolume(spec: SftpVolumeSpec): void {
@@ -1092,7 +1157,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       proxy: spec.proxy,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
-    })
+    });
   }
 
   addSmbVolume(spec: SmbVolumeSpec): void {
@@ -1106,7 +1171,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       proxy: spec.proxy,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
-    })
+    });
   }
 
   addWebdavVolume(spec: WebdavVolumeSpec): void {
@@ -1121,7 +1186,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       proxy: spec.proxy,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
-    })
+    });
   }
 
   addDropboxVolume(spec: DropboxVolumeSpec): void {
@@ -1134,7 +1199,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       proxy: spec.proxy,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
-    })
+    });
   }
 
   addGdriveVolume(spec: GdriveVolumeSpec): void {
@@ -1147,54 +1212,54 @@ export class SandboxContext implements FeatureContext, BuildContext {
       proxy: spec.proxy,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
-    })
+    });
   }
 
   private normalizeCredentials(
-    credentials: Record<string, SecretValue | undefined>
+    credentials: Record<string, SecretValue | undefined>,
   ): Record<string, SecretValue> {
-    const result: Record<string, SecretValue> = {}
+    const result: Record<string, SecretValue> = {};
     for (const [key, value] of Object.entries(credentials)) {
       if (value !== undefined) {
-        result[key] = value
+        result[key] = value;
       }
     }
-    return result
+    return result;
   }
 
   fileExists(path: string): boolean {
-    return existsSync(join(this.rootDir, path))
+    return existsSync(join(this.rootDir, path));
   }
 
   readFile(path: string): string {
-    return readFileSync(join(this.rootDir, path), "utf-8")
+    return readFileSync(join(this.rootDir, path), "utf-8");
   }
 
   readJSON(path: string): unknown {
-    return JSON.parse(this.readFile(path))
+    return JSON.parse(this.readFile(path));
   }
 
   exec(command: string): { stdout: string; stderr: string; exitCode: number } {
     if (this.dryRun) {
-      console.log(`[exec] (dry run) ${command}`)
-      return { stdout: "", stderr: "", exitCode: 0 }
+      console.log(`[exec] (dry run) ${command}`);
+      return { stdout: "", stderr: "", exitCode: 0 };
     }
 
-    console.log(`[exec] ${command}`)
+    console.log(`[exec] ${command}`);
     try {
       const stdout = execSync(command, {
         cwd: this.rootDir,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
-      })
-      return { stdout, stderr: "", exitCode: 0 }
+      });
+      return { stdout, stderr: "", exitCode: 0 };
     } catch (error) {
-      const err = error as Error & { stdout?: string; stderr?: string; status?: number }
+      const err = error as Error & { stdout?: string; stderr?: string; status?: number };
       return {
         stdout: err.stdout || "",
         stderr: err.stderr || "",
         exitCode: err.status || 1,
-      }
+      };
     }
   }
 
@@ -1202,54 +1267,54 @@ export class SandboxContext implements FeatureContext, BuildContext {
 
   setBaseImage(name: string): boolean {
     if (this.plan.build.baseImage) {
-      return false
+      return false;
     }
-    this.plan.build.baseImage = name
-    return true
+    this.plan.build.baseImage = name;
+    return true;
   }
 
   requireDependencyFiles(files: string[]): string[] {
-    const existing: string[] = []
+    const existing: string[] = [];
     for (const file of files) {
       if (this.fileExists(file)) {
-        existing.push(file)
+        existing.push(file);
         if (!this.plan.build.dependencyFiles.includes(file)) {
-          this.plan.build.dependencyFiles.push(file)
+          this.plan.build.dependencyFiles.push(file);
         }
       }
     }
-    return existing
+    return existing;
   }
 
   addDependencyInstall(install: DependencyInstall): void {
-    this.plan.build.dependencyInstalls.push(install)
+    this.plan.build.dependencyInstalls.push(install);
   }
 
   addCopyArtifact(artifact: CopyArtifact): void {
-    this.plan.build.copyArtifacts.push(artifact)
+    this.plan.build.copyArtifacts.push(artifact);
   }
 
   private normalizeProcess(
     spec: ProcessSpec,
     defaultMode: "daemon" | "oneshot",
-    defaultStartOn: LifecyclePoint
+    defaultStartOn: LifecyclePoint,
   ): Process {
-    const mode = spec.mode || defaultMode
-    const startOn = spec.startOn || defaultStartOn
+    const mode = spec.mode || defaultMode;
+    const startOn = spec.startOn || defaultStartOn;
 
-    const ports: Port[] = []
+    const ports: Port[] = [];
     if (spec.port) {
-      ports.push({ host: spec.port, container: spec.port })
+      ports.push({ host: spec.port, container: spec.port });
     }
     if (spec.ports) {
       for (const [portName, p] of Object.entries(spec.ports)) {
-        ports.push({ name: portName, host: p, container: p })
+        ports.push({ name: portName, host: p, container: p });
       }
     }
 
     const healthCheck = spec.healthCheck
       ? this.normalizeHealthCheck(spec.healthCheck, spec.port)
-      : undefined
+      : undefined;
 
     return {
       name: spec.name,
@@ -1261,37 +1326,37 @@ export class SandboxContext implements FeatureContext, BuildContext {
       mode,
       startOn,
       mergeEnv: spec.mergeEnv,
-    }
+    };
   }
 
   private normalizeWorkingDir(workingDir: string | undefined): string | undefined {
-    if (!workingDir) return undefined
-    if (workingDir.startsWith("/")) return workingDir
-    return `/workspace/${workingDir}`
+    if (!workingDir) return undefined;
+    if (workingDir.startsWith("/")) return workingDir;
+    return `/workspace/${workingDir}`;
   }
 
   private normalizeHealthCheck(
     spec: typeof ProcessHealthCheckSpecSchema.Type,
-    defaultPort?: number
+    defaultPort?: number,
   ): ProcessHealthCheck {
-    const type = spec.type || "http"
-    let url = spec.url
-    let port = spec.port
-    const command = spec.command ? [...spec.command] : undefined
+    const type = spec.type || "http";
+    let url = spec.url;
+    let port = spec.port;
+    const command = spec.command ? [...spec.command] : undefined;
 
     if (type === "http" && !url) {
-      port = port || defaultPort
+      port = port || defaultPort;
       if (port) {
-        url = `http://localhost:${port}`
+        url = `http://localhost:${port}`;
       }
     }
 
     if (type === "http") {
-      this.addAptPackage("curl")
+      this.addAptPackage("curl");
     }
 
     if (type === "tcp") {
-      this.addAptPackage("netcat-openbsd")
+      this.addAptPackage("netcat-openbsd");
     }
 
     return {
@@ -1303,73 +1368,117 @@ export class SandboxContext implements FeatureContext, BuildContext {
       timeout: spec.timeout,
       retries: spec.retries,
       startPeriod: spec.startPeriod,
-    }
+    };
   }
 
   private mergeProcessEnv(proc: Process): void {
-    if (proc.mergeEnv === false) return
+    if (proc.mergeEnv === false) return;
     for (const [key, value] of Object.entries(proc.environment)) {
       // Variables declared via addEnv take precedence over process-level env.
       // This prevents a process's local environment from silently overwriting
       // a value the user explicitly declared with addEnv.
-      if (this.plan.runtime.envVars.some((e) => e.key === key)) continue
-      this.plan.runtime.environment[key] = value
+      if (this.plan.runtime.envVars.some((e) => e.key === key)) continue;
+      this.plan.runtime.environment[key] = value;
     }
   }
 
   addRuntimeInstall(snippet: string): void {
     if (!this.plan.build.runtimeInstalls.includes(snippet)) {
-      this.plan.build.runtimeInstalls.push(snippet)
+      this.plan.build.runtimeInstalls.push(snippet);
     }
   }
 
   addLanguageSnippet(snippet: string): void {
     if (!this.plan.build.languageSnippets.includes(snippet)) {
-      this.plan.build.languageSnippets.push(snippet)
+      this.plan.build.languageSnippets.push(snippet);
     }
   }
 
   enableNodeModulesVolume(): void {
-    this.plan.build.nodeModulesVolume = true
+    this.plan.build.nodeModulesVolume = true;
   }
 
   enableVenvVolume(): void {
-    this.plan.build.venvVolume = true
+    this.plan.build.venvVolume = true;
   }
 
   enableVendorVolume(): void {
-    this.plan.build.vendorVolume = true
+    this.plan.build.vendorVolume = true;
   }
 
-  configureMcp(port: number): void {
-    this.plan.build.mcpEnabled = true
-    this.plan.build.mcpPort = port
+  configureMcp(
+    port: number,
+    config?: {
+      token?: { env: string };
+      allowExec?: boolean;
+      allowProcessControl?: boolean;
+      maxReadBytes?: number;
+      maxWriteBytes?: number;
+      maxListEntries?: number;
+    },
+  ): void {
+    this.plan.build.mcpEnabled = true;
+    this.plan.build.mcpPort = port;
+    this.plan.build.mcpConfig.enabled = true;
+    this.plan.build.mcpConfig.port = port;
+
+    if (config) {
+      if (config.token) {
+        if (typeof config.token === "string") {
+          throw new ValidationError({
+            message: 'MCP token must be an environment variable reference ({ env: "VAR" })',
+          });
+        }
+        this.plan.build.mcpConfig.token = { env: config.token.env };
+      }
+      if (config.allowExec !== undefined) {
+        this.plan.build.mcpConfig.allowExec = config.allowExec;
+      }
+      if (config.allowProcessControl !== undefined) {
+        this.plan.build.mcpConfig.allowProcessControl = config.allowProcessControl;
+      }
+      if (config.maxReadBytes !== undefined) {
+        this.plan.build.mcpConfig.maxReadBytes = config.maxReadBytes;
+      }
+      if (config.maxWriteBytes !== undefined) {
+        this.plan.build.mcpConfig.maxWriteBytes = config.maxWriteBytes;
+      }
+      if (config.maxListEntries !== undefined) {
+        this.plan.build.mcpConfig.maxListEntries = config.maxListEntries;
+      }
+    }
 
     // The MCP server is a Node script. Ensure a Node runtime is present without
     // clobbering an explicit node request the user may already have made.
-    const hasNode = this.plan.build.languageRequests.some((r) => r.name === "node")
+    const hasNode = this.plan.build.languageRequests.some((r) => r.name === "node");
     if (!hasNode) {
-      this.addLanguage("node", { version: "20" })
+      this.addLanguage("node", { version: "20" });
     }
 
     // Collect proxy-volume and provider credential env references so the MCP
     // server can resolve them at runtime. Keep them isolated to the MCP process
     // so they are not merged into the dev service's global environment.
-    const mcpEnvironment: Record<string, string> = {}
+    const mcpEnvironment: Record<string, string> = {};
     for (const volume of this.plan.runtime.volumes) {
-      if (!volume.proxy) continue
-      if (!volume.credentials) continue
+      if (!volume.proxy) continue;
+      if (!volume.credentials) continue;
       for (const value of Object.values(volume.credentials)) {
-        if (typeof value === "string") continue
-        mcpEnvironment[value.env] = `\${${value.env}}`
+        if (typeof value === "string") continue;
+        mcpEnvironment[value.env] = `\${${value.env}}`;
       }
     }
     for (const provider of this.plan.runtime.providers) {
-      if (!provider.credentials) continue
+      if (!provider.credentials) continue;
       for (const value of Object.values(provider.credentials)) {
-        if (typeof value === "string") continue
-        mcpEnvironment[value.env] = `\${${value.env}}`
+        if (typeof value === "string") continue;
+        mcpEnvironment[value.env] = `\${${value.env}}`;
       }
+    }
+
+    // Include the MCP token env var so it reaches the MCP server process at runtime.
+    const token = this.plan.build.mcpConfig.token;
+    if (token && typeof token === "object") {
+      mcpEnvironment[token.env] = `\${${token.env}}`;
     }
 
     this.addProcess({
@@ -1377,8 +1486,10 @@ export class SandboxContext implements FeatureContext, BuildContext {
       command: [
         "node",
         "/workspace/.biodome-build/mcp-server.js",
-        "--port", String(port),
-        "--plan", "/workspace/.biodome-build/plan.json",
+        "--port",
+        String(port),
+        "--plan",
+        "/workspace/.biodome-build/plan.json",
       ],
       port,
       healthCheck: { type: "http", url: `http://localhost:${port}/health` },
@@ -1387,6 +1498,6 @@ export class SandboxContext implements FeatureContext, BuildContext {
         MCP_EVENTS_LOG: "/workspace/.biodome-build/logs/mcp-events.jsonl",
       },
       mergeEnv: false,
-    })
+    });
   }
 }

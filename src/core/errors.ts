@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Schema } from "effect";
 
 export class ConfigError extends Schema.TaggedErrorClass<ConfigError>()("ConfigError", {
   message: Schema.String,
@@ -24,7 +24,7 @@ export class PlanError extends Schema.TaggedErrorClass<PlanError>()("PlanError",
   message: Schema.String,
 }) {}
 
-export type SandboxError = ConfigError | ValidationError | FeatureError | RuntimeError | PlanError
+export type SandboxError = ConfigError | ValidationError | FeatureError | RuntimeError | PlanError;
 
 export function isSandboxError(error: unknown): error is SandboxError {
   return (
@@ -33,22 +33,22 @@ export function isSandboxError(error: unknown): error is SandboxError {
     error instanceof FeatureError ||
     error instanceof RuntimeError ||
     error instanceof PlanError
-  )
+  );
 }
 
 export function sandboxErrorMessage(error: SandboxError): string {
   switch (error._tag) {
     case "ConfigError":
-      return error.path ? `${error.path}: ${error.message}` : error.message
+      return error.path ? `${error.path}: ${error.message}` : error.message;
     case "ValidationError":
-      return error.field ? `${error.field}: ${error.message}` : error.message
+      return error.field ? `${error.field}: ${error.message}` : error.message;
     case "FeatureError":
-      return error.path ? `Failed to load feature ${error.path}: ${error.message}` : error.message
+      return error.path ? `Failed to load feature ${error.path}: ${error.message}` : error.message;
     case "RuntimeError":
       return error.command
         ? `Runtime operation failed (${error.command}): ${error.message}`
-        : error.message
+        : error.message;
     case "PlanError":
-      return error.message
+      return error.message;
   }
 }

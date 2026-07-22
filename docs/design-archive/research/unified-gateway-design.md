@@ -81,11 +81,11 @@ sources:
       personal:
         auth:
           type: bearer
-          secret_ref: op://personal/github-token    # resolves via 1Password
+          secret_ref: op://personal/github-token # resolves via 1Password
       work:
         auth:
           type: bearer
-          secret_ref: local://github_work_token     # resolves via local store
+          secret_ref: local://github_work_token # resolves via local store
 
   sentry:
     type: openapi
@@ -94,7 +94,7 @@ sources:
       prod:
         auth:
           type: bearer
-          secret_ref: env://SENTRY_AUTH_TOKEN       # resolves via env var
+          secret_ref: env://SENTRY_AUTH_TOKEN # resolves via env var
 ```
 
 ### Tool Surface
@@ -128,6 +128,7 @@ The agent sees a single MCP tool with meta-tools (same context-efficiency patter
 ```
 
 Agent workflow:
+
 ```
 1. tools.search("create a PR on my personal repos")
 2. tools.describe("github.personal.pulls.create")
@@ -156,7 +157,7 @@ tcp_proxies:
       password_ref: local://prod_db_password
       database: myapp_prod
     policies:
-      connect: approve          # every new connection needs approval
+      connect: approve # every new connection needs approval
       query_allowlist:
         - "SELECT * FROM users WHERE id = $1"
         - "SELECT * FROM orders WHERE user_id = $1 LIMIT $2"
@@ -164,7 +165,7 @@ tcp_proxies:
         - "DROP *"
         - "ALTER *"
         - "TRUNCATE *"
-        - "UPDATE users SET *"   # can only SELECT from users
+        - "UPDATE users SET *" # can only SELECT from users
 
   redis:
     bind: localhost:6379
@@ -186,7 +187,7 @@ tcp_proxies:
       password_ref: local://mysql_password
     policies:
       connect: allow
-      statements: read_only     # rejects anything other than SELECT/SHOW
+      statements: read_only # rejects anything other than SELECT/SHOW
 
   ssh_github:
     bind: localhost:2222
@@ -197,7 +198,7 @@ tcp_proxies:
     policies:
       allowed_commands:
         - git-upload-pack
-        - git-receive-pack    # allow push/pull to specific repos
+        - git-receive-pack # allow push/pull to specific repos
       allowed_repos:
         - my-org/private-repo
 ```
@@ -256,11 +257,11 @@ tcp_proxies:
   raw_tunnel:
     bind: localhost:9999
     upstream: some-service.internal:9999
-    protocol: tcp              # generic TCP relay
+    protocol: tcp # generic TCP relay
     policies:
       connect: allow
-      rate_limit: 10MB/min     # raw bandwidth limits only
-      allowed_ports: []        # not applicable for raw TCP
+      rate_limit: 10MB/min # raw bandwidth limits only
+      allowed_ports: [] # not applicable for raw TCP
 ```
 
 ---
@@ -275,16 +276,16 @@ Policies for both MCP tools and TCP connections share the same evaluation engine
 policy:
   # MCP tool policies (path-based, like executor)
   tools:
-    github.personal.*.read:          allow
-    github.work.*.write:             require_approval
-    github.*.billing.*:              block
-    aws.prod.s3.delete_object:       require_approval
-    aws.staging.s3.*:                allow
+    github.personal.*.read: allow
+    github.work.*.write: require_approval
+    github.*.billing.*: block
+    aws.prod.s3.delete_object: require_approval
+    aws.staging.s3.*: allow
 
   # TCP proxy policies (protocol-aware)
   proxies:
-    postgres:                        # applies to the postgres proxy
-      connect: allow                 # can always connect
+    postgres: # applies to the postgres proxy
+      connect: allow # can always connect
       queries:
         - pattern: "DROP *"
           action: block
@@ -304,7 +305,7 @@ policy:
           action: require_approval
 
   # Global defaults
-  default: require_approval     # everything unknown needs approval
+  default: require_approval # everything unknown needs approval
 ```
 
 ### Enforcement
@@ -471,8 +472,8 @@ export const tcpProxyPlugin = {
         input: {
           type: "object",
           properties: {
-            session_label: { type: "string", description: "Label for audit" }
-          }
+            session_label: { type: "string", description: "Label for audit" },
+          },
         },
         handler: async (ctx, args) => {
           // 1. Resolve credentials from secret provider
@@ -504,7 +505,7 @@ export const tcpProxyPlugin = {
         name: `proxies.${proxy.name}.disconnect`,
         description: `Close a TCP proxy session`,
         input: {
-          session_id: { type: "string" }
+          session_id: { type: "string" },
         },
         handler: async (ctx, args) => {
           await closeSession(args.session_id);
@@ -515,7 +516,7 @@ export const tcpProxyPlugin = {
     }
 
     return tools;
-  }
+  },
 };
 ```
 
@@ -560,20 +561,20 @@ func (t *TCPProxyEngine) resolveCreds(ctx context.Context, ref string) (string, 
 
 ## Comparison to Executor.sh
 
-| Feature | Executor.sh | Unified Gateway |
-|---------|------------|----------------|
-| HTTP API tools (OpenAPI, GraphQL) | Yes | Yes |
-| MCP server hosting | Yes | Yes |
-| JS sandbox execution | Yes | Yes |
-| Credential isolation | Yes | Yes |
-| Policy engine | Yes | Yes |
-| Context-efficient meta-tools | Yes | Yes |
-| **TCP proxy (PostgreSQL, MySQL, Redis)** | **No** | **Yes** |
-| **SSH agent/tunnel proxy** | **No** | **Yes** |
-| **Protocol-level query policies** | **No** | **Yes** |
-| **Raw TCP forwarding** | **No** | **Yes** |
-| **Unified audit (MCP + TCP)** | **MCP only** | **Yes** |
-| **`proxies.connect` MCP lifecycle** | **No** | **Yes** |
+| Feature                                  | Executor.sh  | Unified Gateway |
+| ---------------------------------------- | ------------ | --------------- |
+| HTTP API tools (OpenAPI, GraphQL)        | Yes          | Yes             |
+| MCP server hosting                       | Yes          | Yes             |
+| JS sandbox execution                     | Yes          | Yes             |
+| Credential isolation                     | Yes          | Yes             |
+| Policy engine                            | Yes          | Yes             |
+| Context-efficient meta-tools             | Yes          | Yes             |
+| **TCP proxy (PostgreSQL, MySQL, Redis)** | **No**       | **Yes**         |
+| **SSH agent/tunnel proxy**               | **No**       | **Yes**         |
+| **Protocol-level query policies**        | **No**       | **Yes**         |
+| **Raw TCP forwarding**                   | **No**       | **Yes**         |
+| **Unified audit (MCP + TCP)**            | **MCP only** | **Yes**         |
+| **`proxies.connect` MCP lifecycle**      | **No**       | **Yes**         |
 
 ---
 
@@ -600,7 +601,7 @@ sources:
 
   aws:
     type: openapi
-    spec: https://awssdk.com/v3/openapi.json  # imported aws-sdk
+    spec: https://awssdk.com/v3/openapi.json # imported aws-sdk
     connections:
       prod:
         auth:
@@ -618,7 +619,7 @@ sources:
 # ── TCP proxies ──
 tcp_proxies:
   postgres_staging:
-    bind: 127.0.0.1:0          # ephemeral port, allocated on connect
+    bind: 127.0.0.1:0 # ephemeral port, allocated on connect
     upstream: staging-db.internal:5432
     protocol: postgresql
     auth:
@@ -647,7 +648,7 @@ tcp_proxies:
       database: myapp_prod
       ssl_mode: verify-full
     policies:
-      connect: require_approval    # must approve each connection
+      connect: require_approval # must approve each connection
       default_query: block
       query_allowlist:
         - "SELECT * FROM products WHERE id = $1"
@@ -689,7 +690,7 @@ tcp_proxies:
           - KEYS
 
   ssh_github:
-    bind: /tmp/gw-ssh-github.sock     # Unix socket
+    bind: /tmp/gw-ssh-github.sock # Unix socket
     upstream: github.com:22
     protocol: ssh
     auth:
@@ -705,15 +706,15 @@ tcp_proxies:
 # ── Unified policies ──
 policy:
   tools:
-    github.personal.*.read:       allow
-    github.personal.*.write:      allow
-    github.work.*.read:           allow
-    github.work.*.write:          require_approval
-    github.*.billing.*:           block
-    aws.staging.s3.get_object:    allow
-    aws.staging.s3.put_object:    allow
+    github.personal.*.read: allow
+    github.personal.*.write: allow
+    github.work.*.read: allow
+    github.work.*.write: require_approval
+    github.*.billing.*: block
+    aws.staging.s3.get_object: allow
+    aws.staging.s3.put_object: allow
     aws.staging.s3.delete_object: block
-    aws.prod.*:                   require_approval
+    aws.prod.*: require_approval
 
 # ── Secret backends (same as biodome) ──
 secrets:
@@ -764,6 +765,7 @@ Repurpose Executor.sh's existing tool engine. Add as a sandbox sidecar using the
 ### Phase 2: TCP Proxy Layer
 
 Implement protocol-specific proxies:
+
 - PostgreSQL (SASL auth, query parsing via `pg_query` Go library)
 - Redis (RESP3 parser, command allow/deny)
 - SSH (key exchange, channel filtering via `golang.org/x/crypto/ssh`)

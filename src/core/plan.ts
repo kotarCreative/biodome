@@ -1,171 +1,216 @@
 // Core Plan types for the sandbox intermediate representation.
 // Every feature contributes to a shared Plan, and generators read from it.
 
-import { Schema } from "effect"
+import { Schema } from "effect";
 
 export interface LanguageRequest {
-  name: string
-  options: { version?: string; packageManager?: string }
+  name: string;
+  options: { version?: string; packageManager?: string };
+}
+
+export interface McpConfig {
+  enabled: boolean;
+  port: number;
+  token?: SecretValue;
+  allowExec: boolean;
+  allowProcessControl: boolean;
+  maxReadBytes: number;
+  maxWriteBytes: number;
+  maxListEntries: number;
 }
 
 export interface BuildPlan {
-  project: string
-  baseImage: string
-  aptPackages: string[]
-  runtimeInstalls: string[]
-  languageSnippets: string[]
-  languageRequests: LanguageRequest[]
-  dependencyFiles: string[]
-  dependencyInstalls: DependencyInstall[]
-  copyArtifacts: CopyArtifact[]
-  environment: Record<string, string>
-  nodeModulesVolume: boolean
-  venvVolume: boolean
-  vendorVolume: boolean
-  mcpEnabled: boolean
-  mcpPort: number
+  project: string;
+  baseImage: string;
+  aptPackages: string[];
+  runtimeInstalls: string[];
+  languageSnippets: string[];
+  languageRequests: LanguageRequest[];
+  dependencyFiles: string[];
+  dependencyInstalls: DependencyInstall[];
+  copyArtifacts: CopyArtifact[];
+  environment: Record<string, string>;
+  nodeModulesVolume: boolean;
+  venvVolume: boolean;
+  vendorVolume: boolean;
+  mcpEnabled: boolean;
+  mcpPort: number;
+  mcpConfig: McpConfig;
 }
 
 export interface DependencyInstall {
-  files: string[]
-  command: string
+  files: string[];
+  command: string;
 }
 
 export interface CopyArtifact {
-  files: string[]
-  lines: string[]
+  files: string[];
+  lines: string[];
 }
 
 export interface Repo {
-  name: string
-  url: string
-  path: string
-  branch: string
-  depth?: number
-  credentials?: RepoCredentials
+  name: string;
+  url: string;
+  path: string;
+  branch: string;
+  depth?: number;
+  credentials?: RepoCredentials;
 }
 
 export interface RepoCredentials {
-  token?: SecretValue
-  sshKey?: SecretValue
+  token?: SecretValue;
+  sshKey?: SecretValue;
 }
 
 export interface AgentHarnessMcpServer {
-  url: string
+  url: string;
 }
 
 export interface AgentHarnessTelemetry {
-  enabled: boolean
-  path: string
+  enabled: boolean;
+  path: string;
 }
 
 export interface AgentHarness {
-  name: string
-  type: string
-  port: number
-  mcpServers: Record<string, AgentHarnessMcpServer>
-  telemetry: AgentHarnessTelemetry
-  config: Record<string, unknown>
+  name: string;
+  type: string;
+  port: number;
+  mcpServers: Record<string, AgentHarnessMcpServer>;
+  telemetry: AgentHarnessTelemetry;
+  config: Record<string, unknown>;
 }
 
 export interface LlmProvider {
-  name: string
-  npm?: string
-  displayName?: string
-  options: Record<string, SecretValue | string | number | boolean | undefined>
-  models: Record<string, { name?: string }>
+  name: string;
+  npm?: string;
+  displayName?: string;
+  options: Record<string, SecretValue | string | number | boolean | undefined>;
+  models: Record<string, { name?: string }>;
 }
 
 export interface PiHarness {
-  name: string
-  type: "pi"
-  provider?: string
-  model?: string
-  apiKey?: SecretValue
-  tools?: string[]
-  extensions?: string[]
-  skills?: string[]
-  prompts?: string[]
-  themes?: string[]
-  packages?: string[]
-  telemetry: { enabled: boolean; path: string }
-  config: Record<string, unknown>
+  name: string;
+  type: "pi";
+  provider?: string;
+  model?: string;
+  apiKey?: SecretValue;
+  tools?: string[];
+  extensions?: string[];
+  skills?: string[];
+  prompts?: string[];
+  themes?: string[];
+  packages?: string[];
+  telemetry: { enabled: boolean; path: string };
+  config: Record<string, unknown>;
 }
 
 export interface CodexHarness {
-  name: string
-  type: "codex"
-  port: number
-  mcpServers: Record<string, AgentHarnessMcpServer>
-  apiKey?: SecretValue
-  model?: string
-  telemetry: { enabled: boolean; path: string }
-  config: Record<string, unknown>
+  name: string;
+  type: "codex";
+  port: number;
+  mcpServers: Record<string, AgentHarnessMcpServer>;
+  apiKey?: SecretValue;
+  model?: string;
+  telemetry: { enabled: boolean; path: string };
+  config: Record<string, unknown>;
 }
 
 export interface ClaudeHarness {
-  name: string
-  type: "claude"
-  apiKey?: SecretValue
-  model?: string
-  tools?: string[]
-  permissions?: string
-  telemetry: { enabled: boolean; path: string }
-  config: Record<string, unknown>
+  name: string;
+  type: "claude";
+  apiKey?: SecretValue;
+  model?: string;
+  tools?: string[];
+  permissions?: string;
+  telemetry: { enabled: boolean; path: string };
+  config: Record<string, unknown>;
 }
 
 export interface RuntimePlan {
-  services: Service[]
-  networks: Network[]
-  namedVolumes: NamedVolume[]
-  volumes: Volume[]
-  ports: Port[]
-  environment: Record<string, string>
-  processes: Process[]
-  endpoints: Endpoint[]
-  providers: Provider[]
-  envVars: EnvVar[]
-  repos: Repo[]
-  agentHarnesses: AgentHarness[]
-  piHarnesses: PiHarness[]
-  codexHarnesses: CodexHarness[]
-  claudeHarnesses: ClaudeHarness[]
-  llmProviders: LlmProvider[]
+  services: Service[];
+  networks: Network[];
+  namedVolumes: NamedVolume[];
+  volumes: Volume[];
+  ports: Port[];
+  environment: Record<string, string>;
+  processes: Process[];
+  endpoints: Endpoint[];
+  providers: Provider[];
+  envVars: EnvVar[];
+  repos: Repo[];
+  agentHarnesses: AgentHarness[];
+  piHarnesses: PiHarness[];
+  codexHarnesses: CodexHarness[];
+  claudeHarnesses: ClaudeHarness[];
+  llmProviders: LlmProvider[];
 }
 
-export type EnvScope = "build" | "runtime" | "both"
+// --- Target and task types ---
+
+export type RuntimeDriverId = "docker-compose" | "aws-ecs" | (string & {});
+
+export interface RuntimeTarget {
+  name: string;
+  driver: RuntimeDriverId;
+  options: Record<string, unknown>;
+}
+
+export interface TaskSpec {
+  harness: string;
+  prompt: string;
+  artifacts: string[];
+  timeout: string;
+  cleanup: "always" | "on-success" | "never";
+}
+
+export interface Task {
+  name: string;
+  harness: string;
+  prompt: string;
+  artifacts: string[];
+  timeout: string;
+  cleanup: "always" | "on-success" | "never";
+}
+
+export interface DeploymentPlan {
+  target: RuntimeTarget;
+  task?: Task;
+  deploymentId: string;
+}
+
+export type EnvScope = "build" | "runtime" | "both";
 
 // A declared environment variable. Its value is EITHER a literal (baked into the
 // image / plan) OR a passthrough reference that is resolved from the host at
 // `up` time and never written to the Dockerfile or plan.json. Passthrough is the
 // safe way to inject secrets.
 export interface EnvVar {
-  key: string
-  scope: EnvScope
+  key: string;
+  scope: EnvScope;
   // Present when the value is a literal (non-secret config).
-  value?: string
+  value?: string;
   // Present when the value is passed through from the host environment.
-  from?: { env: string }
+  from?: { env: string };
   // Only meaningful for passthrough vars.
-  required?: boolean
-  default?: string
+  required?: boolean;
+  default?: string;
 }
 
 // A SecretValue is either a plain literal string or a reference to an
 // environment variable resolved at runtime. Env references are never baked into
 // plan.json, keeping secrets out of on-disk artifacts.
-export type SecretValue = string | { env: string }
+export type SecretValue = string | { env: string };
 
 // A user-declared, agent-discoverable resource — e.g. a custom API a feature
 // stands up. Captures how to reach it (url/port) plus optional credentials and
 // free-form metadata.
 export interface Endpoint {
-  name: string
-  description?: string
-  url?: string
-  port?: number
-  credentials?: Record<string, SecretValue>
-  metadata?: Record<string, string>
+  name: string;
+  description?: string;
+  url?: string;
+  port?: number;
+  credentials?: Record<string, SecretValue>;
+  metadata?: Record<string, string>;
 }
 
 // A user-declared external provider — e.g. Jira, GitHub, Slack. Providers are
@@ -173,116 +218,125 @@ export interface Endpoint {
 // the instance URL, an optional project/team scope, credentials, and free-form
 // metadata.
 export interface Provider {
-  name: string
-  type: string
-  url?: string
-  project?: string
-  mcpUrl?: string
-  authHeader?: string
-  authScheme?: string
-  authCredential?: string
-  credentials?: Record<string, SecretValue>
-  metadata?: Record<string, string>
+  name: string;
+  type: string;
+  url?: string;
+  project?: string;
+  mcpUrl?: string;
+  authHeader?: string;
+  authScheme?: string;
+  authCredential?: string;
+  credentials?: Record<string, SecretValue>;
+  metadata?: Record<string, string>;
 }
 
 export interface Service {
-  name: string
-  type: string
-  image: string
-  containerName: string
-  environment: Record<string, string>
-  ports: PortMapping[]
-  volumes: VolumeMapping[]
-  healthCheck?: HealthCheck
-  networks: string[]
+  name: string;
+  type: string;
+  image: string;
+  containerName: string;
+  environment: Record<string, string>;
+  ports: PortMapping[];
+  volumes: VolumeMapping[];
+  healthCheck?: HealthCheck;
+  networks: string[];
 }
 
 export interface PortMapping {
-  host: number
-  container: number
+  host: number;
+  container: number;
 }
 
 export interface VolumeMapping {
-  host: string
-  container: string
+  host: string;
+  container: string;
 }
 
 export interface HealthCheck {
-  test: string[]
-  interval?: string
-  timeout?: string
-  retries?: number
-  startPeriod?: string
+  test: string[];
+  interval?: string;
+  timeout?: string;
+  retries?: number;
+  startPeriod?: string;
 }
 
 export interface Network {
-  name: string
-  driver: string
+  name: string;
+  driver: string;
 }
 
 export interface NamedVolume {
-  name: string
+  name: string;
 }
 
-export type VolumeType = "local" | "s3" | "gcs" | "azure" | "sftp" | "smb" | "webdav" | "dropbox" | "gdrive"
+export type VolumeType =
+  | "local"
+  | "s3"
+  | "gcs"
+  | "azure"
+  | "sftp"
+  | "smb"
+  | "webdav"
+  | "dropbox"
+  | "gdrive";
 
 export interface Volume {
-  name: string
-  type: VolumeType
-  source?: string
-  target: string
-  bucket?: string
-  prefix?: string
-  path?: string
+  name: string;
+  type: VolumeType;
+  source?: string;
+  target: string;
+  bucket?: string;
+  prefix?: string;
+  path?: string;
   // Cloud / network providers
-  endpoint?: string
-  account?: string
-  container?: string
-  host?: string
-  port?: number
-  export?: string
-  share?: string
-  url?: string
-  vendor?: string
-  credentials?: Record<string, SecretValue>
-  options?: Record<string, string>
+  endpoint?: string;
+  account?: string;
+  container?: string;
+  host?: string;
+  port?: number;
+  export?: string;
+  share?: string;
+  url?: string;
+  vendor?: string;
+  credentials?: Record<string, SecretValue>;
+  options?: Record<string, string>;
   // MCP proxy mode: when true, the volume is not mounted in the dev container.
   // The MCP server exposes file-access tools and uses provider SDKs/adapters.
-  proxy?: boolean
-  readOnly?: boolean
-  allowedPaths?: string[]
+  proxy?: boolean;
+  readOnly?: boolean;
+  allowedPaths?: string[];
 }
 
 export interface Port {
-  name?: string
-  host: number
-  container: number
+  name?: string;
+  host: number;
+  container: number;
 }
 
 export interface Process {
-  name: string
-  command: string[]
-  ports: Port[]
-  environment: Record<string, string>
-  workingDir?: string
-  healthCheck?: ProcessHealthCheck
-  mode: "daemon" | "oneshot"
-  startOn: LifecyclePoint
+  name: string;
+  command: string[];
+  ports: Port[];
+  environment: Record<string, string>;
+  workingDir?: string;
+  healthCheck?: ProcessHealthCheck;
+  mode: "daemon" | "oneshot";
+  startOn: LifecyclePoint;
   // When false, the process environment is not merged into the global runtime
   // environment. This keeps sensitive env vars (e.g. MCP proxy credentials) out of
   // the dev service's compose environment.
-  mergeEnv?: boolean
+  mergeEnv?: boolean;
 }
 
 export interface ProcessHealthCheck {
-  type: "http" | "tcp" | "exec"
-  url?: string
-  command?: string[]
-  port?: number
-  interval?: string
-  timeout?: string
-  retries?: number
-  startPeriod?: string
+  type: "http" | "tcp" | "exec";
+  url?: string;
+  command?: string[];
+  port?: number;
+  interval?: string;
+  timeout?: string;
+  retries?: number;
+  startPeriod?: string;
 }
 
 export type LifecyclePoint =
@@ -293,7 +347,7 @@ export type LifecyclePoint =
   | "stop.pre"
   | "stop.post"
   | "exec.pre"
-  | "exec.post"
+  | "exec.post";
 
 export const LIFECYCLE_POINTS = new Set<LifecyclePoint>([
   "build.pre",
@@ -304,7 +358,7 @@ export const LIFECYCLE_POINTS = new Set<LifecyclePoint>([
   "stop.post",
   "exec.pre",
   "exec.post",
-])
+]);
 
 export const LifecyclePointSchema = Schema.Literals([
   "build.pre",
@@ -315,12 +369,13 @@ export const LifecyclePointSchema = Schema.Literals([
   "stop.post",
   "exec.pre",
   "exec.post",
-])
+]);
 
 export interface Plan {
-  project: string
-  build: BuildPlan
-  runtime: RuntimePlan
+  project: string;
+  build: BuildPlan;
+  runtime: RuntimePlan;
+  deployment?: DeploymentPlan;
 }
 
 export function createPlan(project: string): Plan {
@@ -342,6 +397,15 @@ export function createPlan(project: string): Plan {
       vendorVolume: false,
       mcpEnabled: false,
       mcpPort: 3001,
+      mcpConfig: {
+        enabled: false,
+        port: 3001,
+        allowExec: false,
+        allowProcessControl: false,
+        maxReadBytes: 1048576,
+        maxWriteBytes: 2097152,
+        maxListEntries: 100,
+      },
     },
     runtime: {
       services: [],
@@ -361,10 +425,95 @@ export function createPlan(project: string): Plan {
       claudeHarnesses: [],
       llmProviders: [],
     },
+  };
+}
+
+// --- Target/task name and duration validation ---
+
+const TARGET_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
+export function validateTargetName(name: string): void {
+  if (!name || typeof name !== "string") {
+    throw new Error("Target name must be a non-empty string");
+  }
+  if (!TARGET_NAME_PATTERN.test(name)) {
+    throw new Error(`Invalid target name: "${name}". Must match ${TARGET_NAME_PATTERN.source}`);
+  }
+  if (name === "." || name === "..") {
+    throw new Error(`Invalid target name: "${name}"`);
+  }
+  if (name.length > 64) {
+    throw new Error(`Target name too long (${name.length} chars, max 64)`);
   }
 }
 
-// Schema-backed validation for incoming user specs.
+const DURATION_PATTERN = /^(\d+)(s|m|h)$/;
+
+export function parseDuration(value: string): number {
+  if (!value || typeof value !== "string") {
+    throw new Error(`Duration must be a non-empty string`);
+  }
+  const match = DURATION_PATTERN.exec(value);
+  if (!match) {
+    throw new Error(
+      `Invalid duration: "${value}". Use positive integer + s/m/h (e.g. "30s", "5m", "2h")`,
+    );
+  }
+  const num = parseInt(match[1], 10);
+  if (num <= 0) {
+    throw new Error(`Duration must be positive: "${value}"`);
+  }
+  const unit = match[2];
+  switch (unit) {
+    case "s":
+      return num;
+    case "m":
+      return num * 60;
+    case "h":
+      return num * 3600;
+    default:
+      throw new Error(`Unknown duration unit: ${unit}`);
+  }
+}
+
+export function validateArtifactPath(path: string): void {
+  if (!path || typeof path !== "string") {
+    throw new Error("Artifact path must be a non-empty string");
+  }
+  if (path.includes("\0")) {
+    throw new Error("Artifact path must not contain NUL byte");
+  }
+  if (path.startsWith("/")) {
+    throw new Error("Artifact path must not be absolute");
+  }
+  for (const segment of path.split("/")) {
+    if (segment === "..") {
+      throw new Error("Artifact path must not contain .. segments");
+    }
+  }
+}
+
+export function isJsonSafeValue(value: unknown): boolean {
+  if (value === null) return true;
+  if (typeof value === "string") return true;
+  if (typeof value === "number") return true;
+  if (typeof value === "boolean") return true;
+  if (Array.isArray(value)) return value.every(isJsonSafeValue);
+  if (typeof value === "object" && value !== null) {
+    return Object.values(value).every(isJsonSafeValue);
+  }
+  return false;
+}
+
+export function validateJsonSafeOptions(value: unknown, label: string): void {
+  if (!isJsonSafeValue(value)) {
+    throw new Error(
+      `${label} contains non-JSON-safe values (functions, symbols, undefined, dates, etc.)`,
+    );
+  }
+}
+
+// --- Schema-backed validation ---
 
 export const ProcessHealthCheckSpecSchema = Schema.Struct({
   type: Schema.optional(Schema.Literals(["http", "tcp", "exec"])),
@@ -375,7 +524,7 @@ export const ProcessHealthCheckSpecSchema = Schema.Struct({
   timeout: Schema.optional(Schema.String),
   retries: Schema.optional(Schema.Number),
   startPeriod: Schema.optional(Schema.String),
-})
+});
 
 export const ProcessSpecSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
@@ -388,38 +537,38 @@ export const ProcessSpecSchema = Schema.Struct({
   mode: Schema.optional(Schema.Literals(["daemon", "oneshot"])),
   startOn: Schema.optional(LifecyclePointSchema),
   mergeEnv: Schema.optional(Schema.Boolean),
-})
+});
 
 export const HookSpecSchema = ProcessSpecSchema.pipe(
   Schema.check(
     Schema.makeFilter((spec) =>
-      spec.startOn !== undefined ? undefined : "Hook requires a startOn lifecycle point"
-    )
-  )
-)
+      spec.startOn !== undefined ? undefined : "Hook requires a startOn lifecycle point",
+    ),
+  ),
+);
 
 export const LanguageOptionsSchema = Schema.Struct({
   version: Schema.optional(Schema.String),
   packageManager: Schema.optional(Schema.String),
-})
+});
 
 export const PackageOptionsSchema = Schema.Struct({
   version: Schema.optional(Schema.String),
   indexUrl: Schema.optional(Schema.String),
-})
+});
 
 export const ToolOptionsSchema = Schema.Struct({
   version: Schema.optional(Schema.String),
-})
+});
 
 export const ServiceUserSchema = Schema.Struct({
   name: Schema.String,
   password: Schema.String,
-})
+});
 
 export const ServiceDatabaseSchema = Schema.Struct({
   name: Schema.String,
-})
+});
 
 export const ServiceOptionsSchema = Schema.Struct({
   image: Schema.optional(Schema.String),
@@ -428,9 +577,9 @@ export const ServiceOptionsSchema = Schema.Struct({
   databases: Schema.optional(Schema.Array(ServiceDatabaseSchema)),
   users: Schema.optional(Schema.Array(ServiceUserSchema)),
   password: Schema.optional(Schema.String),
-})
+});
 
-const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
+const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 // A credential value is either a plain string or an { env: "VAR" } reference
 // that resolves from the container's environment at runtime.
@@ -439,16 +588,16 @@ export const SecretValueSchema = Schema.Union([
   Schema.Struct({
     env: Schema.String.check(Schema.isMinLength(1)).check(
       Schema.makeFilter((value) =>
-        ENV_VAR_NAME_PATTERN.test(value) ? undefined : "must be a valid environment variable name"
-      )
+        ENV_VAR_NAME_PATTERN.test(value) ? undefined : "must be a valid environment variable name",
+      ),
     ),
   }),
-])
+]);
 
 export const RepoCredentialsSchema = Schema.Struct({
   token: Schema.optional(SecretValueSchema),
   sshKey: Schema.optional(SecretValueSchema),
-})
+});
 
 export const RepoSpecSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
@@ -457,7 +606,7 @@ export const RepoSpecSchema = Schema.Struct({
   branch: Schema.optional(Schema.String),
   depth: Schema.optional(Schema.Number),
   credentials: Schema.optional(RepoCredentialsSchema),
-})
+});
 
 export const RepoSchema = Schema.Struct({
   name: Schema.String,
@@ -466,16 +615,16 @@ export const RepoSchema = Schema.Struct({
   branch: Schema.String,
   depth: Schema.optional(Schema.Number),
   credentials: Schema.optional(RepoCredentialsSchema),
-})
+});
 
 export const AgentHarnessMcpServerSchema = Schema.Struct({
   url: Schema.String,
-})
+});
 
 export const AgentHarnessTelemetrySchema = Schema.Struct({
   enabled: Schema.Boolean,
   path: Schema.String,
-})
+});
 
 export const AgentHarnessSpecSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
@@ -485,10 +634,10 @@ export const AgentHarnessSpecSchema = Schema.Struct({
     Schema.Struct({
       enabled: Schema.optional(Schema.Boolean),
       path: Schema.optional(Schema.String),
-    })
+    }),
   ),
   config: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
-})
+});
 
 export const AgentHarnessSchema = Schema.Struct({
   name: Schema.String,
@@ -497,7 +646,7 @@ export const AgentHarnessSchema = Schema.Struct({
   mcpServers: Schema.Record(Schema.String, AgentHarnessMcpServerSchema),
   telemetry: AgentHarnessTelemetrySchema,
   config: Schema.Record(Schema.String, Schema.Unknown),
-})
+});
 
 export const PiHarnessSpecSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
@@ -514,10 +663,10 @@ export const PiHarnessSpecSchema = Schema.Struct({
     Schema.Struct({
       enabled: Schema.optional(Schema.Boolean),
       path: Schema.optional(Schema.String),
-    })
+    }),
   ),
   config: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
-})
+});
 
 export const PiHarnessSchema = Schema.Struct({
   name: Schema.String,
@@ -533,7 +682,7 @@ export const PiHarnessSchema = Schema.Struct({
   packages: Schema.optional(Schema.Array(Schema.String)),
   telemetry: AgentHarnessTelemetrySchema,
   config: Schema.Record(Schema.String, Schema.Unknown),
-})
+});
 
 export const CodexHarnessSpecSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
@@ -545,10 +694,10 @@ export const CodexHarnessSpecSchema = Schema.Struct({
     Schema.Struct({
       enabled: Schema.optional(Schema.Boolean),
       path: Schema.optional(Schema.String),
-    })
+    }),
   ),
   config: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
-})
+});
 
 export const CodexHarnessSchema = Schema.Struct({
   name: Schema.String,
@@ -559,7 +708,7 @@ export const CodexHarnessSchema = Schema.Struct({
   model: Schema.optional(Schema.String),
   telemetry: AgentHarnessTelemetrySchema,
   config: Schema.Record(Schema.String, Schema.Unknown),
-})
+});
 
 export const ClaudeHarnessSpecSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
@@ -571,10 +720,10 @@ export const ClaudeHarnessSpecSchema = Schema.Struct({
     Schema.Struct({
       enabled: Schema.optional(Schema.Boolean),
       path: Schema.optional(Schema.String),
-    })
+    }),
   ),
   config: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
-})
+});
 
 export const ClaudeHarnessSchema = Schema.Struct({
   name: Schema.String,
@@ -585,7 +734,7 @@ export const ClaudeHarnessSchema = Schema.Struct({
   permissions: Schema.optional(Schema.String),
   telemetry: AgentHarnessTelemetrySchema,
   config: Schema.Record(Schema.String, Schema.Unknown),
-})
+});
 
 const LlmProviderOptionValueSchema = Schema.Union([
   Schema.String,
@@ -593,17 +742,19 @@ const LlmProviderOptionValueSchema = Schema.Union([
   Schema.Boolean,
   SecretValueSchema,
   Schema.Undefined,
-])
+]);
 
 export const LlmProviderSpecSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
   npm: Schema.optional(Schema.String),
   displayName: Schema.optional(Schema.String),
   options: Schema.optional(Schema.Record(Schema.String, LlmProviderOptionValueSchema)),
-  models: Schema.optional(Schema.Record(Schema.String, Schema.Struct({ name: Schema.optional(Schema.String) }))),
-})
+  models: Schema.optional(
+    Schema.Record(Schema.String, Schema.Struct({ name: Schema.optional(Schema.String) })),
+  ),
+});
 
-export const EndpointCredentialsSchema = Schema.Record(Schema.String, SecretValueSchema)
+export const EndpointCredentialsSchema = Schema.Record(Schema.String, SecretValueSchema);
 
 export const EndpointSpecSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
@@ -612,7 +763,7 @@ export const EndpointSpecSchema = Schema.Struct({
   port: Schema.optional(Schema.Number),
   credentials: Schema.optional(EndpointCredentialsSchema),
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-})
+});
 
 export const ProviderSpecSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
@@ -625,9 +776,9 @@ export const ProviderSpecSchema = Schema.Struct({
   authCredential: Schema.optional(Schema.String),
   credentials: Schema.optional(EndpointCredentialsSchema),
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-})
+});
 
-export const VolumeCredentialsSchema = Schema.Record(Schema.String, SecretValueSchema)
+export const VolumeCredentialsSchema = Schema.Record(Schema.String, SecretValueSchema);
 
 export const VolumeSpecSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
@@ -661,9 +812,9 @@ export const VolumeSpecSchema = Schema.Struct({
   proxy: Schema.optional(Schema.Boolean),
   readOnly: Schema.optional(Schema.Boolean),
   allowedPaths: Schema.optional(Schema.Array(Schema.String)),
-})
+});
 
-export const EnvScopeSchema = Schema.Literals(["build", "runtime", "both"])
+export const EnvScopeSchema = Schema.Literals(["build", "runtime", "both"]);
 
 // Input spec for addEnv. Exactly one of `value` (literal) or `from` (host
 // passthrough) must be provided; addEnv enforces that XOR at runtime.
@@ -673,15 +824,17 @@ export const EnvSpecSchema = Schema.Struct({
     Schema.Struct({
       env: Schema.String.check(Schema.isMinLength(1)).check(
         Schema.makeFilter((value) =>
-          ENV_VAR_NAME_PATTERN.test(value) ? undefined : "must be a valid environment variable name"
-        )
+          ENV_VAR_NAME_PATTERN.test(value)
+            ? undefined
+            : "must be a valid environment variable name",
+        ),
       ),
-    })
+    }),
   ),
   scope: Schema.optional(EnvScopeSchema),
   required: Schema.optional(Schema.Boolean),
   default: Schema.optional(Schema.String),
-})
+});
 
 // Normalized EnvVar as stored on the plan (round-trippable in plan.json).
 export const EnvVarSchema = Schema.Struct({
@@ -691,25 +844,31 @@ export const EnvVarSchema = Schema.Struct({
   from: Schema.optional(Schema.Struct({ env: Schema.String })),
   required: Schema.optional(Schema.Boolean),
   default: Schema.optional(Schema.String),
-})
+});
 
 export const McpConfigSchema = Schema.Struct({
   enabled: Schema.Boolean,
   port: Schema.optional(Schema.Number),
-})
+  token: Schema.optional(SecretValueSchema),
+  allowExec: Schema.optional(Schema.Boolean),
+  allowProcessControl: Schema.optional(Schema.Boolean),
+  maxReadBytes: Schema.optional(Schema.Number),
+  maxWriteBytes: Schema.optional(Schema.Number),
+  maxListEntries: Schema.optional(Schema.Number),
+});
 
 export const ConfigSchema = Schema.Struct({
   project: Schema.Struct({
     name: Schema.String.check(Schema.isMinLength(1)),
   }),
   mcp: Schema.optional(McpConfigSchema),
-})
+});
 
 export const PortSchema = Schema.Struct({
   name: Schema.optional(Schema.String),
   host: Schema.Number,
   container: Schema.Number,
-})
+});
 
 export const ProcessSchema = Schema.Struct({
   name: Schema.String,
@@ -721,7 +880,7 @@ export const ProcessSchema = Schema.Struct({
   mode: Schema.Literals(["daemon", "oneshot"]),
   startOn: LifecyclePointSchema,
   mergeEnv: Schema.optional(Schema.Boolean),
-})
+});
 
 export const ServiceSchema = Schema.Struct({
   name: Schema.String,
@@ -738,10 +897,10 @@ export const ServiceSchema = Schema.Struct({
       timeout: Schema.optional(Schema.String),
       retries: Schema.optional(Schema.Number),
       startPeriod: Schema.optional(Schema.String),
-    })
+    }),
   ),
   networks: Schema.Array(Schema.String),
-})
+});
 
 export const ProviderSchema = Schema.Struct({
   name: Schema.String,
@@ -754,10 +913,69 @@ export const ProviderSchema = Schema.Struct({
   authCredential: Schema.optional(Schema.String),
   credentials: Schema.optional(EndpointCredentialsSchema),
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-})
+});
+
+const TargetNameSchema = Schema.String.pipe(
+  Schema.check(Schema.isMinLength(1)),
+  Schema.check(
+    Schema.makeFilter((value): string | undefined => {
+      try {
+        validateTargetName(value);
+        return undefined;
+      } catch (e) {
+        return (e as Error).message;
+      }
+    }),
+  ),
+);
+
+const DurationSchema = Schema.String.pipe(
+  Schema.check(
+    Schema.makeFilter((value): string | undefined => {
+      try {
+        parseDuration(value);
+        return undefined;
+      } catch (e) {
+        return (e as Error).message;
+      }
+    }),
+  ),
+);
+
+const CleanupSchema = Schema.Literals(["always", "on-success", "never"]);
+
+export const RuntimeTargetSchema = Schema.Struct({
+  name: TargetNameSchema,
+  driver: Schema.String.check(Schema.isMinLength(1)),
+  options: Schema.Record(Schema.String, Schema.Unknown),
+});
+
+export const TaskSpecSchema = Schema.Struct({
+  harness: Schema.String.check(Schema.isMinLength(1)),
+  prompt: Schema.String.check(Schema.isMinLength(1)),
+  artifacts: Schema.optional(Schema.Array(Schema.String)),
+  timeout: Schema.optional(DurationSchema),
+  cleanup: Schema.optional(CleanupSchema),
+});
+
+export const TaskSchema = Schema.Struct({
+  name: Schema.String,
+  harness: Schema.String,
+  prompt: Schema.String,
+  artifacts: Schema.Array(Schema.String),
+  timeout: Schema.String,
+  cleanup: CleanupSchema,
+});
+
+export const DeploymentPlanSchema = Schema.Struct({
+  target: RuntimeTargetSchema,
+  task: Schema.optional(TaskSchema),
+  deploymentId: Schema.String,
+});
 
 export const PlanSchema = Schema.Struct({
   project: Schema.String,
+  deployment: Schema.optional(DeploymentPlanSchema),
   build: Schema.Struct({
     project: Schema.String,
     baseImage: Schema.String,
@@ -768,14 +986,14 @@ export const PlanSchema = Schema.Struct({
       Schema.Struct({
         name: Schema.String,
         options: LanguageOptionsSchema,
-      })
+      }),
     ),
     dependencyFiles: Schema.Array(Schema.String),
     dependencyInstalls: Schema.Array(
-      Schema.Struct({ files: Schema.Array(Schema.String), command: Schema.String })
+      Schema.Struct({ files: Schema.Array(Schema.String), command: Schema.String }),
     ),
     copyArtifacts: Schema.Array(
-      Schema.Struct({ files: Schema.Array(Schema.String), lines: Schema.Array(Schema.String) })
+      Schema.Struct({ files: Schema.Array(Schema.String), lines: Schema.Array(Schema.String) }),
     ),
     environment: Schema.Record(Schema.String, Schema.String),
     nodeModulesVolume: Schema.Boolean,
@@ -783,6 +1001,16 @@ export const PlanSchema = Schema.Struct({
     vendorVolume: Schema.Boolean,
     mcpEnabled: Schema.Boolean,
     mcpPort: Schema.Number,
+    mcpConfig: Schema.Struct({
+      enabled: Schema.Boolean,
+      port: Schema.Number,
+      token: Schema.optional(SecretValueSchema),
+      allowExec: Schema.Boolean,
+      allowProcessControl: Schema.Boolean,
+      maxReadBytes: Schema.Number,
+      maxWriteBytes: Schema.Number,
+      maxListEntries: Schema.Number,
+    }),
   }),
   runtime: Schema.Struct({
     services: Schema.Array(ServiceSchema),
@@ -821,7 +1049,7 @@ export const PlanSchema = Schema.Struct({
         proxy: Schema.optional(Schema.Boolean),
         readOnly: Schema.optional(Schema.Boolean),
         allowedPaths: Schema.optional(Schema.Array(Schema.String)),
-      })
+      }),
     ),
     ports: Schema.Array(PortSchema),
     environment: Schema.Record(Schema.String, Schema.String),
@@ -839,9 +1067,15 @@ export const PlanSchema = Schema.Struct({
         name: Schema.String,
         npm: Schema.optional(Schema.String),
         displayName: Schema.optional(Schema.String),
-        options: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Number, Schema.Boolean, SecretValueSchema])),
-        models: Schema.Record(Schema.String, Schema.Struct({ name: Schema.optional(Schema.String) })),
-      })
+        options: Schema.Record(
+          Schema.String,
+          Schema.Union([Schema.String, Schema.Number, Schema.Boolean, SecretValueSchema]),
+        ),
+        models: Schema.Record(
+          Schema.String,
+          Schema.Struct({ name: Schema.optional(Schema.String) }),
+        ),
+      }),
     ),
   }),
-})
+});

@@ -22,14 +22,17 @@ function tmpDir(prefix: string): string {
 }
 
 const NodeRuntime = NodeChildProcessSpawner.layer.pipe(
-  Layer.provide(Layer.merge(NodeFileSystem.layer, NodePath.layer))
+  Layer.provide(Layer.merge(NodeFileSystem.layer, NodePath.layer)),
 );
 
 describe("resolveProjectName", () => {
   it("reads the project name from sandbox/config.json", () => {
     const dir = tmpDir("project-name");
     mkdirSync(join(dir, ".biodome"), { recursive: true });
-    writeFileSync(join(dir, ".biodome", "config.json"), JSON.stringify({ project: { name: "my-app" } }));
+    writeFileSync(
+      join(dir, ".biodome", "config.json"),
+      JSON.stringify({ project: { name: "my-app" } }),
+    );
 
     try {
       expect(resolveProjectName(dir)).toBe("my-app");
@@ -54,7 +57,7 @@ describe("runHooks", () => {
     const exec = vi.fn().mockReturnValue(Effect.void);
     const runner = { exec } as unknown as SandboxRuntime;
     const program = runHooks(plan, "start.post", runner, "/tmp").pipe(
-      Effect.provide(Layer.merge(NodeRuntime, NoOpEventStoreLive("test")))
+      Effect.provide(Layer.merge(NodeRuntime, NoOpEventStoreLive("test"))),
     );
     await Effect.runPromise(program);
     expect(exec).toHaveBeenCalledWith(["python", "manage.py", "migrate"]);
@@ -74,7 +77,7 @@ describe("runHooks", () => {
     const exec = vi.fn().mockReturnValue(Effect.void);
     const runner = { exec } as unknown as SandboxRuntime;
     const program = runHooks(plan, "build.pre", runner, "/tmp").pipe(
-      Effect.provide(Layer.merge(NodeRuntime, NoOpEventStoreLive("test")))
+      Effect.provide(Layer.merge(NodeRuntime, NoOpEventStoreLive("test"))),
     );
     await Effect.runPromise(program);
     expect(exec).not.toHaveBeenCalled();
@@ -99,8 +102,8 @@ describe("runHooks", () => {
     const runner = { exec } as unknown as SandboxRuntime;
     const program = runHooks(plan, "start.post", runner, "/tmp").pipe(
       Effect.provide(
-        Layer.merge(NodeRuntime, FileEventStoreLive({ runId: "test", path: logPath }))
-      )
+        Layer.merge(NodeRuntime, FileEventStoreLive({ runId: "test", path: logPath })),
+      ),
     );
 
     try {
@@ -127,7 +130,7 @@ describe("runHooks", () => {
     const exec = vi.fn().mockReturnValue(Effect.void);
     const runner = { exec } as unknown as SandboxRuntime;
     const program = runHooks(plan, "stop.pre", runner, "/tmp").pipe(
-      Effect.provide(Layer.merge(NodeRuntime, NoOpEventStoreLive("test")))
+      Effect.provide(Layer.merge(NodeRuntime, NoOpEventStoreLive("test"))),
     );
     await Effect.runPromise(program);
     expect(exec).not.toHaveBeenCalled();
@@ -158,9 +161,7 @@ describe("detectStarterLanguages", () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "app" }));
     try {
-      expect(detectStarterLanguages(dir)).toEqual([
-        { name: "node", options: { version: "20" } },
-      ]);
+      expect(detectStarterLanguages(dir)).toEqual([{ name: "node", options: { version: "20" } }]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -171,9 +172,7 @@ describe("detectStarterLanguages", () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "bun.lockb"), "");
     try {
-      expect(detectStarterLanguages(dir)).toEqual([
-        { name: "node", options: { version: "20" } },
-      ]);
+      expect(detectStarterLanguages(dir)).toEqual([{ name: "node", options: { version: "20" } }]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -212,11 +211,12 @@ describe("detectStarterLanguages", () => {
   it("detects php from composer.json", () => {
     const dir = tmpDir("php-lang");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "composer.json"), JSON.stringify({ name: "app", require: { "laravel/framework": "^11.0" } }));
+    writeFileSync(
+      join(dir, "composer.json"),
+      JSON.stringify({ name: "app", require: { "laravel/framework": "^11.0" } }),
+    );
     try {
-      expect(detectStarterLanguages(dir)).toEqual([
-        { name: "php", options: { version: "8.3" } },
-      ]);
+      expect(detectStarterLanguages(dir)).toEqual([{ name: "php", options: { version: "8.3" } }]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -245,7 +245,7 @@ describe("generateStarterFeature", () => {
       { name: "node", options: { version: "20" } },
       { name: "python", options: { version: "3.12" } },
     ]);
-    expect(feature).toContain('export default function autoDetect(ctx) {');
+    expect(feature).toContain("export default function autoDetect(ctx) {");
     expect(feature).toContain('ctx.addLanguage("node", {"version":"20"})');
     expect(feature).toContain('ctx.addLanguage("python", {"version":"3.12"})');
   });

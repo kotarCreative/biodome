@@ -103,7 +103,9 @@ describe("SandboxContext", () => {
       expect(ctx.plan.build.dependencyFiles).toEqual(["package.json", "package-lock.json"]);
       expect(ctx.plan.build.dependencyInstalls).toHaveLength(1);
       expect(ctx.plan.build.dependencyInstalls[0].command).toContain("npm ci");
-      expect(ctx.plan.build.dependencyInstalls[0].command).toContain("mkdir -p /workspace/node_modules");
+      expect(ctx.plan.build.dependencyInstalls[0].command).toContain(
+        "mkdir -p /workspace/node_modules",
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -120,7 +122,9 @@ describe("SandboxContext", () => {
       expect(ctx.plan.build.dependencyInstalls).toHaveLength(1);
       expect(ctx.plan.build.dependencyInstalls[0].command).toContain("npm install");
       expect(ctx.plan.build.dependencyInstalls[0].command).not.toContain("npm ci");
-      expect(ctx.plan.build.dependencyInstalls[0].command).toContain("mkdir -p /workspace/node_modules");
+      expect(ctx.plan.build.dependencyInstalls[0].command).toContain(
+        "mkdir -p /workspace/node_modules",
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -149,7 +153,9 @@ describe("SandboxContext", () => {
 
       expect(ctx.plan.build.dependencyFiles).toEqual(["package.json", "pnpm-lock.yaml"]);
       expect(ctx.plan.build.dependencyInstalls).toHaveLength(1);
-      expect(ctx.plan.build.dependencyInstalls[0].command).toContain("pnpm install --frozen-lockfile");
+      expect(ctx.plan.build.dependencyInstalls[0].command).toContain(
+        "pnpm install --frozen-lockfile",
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -164,7 +170,9 @@ describe("SandboxContext", () => {
 
       expect(ctx.plan.build.dependencyFiles).toEqual(["package.json", "yarn.lock"]);
       expect(ctx.plan.build.dependencyInstalls).toHaveLength(1);
-      expect(ctx.plan.build.dependencyInstalls[0].command).toContain("yarn install --frozen-lockfile");
+      expect(ctx.plan.build.dependencyInstalls[0].command).toContain(
+        "yarn install --frozen-lockfile",
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -209,7 +217,9 @@ describe("SandboxContext", () => {
       expect(ctx.plan.build.dependencyFiles).toEqual(["composer.json"]);
       expect(ctx.plan.build.dependencyInstalls).toHaveLength(1);
       expect(ctx.plan.build.dependencyInstalls[0].command).toContain("composer install");
-      expect(ctx.plan.build.copyArtifacts[0].lines).toContain("COPY --from=deps /workspace/vendor /workspace/vendor");
+      expect(ctx.plan.build.copyArtifacts[0].lines).toContain(
+        "COPY --from=deps /workspace/vendor /workspace/vendor",
+      );
       expect(ctx.plan.build.vendorVolume).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -244,7 +254,11 @@ describe("SandboxContext", () => {
         php: "sury",
       };
       for (const name of languages) {
-        expect(ctx.plan.build.runtimeInstalls.some((snippet) => snippet.toLowerCase().includes(markers[name]))).toBe(true);
+        expect(
+          ctx.plan.build.runtimeInstalls.some((snippet) =>
+            snippet.toLowerCase().includes(markers[name]),
+          ),
+        ).toBe(true);
       }
 
       if (languages.includes("go")) {
@@ -288,9 +302,7 @@ describe("SandboxContext", () => {
 
     expect(ctx.plan.build.environment.DEBUG).toBeUndefined();
     expect(ctx.plan.runtime.environment.DEBUG).toBe("1");
-    expect(ctx.plan.runtime.envVars).toEqual([
-      { key: "DEBUG", scope: "runtime", value: "1" },
-    ]);
+    expect(ctx.plan.runtime.envVars).toEqual([{ key: "DEBUG", scope: "runtime", value: "1" }]);
   });
 
   it("adds a literal env var to both build and runtime with scope 'both'", () => {
@@ -342,9 +354,9 @@ describe("SandboxContext", () => {
 
   it("rejects an env var with both value and from", () => {
     const ctx = new SandboxContext("/tmp", "test");
-    expect(() =>
-      ctx.addEnv("X", { value: "1", from: { env: "X" } })
-    ).toThrow(/exactly one of 'value'/);
+    expect(() => ctx.addEnv("X", { value: "1", from: { env: "X" } })).toThrow(
+      /exactly one of 'value'/,
+    );
   });
 
   it("rejects an env var with neither value nor from", () => {
@@ -355,15 +367,15 @@ describe("SandboxContext", () => {
   it("rejects required/default on a literal env var", () => {
     const ctx = new SandboxContext("/tmp", "test");
     expect(() => ctx.addEnv("X", { value: "1", required: true })).toThrow(
-      /only apply to passthrough/
+      /only apply to passthrough/,
     );
   });
 
   it("rejects an unsafe default for compose interpolation", () => {
     const ctx = new SandboxContext("/tmp", "test");
-    expect(() =>
-      ctx.addEnv("PORT", { from: { env: "PORT" }, default: "8:000" })
-    ).toThrow(/not safe inside a Docker Compose interpolation default/);
+    expect(() => ctx.addEnv("PORT", { from: { env: "PORT" }, default: "8:000" })).toThrow(
+      /not safe inside a Docker Compose interpolation default/,
+    );
   });
 
   it("rejects an invalid env key", () => {
@@ -375,9 +387,7 @@ describe("SandboxContext", () => {
   it("rejects duplicate env keys", () => {
     const ctx = new SandboxContext("/tmp", "test");
     ctx.addEnv("DEBUG", { value: "1" });
-    expect(() => ctx.addEnv("DEBUG", { value: "0" })).toThrow(
-      /Duplicate env variable/
-    );
+    expect(() => ctx.addEnv("DEBUG", { value: "0" })).toThrow(/Duplicate env variable/);
   });
 
   it("does not let a process environment overwrite an addEnv variable", () => {
@@ -423,7 +433,7 @@ describe("SandboxContext", () => {
     ctx.addProcess({ name: "web", command: ["node", "server.js"], port: 3000 });
 
     expect(() =>
-      ctx.addProcess({ name: "web", command: ["node", "server.js"], port: 3001 })
+      ctx.addProcess({ name: "web", command: ["node", "server.js"], port: 3001 }),
     ).toThrow(/Duplicate process or hook name/);
   });
 
@@ -431,9 +441,7 @@ describe("SandboxContext", () => {
     const ctx = new SandboxContext("/tmp", "test");
     ctx.addService("postgres", { port: 5432 });
 
-    expect(() => ctx.addService("postgres", { port: 5433 })).toThrow(
-      /Duplicate service name/
-    );
+    expect(() => ctx.addService("postgres", { port: 5433 })).toThrow(/Duplicate service name/);
   });
 
   it("adds an endpoint with literal and env-referenced credentials", () => {
@@ -478,15 +486,13 @@ describe("SandboxContext", () => {
     const ctx = new SandboxContext("/tmp", "test");
     ctx.addEndpoint({ name: "api", port: 8000 });
 
-    expect(() => ctx.addEndpoint({ name: "api", port: 8001 })).toThrow(
-      /Duplicate endpoint name/
-    );
+    expect(() => ctx.addEndpoint({ name: "api", port: 8001 })).toThrow(/Duplicate endpoint name/);
   });
 
   it("rejects an endpoint with an out-of-range port", () => {
     const ctx = new SandboxContext("/tmp", "test");
     expect(() => ctx.addEndpoint({ name: "api", port: 70000 })).toThrow(
-      /integer between 1 and 65535/
+      /integer between 1 and 65535/,
     );
   });
 
@@ -541,7 +547,7 @@ describe("SandboxContext", () => {
       ctx.addJiraProvider({
         name: "jira",
         credentials: {} as any,
-      })
+      }),
     ).toThrow(/credentials.token is required/);
   });
 
@@ -549,7 +555,7 @@ describe("SandboxContext", () => {
     const ctx = new SandboxContext("/tmp", "test");
     ctx.addProvider({ name: "jira", type: "jira" });
     expect(() => ctx.addProvider({ name: "jira", type: "jira" })).toThrow(
-      /Duplicate provider name/
+      /Duplicate provider name/,
     );
   });
 
@@ -580,15 +586,13 @@ describe("SandboxContext", () => {
       ctx.addLinearProvider({
         name: "linear",
         credentials: {} as any,
-      })
+      }),
     ).toThrow(/credentials.token is required/);
   });
 
   it("rejects an endpoint with an empty env reference", () => {
     const ctx = new SandboxContext("/tmp", "test");
-    expect(() =>
-      ctx.addEndpoint({ name: "api", credentials: { token: { env: "" } } })
-    ).toThrow();
+    expect(() => ctx.addEndpoint({ name: "api", credentials: { token: { env: "" } } })).toThrow();
   });
 
   it("does not create orphan volumes for services with no mounts", () => {
@@ -605,7 +609,7 @@ describe("SandboxContext", () => {
         name: "bad",
         command: "node server.js" as unknown as readonly string[],
         port: 3000,
-      })
+      }),
     ).toThrow(/Expected array, got "node server.js"/);
   });
 
@@ -616,21 +620,21 @@ describe("SandboxContext", () => {
         name: "bad",
         command: ["node"],
         startOn: "build.middle" as unknown as "build.pre",
-      })
+      }),
     ).toThrow(/Expected .* got "build.middle"/);
   });
 
   it("rejects an out-of-range port", () => {
     const ctx = new SandboxContext("/tmp", "test");
     expect(() => ctx.addProcess({ name: "bad", command: ["node"], port: 70000 })).toThrow(
-      /integer between 1 and 65535/
+      /integer between 1 and 65535/,
     );
   });
 
   it("rejects a service with non-string environment values", () => {
     const ctx = new SandboxContext("/tmp", "test");
     expect(() =>
-      ctx.addService("bad", { environment: { COUNT: 42 as unknown as string } })
+      ctx.addService("bad", { environment: { COUNT: 42 as unknown as string } }),
     ).toThrow(/Expected string, got 42/);
   });
 
@@ -802,31 +806,31 @@ describe("SandboxContext", () => {
       const ctx = new SandboxContext("/tmp", "test");
       ctx.addVolume({ name: "data", type: "local", source: "./a", target: "/workspace/a" });
       expect(() =>
-        ctx.addVolume({ name: "data", type: "local", source: "./b", target: "/workspace/b" })
+        ctx.addVolume({ name: "data", type: "local", source: "./b", target: "/workspace/b" }),
       ).toThrow(/Duplicate volume name/);
     });
 
     it("rejects local volumes without a source", () => {
       const ctx = new SandboxContext("/tmp", "test");
       expect(() =>
-        ctx.addVolume({ name: "data", type: "local", target: "/workspace/data" } as any)
+        ctx.addVolume({ name: "data", type: "local", target: "/workspace/data" } as any),
       ).toThrow(/local volumes require a source path/);
     });
 
     it("rejects S3 volumes without a bucket", () => {
       const ctx = new SandboxContext("/tmp", "test");
       expect(() =>
-        ctx.addVolume({ name: "s3", type: "s3", target: "/workspace/s3" } as any)
+        ctx.addVolume({ name: "s3", type: "s3", target: "/workspace/s3" } as any),
       ).toThrow(/S3 volumes require a bucket/);
     });
 
     it("rejects cloud volumes without a path", () => {
       const ctx = new SandboxContext("/tmp", "test");
       expect(() =>
-        ctx.addVolume({ name: "db", type: "dropbox", target: "/workspace/db" } as any)
+        ctx.addVolume({ name: "db", type: "dropbox", target: "/workspace/db" } as any),
       ).toThrow(/dropbox volumes require a path/);
       expect(() =>
-        ctx.addVolume({ name: "gd", type: "gdrive", target: "/workspace/gd" } as any)
+        ctx.addVolume({ name: "gd", type: "gdrive", target: "/workspace/gd" } as any),
       ).toThrow(/gdrive volumes require a path/);
     });
 
@@ -1072,14 +1076,24 @@ describe("SandboxContext", () => {
     it("requires mcpUrl", () => {
       const ctx = new SandboxContext("/tmp", "test");
       expect(() =>
-        ctx.addMcpProvider({ name: "x", type: "custom", mcpUrl: "", credentials: { token: "abc" } } as any)
+        ctx.addMcpProvider({
+          name: "x",
+          type: "custom",
+          mcpUrl: "",
+          credentials: { token: "abc" },
+        } as any),
       ).toThrow(/mcpUrl is required/);
     });
 
     it("requires credentials.token", () => {
       const ctx = new SandboxContext("/tmp", "test");
       expect(() =>
-        ctx.addMcpProvider({ name: "x", type: "custom", mcpUrl: "http://example.com/mcp", credentials: {} as any })
+        ctx.addMcpProvider({
+          name: "x",
+          type: "custom",
+          mcpUrl: "http://example.com/mcp",
+          credentials: {} as any,
+        }),
       ).toThrow(/credentials.token is required/);
     });
 
@@ -1118,9 +1132,9 @@ describe("SandboxContext", () => {
 
   it("rejects a Sentry provider without a token", () => {
     const ctx = new SandboxContext("/tmp", "test");
-    expect(() =>
-      ctx.addSentryProvider({ name: "sentry", credentials: {} as any })
-    ).toThrow(/credentials.token is required/);
+    expect(() => ctx.addSentryProvider({ name: "sentry", credentials: {} as any })).toThrow(
+      /credentials.token is required/,
+    );
   });
 
   it("adds a Slack provider through the helper", () => {
@@ -1140,7 +1154,7 @@ describe("SandboxContext", () => {
   it("rejects a Slack provider without mcpUrl", () => {
     const ctx = new SandboxContext("/tmp", "test");
     expect(() =>
-      ctx.addSlackProvider({ name: "slack", credentials: { token: "x" } } as any)
+      ctx.addSlackProvider({ name: "slack", credentials: { token: "x" } } as any),
     ).toThrow(/mcpUrl is required/);
   });
 
@@ -1159,9 +1173,9 @@ describe("SandboxContext", () => {
 
   it("rejects a GitHub provider without a token", () => {
     const ctx = new SandboxContext("/tmp", "test");
-    expect(() =>
-      ctx.addGithubProvider({ name: "github", credentials: {} as any })
-    ).toThrow(/credentials.token is required/);
+    expect(() => ctx.addGithubProvider({ name: "github", credentials: {} as any })).toThrow(
+      /credentials.token is required/,
+    );
   });
 
   describe("provider credential isolation in configureMcp", () => {
@@ -1253,7 +1267,7 @@ describe("SandboxContext", () => {
       const ctx = new SandboxContext("/tmp", "test");
       ctx.addRepo({ name: "backend", url: "https://github.com/acme/backend.git" });
       expect(() =>
-        ctx.addRepo({ name: "backend", url: "https://github.com/acme/backend2.git" })
+        ctx.addRepo({ name: "backend", url: "https://github.com/acme/backend2.git" }),
       ).toThrow(/Duplicate repo name/);
     });
 
@@ -1264,7 +1278,7 @@ describe("SandboxContext", () => {
           name: "backend",
           url: "https://github.com/acme/backend.git",
           credentials: { token: "ghp_secret" },
-        })
+        }),
       ).toThrow(/must be an environment reference/);
     });
   });
@@ -1315,7 +1329,9 @@ describe("SandboxContext", () => {
     it("rejects duplicate harness names", () => {
       const ctx = new SandboxContext("/tmp", "test");
       ctx.addOpencodeHarness({ name: "agent" });
-      expect(() => ctx.addOpencodeHarness({ name: "agent" })).toThrow(/Duplicate agent harness name/);
+      expect(() => ctx.addOpencodeHarness({ name: "agent" })).toThrow(
+        /Duplicate agent harness name/,
+      );
     });
   });
 
@@ -1359,7 +1375,7 @@ describe("SandboxContext", () => {
         ctx.addLlmProvider({
           name: "lmstudio",
           options: { apiKey: "sk-secret" },
-        })
+        }),
       ).toThrow(/must be an environment reference/);
     });
   });
@@ -1376,7 +1392,9 @@ describe("SandboxContext", () => {
       expect(harness.telemetry.enabled).toBe(true);
       expect(harness.telemetry.path).toBe("/workspace/.biodome-build/logs/pi-coder-events.jsonl");
 
-      expect(ctx.plan.build.languageSnippets.some((s) => s.includes("@earendil-works/pi-coding-agent"))).toBe(true);
+      expect(
+        ctx.plan.build.languageSnippets.some((s) => s.includes("@earendil-works/pi-coding-agent")),
+      ).toBe(true);
     });
 
     it("supports provider, model, tools and resources", () => {
@@ -1413,7 +1431,9 @@ describe("SandboxContext", () => {
 
     it("rejects literal apiKey strings", () => {
       const ctx = new SandboxContext("/tmp", "test");
-      expect(() => ctx.addPiHarness({ name: "coder", apiKey: "sk-secret" })).toThrow(/must be an environment reference/);
+      expect(() => ctx.addPiHarness({ name: "coder", apiKey: "sk-secret" })).toThrow(
+        /must be an environment reference/,
+      );
     });
   });
 
@@ -1430,7 +1450,9 @@ describe("SandboxContext", () => {
       expect(harness.port).toBe(3003);
       expect(harness.mcpServers).toEqual({ biodome: { url: "http://localhost:3001" } });
       expect(harness.telemetry.enabled).toBe(true);
-      expect(harness.telemetry.path).toBe("/workspace/.biodome-build/logs/codex-coder-events.jsonl");
+      expect(harness.telemetry.path).toBe(
+        "/workspace/.biodome-build/logs/codex-coder-events.jsonl",
+      );
 
       const proc = ctx.plan.runtime.processes.find((p) => p.name === "codex-agent-coder");
       expect(proc).toBeDefined();
@@ -1470,7 +1492,9 @@ describe("SandboxContext", () => {
 
     it("rejects literal apiKey strings", () => {
       const ctx = new SandboxContext("/tmp", "test");
-      expect(() => ctx.addCodexHarness({ name: "coder", apiKey: "sk-secret" })).toThrow(/must be an environment reference/);
+      expect(() => ctx.addCodexHarness({ name: "coder", apiKey: "sk-secret" })).toThrow(
+        /must be an environment reference/,
+      );
     });
   });
 
@@ -1484,9 +1508,13 @@ describe("SandboxContext", () => {
       expect(harness.name).toBe("assistant");
       expect(harness.type).toBe("claude");
       expect(harness.telemetry.enabled).toBe(true);
-      expect(harness.telemetry.path).toBe("/workspace/.biodome-build/logs/claude-assistant-events.jsonl");
+      expect(harness.telemetry.path).toBe(
+        "/workspace/.biodome-build/logs/claude-assistant-events.jsonl",
+      );
 
-      expect(ctx.plan.build.languageSnippets.some((s) => s.includes("@anthropic-ai/claude-code"))).toBe(true);
+      expect(
+        ctx.plan.build.languageSnippets.some((s) => s.includes("@anthropic-ai/claude-code")),
+      ).toBe(true);
     });
 
     it("supports model, tools, permissions, and apiKey", () => {
@@ -1512,12 +1540,16 @@ describe("SandboxContext", () => {
     it("rejects duplicate Claude harness names", () => {
       const ctx = new SandboxContext("/tmp", "test");
       ctx.addClaudeHarness({ name: "assistant" });
-      expect(() => ctx.addClaudeHarness({ name: "assistant" })).toThrow(/Duplicate Claude harness name/);
+      expect(() => ctx.addClaudeHarness({ name: "assistant" })).toThrow(
+        /Duplicate Claude harness name/,
+      );
     });
 
     it("rejects literal apiKey strings", () => {
       const ctx = new SandboxContext("/tmp", "test");
-      expect(() => ctx.addClaudeHarness({ name: "assistant", apiKey: "sk-secret" })).toThrow(/must be an environment reference/);
+      expect(() => ctx.addClaudeHarness({ name: "assistant", apiKey: "sk-secret" })).toThrow(
+        /must be an environment reference/,
+      );
     });
   });
 });

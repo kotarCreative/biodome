@@ -416,7 +416,7 @@ export default function volumes(ctx) {
 - `credentials` — map of provider credentials. Each value is either a literal string or an `{ env: "VAR_NAME" }` reference. Env references are resolved from the host at `up` time and never written to the generated files.
 - `options.readOnly` — set to `"true"` for read-only mounts (local only).
 
-Cloud-backed volumes install `rclone` and `fuse3` in the dev container, enable privileged mode, and run an `rclone mount` daemon process. Files are read and written directly against the remote source.
+Cloud-backed volumes install `rclone` and `fuse3` in the dev container, grant only the minimal FUSE capabilities (`/dev/fuse`, `SYS_ADMIN`, dropped default capabilities, `no-new-privileges`), and run an `rclone mount` daemon process. Files are read and written directly against the remote source. **Proxy mode** (see below) is the recommended approach for agent workloads — it avoids granting any container-level capabilities.
 
 ### Proxy mode (agent-safe access)
 
@@ -446,6 +446,7 @@ In proxy mode:
 - Credentials are passed only to the MCP server process, never to the dev container's global environment.
 - Agents access files through MCP tools: `list_volumes`, `list_files`, `read_file`, `write_file`, `stat_file`.
 - Access rules are enforced by the MCP server (`allowedPaths`, `readOnly`).
+- **`allowedPaths` defaults to deny-all.** Without an explicit glob pattern like `["**"]`, no paths are accessible. This is a security-hardened default; existing proxy volume configurations must add an explicit `allowedPaths` entry.
 
 Proxy mode is supported for `local`, `s3`, `gcs`, and `azure` volumes. Other volume types still fall back to `rclone` mount.
 

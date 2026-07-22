@@ -31,15 +31,11 @@ describe("createFileEventStore", () => {
     const path = join(dir, "events.jsonl");
     const store = createFileEventStore({ runId: "run-1", path });
 
+    await Effect.runPromise(store.emit("run.started", { command: "build", cwd: "/project" }));
     await Effect.runPromise(
-      store.emit("run.started", { command: "build", cwd: "/project" })
+      store.emit("plan.loaded", { project: "my-app", languages: [], services: [], processes: [] }),
     );
-    await Effect.runPromise(
-      store.emit("plan.loaded", { project: "my-app", languages: [], services: [], processes: [] })
-    );
-    await Effect.runPromise(
-      store.emit("run.completed", { command: "build", durationMs: 100 })
-    );
+    await Effect.runPromise(store.emit("run.completed", { command: "build", durationMs: 100 }));
 
     const events = await Effect.runPromise(readEventsFromPath(path));
     expect(events).toHaveLength(3);
@@ -81,7 +77,7 @@ describe("createFileEventStore", () => {
 
     await Effect.runPromise(store.close());
     await expect(
-      Effect.runPromise(store.emit("run.started", { command: "exec", cwd: "/project" }))
+      Effect.runPromise(store.emit("run.started", { command: "exec", cwd: "/project" })),
     ).rejects.toThrow("EventStore is closed");
   });
 });
@@ -148,9 +144,30 @@ describe("formatEvent", () => {
 describe("filterEventsByRunId", () => {
   it("keeps only events matching the run id", () => {
     const events = [
-      { id: "a", runId: "run-1", sequence: 1, timestamp: "t", type: "run.started" as const, data: {} },
-      { id: "b", runId: "run-2", sequence: 1, timestamp: "t", type: "run.started" as const, data: {} },
-      { id: "c", runId: "run-1", sequence: 2, timestamp: "t", type: "run.completed" as const, data: {} },
+      {
+        id: "a",
+        runId: "run-1",
+        sequence: 1,
+        timestamp: "t",
+        type: "run.started" as const,
+        data: {},
+      },
+      {
+        id: "b",
+        runId: "run-2",
+        sequence: 1,
+        timestamp: "t",
+        type: "run.started" as const,
+        data: {},
+      },
+      {
+        id: "c",
+        runId: "run-1",
+        sequence: 2,
+        timestamp: "t",
+        type: "run.completed" as const,
+        data: {},
+      },
     ];
     const filtered = filterEventsByRunId(events, "run-1");
     expect(filtered).toHaveLength(2);

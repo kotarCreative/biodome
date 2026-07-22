@@ -11,6 +11,10 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli/index.ts",
+    "format": "oxfmt --write src docs",
+    "format:check": "oxfmt --check src docs",
+    "lint": "oxlint --disable-nested-config -c .oxlintrc.json src",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test:run",
     "test": "vitest",
     "test:run": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
@@ -28,6 +32,8 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "oxfmt": "^0.59.0",
+    "oxlint": "^1.74.0",
     "tsx": "^4.0.0",
     "typescript": "^5.5.4",
     "vitest": "^2.0.0"

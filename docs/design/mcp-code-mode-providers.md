@@ -61,20 +61,20 @@ File: `src/core/plan.ts`
 
    ```ts
    export interface Provider {
-     name: string
-     type: string
+     name: string;
+     type: string;
      // Remote MCP endpoint the biodome-mcp aggregator connects to.
-     mcpUrl?: string
+     mcpUrl?: string;
      // Header name used to send the credential (default "Authorization").
-     authHeader?: string
+     authHeader?: string;
      // Prefix prepended to the credential when sending (e.g. "Bearer ").
-     authScheme?: string
+     authScheme?: string;
      // Which key in `credentials` holds the token to send. Default "token".
-     authCredential?: string
-     url?: string
-     project?: string
-     credentials?: Record<string, SecretValue>
-     metadata?: Record<string, string>
+     authCredential?: string;
+     url?: string;
+     project?: string;
+     credentials?: Record<string, SecretValue>;
+     metadata?: Record<string, string>;
    }
    ```
 
@@ -88,6 +88,7 @@ File: `src/core/plan.ts`
    fields there so `plan.json` round-trips.
 
 Verify:
+
 ```bash
 npm run typecheck
 ```
@@ -107,51 +108,51 @@ File: `src/core/feature.ts`
    // A remote MCP provider: biodome-mcp connects to `mcpUrl` and forwards the
    // agent's tool calls, attaching the credential server-side.
    export interface McpProviderSpec {
-     name: string
-     type: string
-     mcpUrl: string
-     credentials: { token: SecretValue }
-     authHeader?: string      // default "Authorization"
-     authScheme?: string      // default "Bearer "
-     project?: string
-     metadata?: Record<string, string>
+     name: string;
+     type: string;
+     mcpUrl: string;
+     credentials: { token: SecretValue };
+     authHeader?: string; // default "Authorization"
+     authScheme?: string; // default "Bearer "
+     project?: string;
+     metadata?: Record<string, string>;
    }
 
    export interface JiraProviderSpec {
-     name: string
-     mcpUrl?: string          // default "https://mcp.atlassian.com/v1/mcp/authv2"
-     project?: string
-     credentials: { token: SecretValue }
-     metadata?: Record<string, string>
+     name: string;
+     mcpUrl?: string; // default "https://mcp.atlassian.com/v1/mcp/authv2"
+     project?: string;
+     credentials: { token: SecretValue };
+     metadata?: Record<string, string>;
    }
 
    export interface LinearProviderSpec {
-     name: string
-     mcpUrl?: string          // default "https://mcp.linear.app/mcp"
-     team?: string
-     credentials: { token: SecretValue }
-     metadata?: Record<string, string>
+     name: string;
+     mcpUrl?: string; // default "https://mcp.linear.app/mcp"
+     team?: string;
+     credentials: { token: SecretValue };
+     metadata?: Record<string, string>;
    }
 
    export interface SentryProviderSpec {
-     name: string
-     mcpUrl?: string          // default "https://mcp.sentry.dev/mcp"
-     credentials: { token: SecretValue }
-     metadata?: Record<string, string>
+     name: string;
+     mcpUrl?: string; // default "https://mcp.sentry.dev/mcp"
+     credentials: { token: SecretValue };
+     metadata?: Record<string, string>;
    }
 
    export interface SlackProviderSpec {
-     name: string
-     mcpUrl: string           // no stable public default; required
-     credentials: { token: SecretValue }
-     metadata?: Record<string, string>
+     name: string;
+     mcpUrl: string; // no stable public default; required
+     credentials: { token: SecretValue };
+     metadata?: Record<string, string>;
    }
 
    export interface GithubProviderSpec {
-     name: string
-     mcpUrl?: string          // default "https://api.githubcopilot.com/mcp/"
-     credentials: { token: SecretValue }
-     metadata?: Record<string, string>
+     name: string;
+     mcpUrl?: string; // default "https://api.githubcopilot.com/mcp/"
+     credentials: { token: SecretValue };
+     metadata?: Record<string, string>;
    }
    ```
 
@@ -169,6 +170,7 @@ File: `src/core/feature.ts`
    ```
 
 Verify:
+
 ```bash
 npm run typecheck   # will fail until Task 3 implements the methods — that is expected
 ```
@@ -181,7 +183,7 @@ File: `src/core/context.ts`
 
 1. Update the import from `./feature.js` to include the new spec types:
    `McpProviderSpec, JiraProviderSpec, LinearProviderSpec, SentryProviderSpec,
-   SlackProviderSpec, GithubProviderSpec` (remove any that no longer exist).
+SlackProviderSpec, GithubProviderSpec` (remove any that no longer exist).
 
 2. Keep `addProvider(spec)` as-is (it validates via `ProviderSpecSchema`, checks
    duplicate name, pushes onto `plan.runtime.providers`). Ensure it copies the
@@ -265,15 +267,16 @@ File: `src/core/context.ts`
 
    ```ts
    for (const provider of this.plan.runtime.providers) {
-     if (!provider.credentials) continue
+     if (!provider.credentials) continue;
      for (const value of Object.values(provider.credentials)) {
-       if (typeof value === "string") continue
-       mcpEnvironment[value.env] = `\${${value.env}}`
+       if (typeof value === "string") continue;
+       mcpEnvironment[value.env] = `\${${value.env}}`;
      }
    }
    ```
 
 Verify:
+
 ```bash
 npm run typecheck
 ```
@@ -303,9 +306,11 @@ providers: plan.runtime.providers.map((provider) => ({
 ```
 
 Verify:
+
 ```bash
 npm run typecheck && npm run test:run
 ```
+
 (Existing `generator.test.ts` provider tests may need the new fields; update
 their expected objects in Task 8.)
 
@@ -321,34 +326,34 @@ It has no dependency on the running server; it is unit-testable.
 Define and export:
 
 ```ts
-import { Client } from "@modelcontextprotocol/sdk/client/index.js"
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 export interface UpstreamProvider {
-  name: string
-  type: string
-  mcpUrl: string
-  authHeader: string       // e.g. "Authorization"
-  authScheme: string       // e.g. "Bearer "
-  token: string            // already resolved from env by the caller
+  name: string;
+  type: string;
+  mcpUrl: string;
+  authHeader: string; // e.g. "Authorization"
+  authScheme: string; // e.g. "Bearer "
+  token: string; // already resolved from env by the caller
 }
 
 export interface CatalogEntry {
-  provider: string         // provider.name
-  tool: string             // upstream tool name
-  qualified: string        // `${provider}.${tool}` — what the agent references
-  description: string
-  inputSchema: unknown
+  provider: string; // provider.name
+  tool: string; // upstream tool name
+  qualified: string; // `${provider}.${tool}` — what the agent references
+  description: string;
+  inputSchema: unknown;
 }
 
 export class UpstreamRegistry {
   // Map qualified name -> { provider, tool }
   // Lazily connect per provider; cache Client + tool list.
-  constructor(providers: UpstreamProvider[])
-  async listCatalog(): Promise<CatalogEntry[]>        // connect all, gather tools
-  async describe(qualified: string): Promise<CatalogEntry>
-  async call(qualified: string, args: unknown): Promise<unknown>
-  async close(): Promise<void>
+  constructor(providers: UpstreamProvider[]);
+  async listCatalog(): Promise<CatalogEntry[]>; // connect all, gather tools
+  async describe(qualified: string): Promise<CatalogEntry>;
+  async call(qualified: string, args: unknown): Promise<unknown>;
+  async close(): Promise<void>;
 }
 ```
 
@@ -359,7 +364,7 @@ Implementation notes for the executor:
   ```ts
   new StreamableHTTPClientTransport(new URL(p.mcpUrl), {
     requestInit: { headers: { [p.authHeader]: `${p.authScheme}${p.token}` } },
-  })
+  });
   ```
 - Connect lazily: keep a `Map<string, Client>` and a `Map<string, boolean>` for
   connected state; a private `async ensureConnected(providerName)` that connects
@@ -368,9 +373,9 @@ Implementation notes for the executor:
 - `listCatalog()`: for each provider, `ensureConnected`, then
   `client.listTools()`; flatten into `CatalogEntry[]` with
   `qualified = \`${provider}.${tool}\``. Cache the result per provider so repeat
-  calls do not re-list. If a provider fails to connect, skip it and record the
-  error (do not throw the whole catalog away); expose failures via a
-  `getErrors(): { provider: string; error: string }[]` method.
+calls do not re-list. If a provider fails to connect, skip it and record the
+error (do not throw the whole catalog away); expose failures via a
+`getErrors(): { provider: string; error: string }[]` method.
 - `describe(qualified)`: split on the FIRST `.` into `provider` + `tool`; find
   the entry in the cached catalog; if not cached, list that provider first.
 - `call(qualified, args)`: split, `ensureConnected`, then
@@ -380,6 +385,7 @@ Implementation notes for the executor:
   and export it for tests. Rule: split on the first `.`; error if there is no `.`.
 
 Verify:
+
 ```bash
 npm run typecheck
 ```
@@ -409,13 +415,13 @@ Delete these (verify exact ranges by searching for the function/case names):
 After `const providers = plan.providers || []` (~line 157), build the registry:
 
 ```ts
-import { UpstreamRegistry, UpstreamProvider } from "./upstream.js"
+import { UpstreamRegistry, UpstreamProvider } from "./upstream.js";
 
 function toUpstream(p: any): UpstreamProvider | null {
-  if (!p.mcpUrl) return null
-  const credKey = p.authCredential || "token"
-  const token = resolveSecret(p.credentials?.[credKey])
-  if (!token) return null
+  if (!p.mcpUrl) return null;
+  const credKey = p.authCredential || "token";
+  const token = resolveSecret(p.credentials?.[credKey]);
+  if (!token) return null;
   return {
     name: p.name,
     type: p.type,
@@ -423,11 +429,13 @@ function toUpstream(p: any): UpstreamProvider | null {
     authHeader: p.authHeader || "Authorization",
     authScheme: p.authScheme || "Bearer ",
     token,
-  }
+  };
 }
 
-const upstreamProviders = providers.map(toUpstream).filter((x): x is UpstreamProvider => x !== null)
-const registry = new UpstreamRegistry(upstreamProviders)
+const upstreamProviders = providers
+  .map(toUpstream)
+  .filter((x): x is UpstreamProvider => x !== null);
+const registry = new UpstreamRegistry(upstreamProviders);
 ```
 
 ### 6c. Add the three code-mode tools to `ListTools`
@@ -530,6 +538,7 @@ In the outer `try/catch` of the `CallTool` handler, the existing
 surface as `McpError(ErrorCode.InternalError, ...)` (wrap in the default branch).
 
 Verify:
+
 ```bash
 npm run typecheck
 ```
@@ -549,18 +558,19 @@ const PROVIDER_TOOL_NAMES = new Set([
   "provider_search",
   "provider_describe",
   "provider_execute",
-])
+]);
 
 export function filterProviderTools(tools: any[], providers: any[]): any[] {
-  const hasProviders = providers.length > 0
+  const hasProviders = providers.length > 0;
   return tools.filter((tool) => {
-    if (PROVIDER_TOOL_NAMES.has(tool.name)) return hasProviders
-    return true
-  })
+    if (PROVIDER_TOOL_NAMES.has(tool.name)) return hasProviders;
+    return true;
+  });
 }
 ```
 
 Verify:
+
 ```bash
 npm run typecheck
 ```
@@ -572,6 +582,7 @@ npm run typecheck
 ### 8a. Rewrite `src/tests/mcp/provider-tools.test.ts`
 
 Replace Jira/Linear cases with:
+
 - No providers -> none of `get_providers`, `provider_search`,
   `provider_describe`, `provider_execute` present; base tools remain.
 - One provider (any type) -> all four provider tools present.
@@ -579,6 +590,7 @@ Replace Jira/Linear cases with:
 ### 8b. New `src/tests/mcp/upstream.test.ts`
 
 Test the pure logic without real network:
+
 - `parseQualified("linear.create_issue")` -> `{ provider: "linear", tool: "create_issue" }`.
 - `parseQualified("a.b.c")` -> `{ provider: "a", tool: "b.c" }` (split on first dot).
 - `parseQualified("nodot")` throws.
@@ -613,6 +625,7 @@ The info/AGENTS.md provider rendering still reads `type`, `url`, `project`,
 when `url` is absent, and update the test accordingly.
 
 Verify:
+
 ```bash
 npm run typecheck && npm run test:run
 ```
@@ -633,6 +646,7 @@ npm run typecheck && npm run test:run
   three code-mode tools + `get_providers`. Remove `jira_*` / `linear_*` entries.
 
 Verify: manual read; ensure no references to removed tools remain:
+
 ```bash
 rg -n "jira_list_issues|jira_get_issue|jira_create_issue|jira_get_attachment|jira_add_attachment|linear_list_issues|linear_get_issue|linear_create_issue|linear_add_attachment" src docs
 # expect: no matches

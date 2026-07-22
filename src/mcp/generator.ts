@@ -1,10 +1,10 @@
-import { Plan, Volume, SecretValue } from "../core/plan.js"
-import { serviceConnection } from "../core/info.js"
+import { Plan, Volume, SecretValue } from "../core/plan.js";
+import { serviceConnection } from "../core/info.js";
 
 function serializeCredential(value: SecretValue | undefined): string | { env: string } | null {
-  if (value === undefined) return null
-  if (typeof value === "string") return value
-  return { env: value.env }
+  if (value === undefined) return null;
+  if (typeof value === "string") return value;
+  return { env: value.env };
 }
 
 function serializeVolume(volume: Volume) {
@@ -31,10 +31,10 @@ function serializeVolume(volume: Volume) {
       ? Object.fromEntries(
           Object.entries(volume.credentials)
             .map(([key, value]) => [key, serializeCredential(value)])
-            .filter(([, value]) => value !== null)
+            .filter(([, value]) => value !== null),
         )
       : {},
-  }
+  };
 }
 
 export function generatePlanJson(plan: Plan): string {
@@ -109,6 +109,14 @@ export function generatePlanJson(plan: Plan): string {
           }
         : null,
     })),
-  }
-  return JSON.stringify(data, null, 2)
+    mcp: {
+      token: serializeCredential(plan.build.mcpConfig.token),
+      allowExec: plan.build.mcpConfig.allowExec,
+      allowProcessControl: plan.build.mcpConfig.allowProcessControl,
+      maxReadBytes: plan.build.mcpConfig.maxReadBytes,
+      maxWriteBytes: plan.build.mcpConfig.maxWriteBytes,
+      maxListEntries: plan.build.mcpConfig.maxListEntries,
+    },
+  };
+  return JSON.stringify(data, null, 2);
 }

@@ -7,20 +7,25 @@ my-project/
 ├── .biodome/
 │   ├── config.json          # project metadata
 │   ├── services.mjs         # backing services
-│   └── features/
-│       ├── django.mjs       # daemon process
-│       ├── migrate.mjs      # one-shot hook
-│       ├── python.mjs       # language runtime
-│       └── npm-tools.mjs    # tools and packages
+│   ├── features/
+│   │   ├── django.mjs       # daemon process
+│   │   ├── migrate.mjs      # one-shot hook
+│   │   ├── python.mjs       # language runtime
+│   │   └── npm-tools.mjs    # tools and packages
+│   ├── targets/
+│   │   └── local.mjs        # default Docker Compose target
+│   └── tasks/
+│       └── .gitkeep         # named task declarations
 ├── .biodome-build/
-│   ├── Dockerfile           # generated
-│   ├── supervisord.conf     # generated
-│   ├── docker-compose.yaml  # generated
-│   ├── healthchecks/        # generated
-│   │   ├── <process>.sh
-│   │   ├── <process>-monitor.sh
-│   │   └── all.sh
-│   └── logs/                # generated event logs
+│   ├── targets/
+│   │   └── local/           # target-scoped generated artifacts
+│   │       ├── Dockerfile
+│   │       ├── supervisord.conf
+│   │       ├── docker-compose.yaml
+│   │       ├── healthchecks/
+│   │       ├── state.json
+│   │       └── logs/
+│   └── logs/                # global event logs
 │       └── events-<runId>.jsonl
 ├── .dockerignore            # generated
 └── .gitignore               # `.biodome-build/` entry added by `biodome build`

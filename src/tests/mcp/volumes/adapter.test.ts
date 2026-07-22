@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest";
 import { matchesAllowedPath } from "../../../mcp/volumes/adapter.js";
 
 describe("matchesAllowedPath", () => {
-  it("allows everything when no patterns are given", () => {
-    expect(matchesAllowedPath("anything.txt", undefined)).toBe(true);
-    expect(matchesAllowedPath("anything.txt", [])).toBe(true);
+  it("denies when no patterns are given", () => {
+    expect(matchesAllowedPath("anything.txt", undefined)).toBe(false);
+    expect(matchesAllowedPath("anything.txt", [])).toBe(false);
   });
 
   it("matches literal paths", () => {

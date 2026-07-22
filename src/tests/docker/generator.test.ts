@@ -14,6 +14,18 @@ import {
 import { createPlan } from "../../core/plan.js";
 
 describe("Docker generators", () => {
+  it("uses target-specific Compose paths when provided", () => {
+    const compose = generateCompose(createPlan("my-app"), {
+      buildContext: "../../..",
+      dockerfile: ".biodome-build/targets/local/Dockerfile",
+      workspace: "../../..",
+    });
+
+    expect(compose).toContain("context: ../../..");
+    expect(compose).toContain("dockerfile: .biodome-build/targets/local/Dockerfile");
+    expect(compose).toContain("- ../../..:/workspace");
+  });
+
   it("generates a Dockerfile with supervisord for daemon processes", () => {
     const plan = createPlan("my-app");
     plan.build.baseImage = "python:3.12-slim";
@@ -30,7 +42,9 @@ describe("Docker generators", () => {
     expect(dockerfile).toContain("FROM python:3.12-slim AS base");
     expect(dockerfile).toContain("supervisor");
     expect(dockerfile).toContain("supervisord.conf");
-    expect(dockerfile).toContain('CMD ["supervisord", "-c", "/workspace/.biodome-build/supervisord.conf"]');
+    expect(dockerfile).toContain(
+      'CMD ["supervisord", "-c", "/workspace/.biodome-build/supervisord.conf"]',
+    );
     expect(dockerfile).not.toContain('CMD ["bash"]');
   });
 
@@ -125,7 +139,7 @@ describe("Docker generators", () => {
     expect(dockerfile).toContain("DEBUG=1");
 
     const compose = generateCompose(plan);
-    expect(compose).toContain("DEBUG: \"1\"");
+    expect(compose).toContain('DEBUG: "1"');
   });
 
   it("emits passthrough env vars as compose interpolations, not literals", () => {
@@ -133,7 +147,7 @@ describe("Docker generators", () => {
     plan.runtime.envVars.push(
       { key: "DATABASE_URL", scope: "runtime", from: { env: "DATABASE_URL" }, required: true },
       { key: "PORT", scope: "runtime", from: { env: "PORT" }, default: "8000" },
-      { key: "API_KEY", scope: "runtime", from: { env: "API_KEY" } }
+      { key: "API_KEY", scope: "runtime", from: { env: "API_KEY" } },
     );
 
     const compose = generateCompose(plan);
@@ -249,7 +263,7 @@ describe("Docker generators", () => {
     expect(compose).toContain("volumes:\n  shared-data:");
   });
 
-  it("enables privileged mode for cloud-backed volumes", () => {
+  it("adds FUSE capabilities for cloud-backed volumes instead of privileged mode", () => {
     const plan = createPlan("my-app");
     plan.runtime.volumes.push({
       name: "s3-data",
@@ -259,10 +273,13 @@ describe("Docker generators", () => {
     });
 
     const compose = generateCompose(plan);
-    expect(compose).toContain("privileged: true");
+    expect(compose).not.toContain("privileged:");
+    expect(compose).toContain("/dev/fuse");
+    expect(compose).toContain("SYS_ADMIN");
+    expect(compose).toContain("no-new-privileges");
   });
 
-  it("does not enable privileged mode for local volumes only", () => {
+  it("does not add FUSE devices for local volumes only", () => {
     const plan = createPlan("my-app");
     plan.runtime.volumes.push({
       name: "data",
@@ -273,9 +290,10 @@ describe("Docker generators", () => {
 
     const compose = generateCompose(plan);
     expect(compose).not.toContain("privileged");
+    expect(compose).not.toContain("/dev/fuse");
   });
 
-  it("does not enable privileged mode when all cloud volumes are proxy volumes", () => {
+  it("does not add FUSE devices when all cloud volumes are proxy volumes", () => {
     const plan = createPlan("my-app");
     plan.runtime.volumes.push({
       name: "s3-proxy",
@@ -287,6 +305,7 @@ describe("Docker generators", () => {
 
     const compose = generateCompose(plan);
     expect(compose).not.toContain("privileged");
+    expect(compose).not.toContain("/dev/fuse");
     expect(compose).not.toContain("/workspace/s3-proxy");
   });
 
@@ -354,7 +373,9 @@ describe("Docker generators", () => {
       const script = scripts["backend.sh"];
       expect(script).toContain("#!/bin/sh");
       expect(script).toContain("REPO_DIR=/workspace/repos/backend");
-      expect(script).toContain("git clone --branch main https://github.com/acme/backend.git \"$REPO_DIR\"");
+      expect(script).toContain(
+        'git clone --branch main https://github.com/acme/backend.git "$REPO_DIR"',
+      );
       expect(script).toContain("git pull origin main");
     });
 
@@ -369,7 +390,9 @@ describe("Docker generators", () => {
       });
 
       const scripts = generateRepoScripts(plan);
-      expect(scripts["backend.sh"]).toContain("git clone --branch main --depth 1 https://github.com/acme/backend.git");
+      expect(scripts["backend.sh"]).toContain(
+        "git clone --branch main --depth 1 https://github.com/acme/backend.git",
+      );
     });
 
     it("injects a token into an https url", () => {
@@ -383,7 +406,7 @@ describe("Docker generators", () => {
       });
 
       const scripts = generateRepoScripts(plan);
-      expect(scripts["backend.sh"]).toContain("if [ -z \"$GITHUB_TOKEN\" ]");
+      expect(scripts["backend.sh"]).toContain('if [ -z "$GITHUB_TOKEN" ]');
       expect(scripts["backend.sh"]).toContain("https://$GITHUB_TOKEN@github.com/acme/backend.git");
     });
 
@@ -398,7 +421,7 @@ describe("Docker generators", () => {
       });
 
       const scripts = generateRepoScripts(plan);
-      expect(scripts["backend.sh"]).toContain("if [ -z \"$BACKEND_SSH_KEY\" ]");
+      expect(scripts["backend.sh"]).toContain('if [ -z "$BACKEND_SSH_KEY" ]');
       expect(scripts["backend.sh"]).toContain("/tmp/biodome-repo-keys/backend");
       expect(scripts["backend.sh"]).toContain("GIT_SSH_COMMAND");
     });
@@ -494,7 +517,9 @@ describe("Docker generators", () => {
 
       const files = generatePiHarnessFiles(plan);
       expect(files["pi-homes/coder/settings.json"]).toContain('"defaultProvider": "anthropic"');
-      expect(files["pi-homes/coder/settings.json"]).toContain('"defaultModel": "claude-sonnet-4-20250514"');
+      expect(files["pi-homes/coder/settings.json"]).toContain(
+        '"defaultModel": "claude-sonnet-4-20250514"',
+      );
       expect(files["pi-homes/coder/settings.json"]).toContain('"extensions"');
 
       const wrapper = files["pi-homes/coder/pi"];
@@ -533,7 +558,10 @@ describe("Docker generators", () => {
         port: 3003,
         mcpServers: { biodome: { url: "http://localhost:3001" } },
         model: "gpt-5.6",
-        telemetry: { enabled: true, path: "/workspace/.biodome-build/logs/codex-coder-events.jsonl" },
+        telemetry: {
+          enabled: true,
+          path: "/workspace/.biodome-build/logs/codex-coder-events.jsonl",
+        },
         config: {},
       });
 
@@ -570,7 +598,10 @@ describe("Docker generators", () => {
         apiKey: { env: "ANTHROPIC_API_KEY" },
         tools: ["Bash", "Read", "Edit"],
         permissions: "acceptEdits",
-        telemetry: { enabled: true, path: "/workspace/.biodome-build/logs/claude-assistant-events.jsonl" },
+        telemetry: {
+          enabled: true,
+          path: "/workspace/.biodome-build/logs/claude-assistant-events.jsonl",
+        },
         config: {},
       });
 
@@ -589,7 +620,7 @@ describe("Docker generators", () => {
 
       const wrapper = files["claude-homes/assistant/claude"];
       expect(wrapper).toContain("#!/bin/sh");
-      expect(wrapper).toContain("ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\"");
+      expect(wrapper).toContain('ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"');
       expect(wrapper).toContain("--permission-mode acceptEdits");
       expect(wrapper).not.toContain("--skip-git-repo-check");
     });

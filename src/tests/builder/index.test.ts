@@ -4,6 +4,8 @@ import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import {
   buildPlan,
+  buildTargetPlan,
+  buildTaskPlan,
   validateConfig,
   validateFeatures,
   validatePlan,
@@ -234,7 +236,7 @@ describe("validatePlan", () => {
     });
 
     await expect(buildPlan(dir)).rejects.toThrow(
-      /Host port 5432 is used by both process "pg" and service "postgres"/
+      /Host port 5432 is used by both process "pg" and service "postgres"/,
     );
   });
 
@@ -382,5 +384,166 @@ describe("validateFeatures", () => {
     expect(node).toHaveLength(1);
     expect(node[0].options.version).toBe("22");
     expect(node[0].options.packageManager).toBe("pnpm");
+  });
+});
+
+describe("buildTargetPlan", () => {
+  it("builds a plan with a target", async () => {
+    const dir = join("/tmp", "sandbox-test-target-" + Date.now());
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({ project: { name: "target-app" } }),
+      ".biodome/features/.gitkeep": "",
+      ".biodome/targets/local.mjs": `
+        export default function local(ctx) {
+          ctx.useRuntime("docker-compose");
+        }
+      `,
+    });
+
+    const plan = await buildTargetPlan(dir, "local");
+    expect(plan.deployment).toBeDefined();
+    expect(plan.deployment!.target.name).toBe("local");
+    expect(plan.deployment!.target.driver).toBe("docker-compose");
+    expect(plan.deployment!.deploymentId).toBeDefined();
+    expect(plan.deployment!.deploymentId).toContain("target-app");
+  });
+
+  it("fails when target file does not exist", async () => {
+    const dir = join("/tmp", "sandbox-test-target-" + Date.now());
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({ project: { name: "missing-target" } }),
+      ".biodome/features/.gitkeep": "",
+    });
+
+    await expect(buildTargetPlan(dir, "nonexistent")).rejects.toThrow(/not found/);
+  });
+
+  it("fails when target module has no default export", async () => {
+    const dir = join("/tmp", "sandbox-test-target-" + Date.now());
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({ project: { name: "bad-target" } }),
+      ".biodome/features/.gitkeep": "",
+      ".biodome/targets/bad.mjs": `
+        export const notTarget = 42;
+      `,
+    });
+
+    await expect(buildTargetPlan(dir, "bad")).rejects.toThrow(/must export a default function/);
+  });
+
+  it("fails when target does not call useRuntime", async () => {
+    const dir = join("/tmp", "sandbox-test-target-" + Date.now());
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({ project: { name: "empty-target" } }),
+      ".biodome/features/.gitkeep": "",
+      ".biodome/targets/empty.mjs": `
+        export default function empty(ctx) {
+          // no useRuntime call
+        }
+      `,
+    });
+
+    await expect(buildTargetPlan(dir, "empty")).rejects.toThrow(/did not declare/);
+  });
+
+  it("fails when target declares an unknown runtime driver", async () => {
+    const dir = join("/tmp", "sandbox-test-target-" + Date.now());
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({ project: { name: "unknown-driver" } }),
+      ".biodome/features/.gitkeep": "",
+      ".biodome/targets/local.mjs": `
+        export default function local(ctx) { ctx.useRuntime("not-a-driver"); }
+      `,
+    });
+
+    await expect(buildTargetPlan(dir, "local")).rejects.toThrow(/Unknown runtime driver/);
+  });
+
+  it("fails with ambiguous .mjs and .js", async () => {
+    const dir = join("/tmp", "sandbox-test-target-" + Date.now());
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({ project: { name: "amb-target" } }),
+      ".biodome/features/.gitkeep": "",
+      ".biodome/targets/amb.mjs": `
+        export default function amb(ctx) { ctx.useRuntime("docker-compose"); }
+      `,
+      ".biodome/targets/amb.js": `
+        export default function amb(ctx) { ctx.useRuntime("docker-compose"); }
+      `,
+    });
+
+    await expect(buildTargetPlan(dir, "amb")).rejects.toThrow(/Ambiguous/);
+  });
+
+  it("prefers .mjs over .js", async () => {
+    const dir = join("/tmp", "sandbox-test-target-" + Date.now());
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({ project: { name: "pref-target" } }),
+      ".biodome/features/.gitkeep": "",
+      ".biodome/targets/preferred.mjs": `
+        export default function t(ctx) { ctx.useRuntime("docker-compose", { from: "mjs" }); }
+      `,
+    });
+
+    const plan = await buildTargetPlan(dir, "preferred");
+    expect(plan.deployment!.target.options).toEqual({ from: "mjs" });
+  });
+});
+
+describe("buildTaskPlan", () => {
+  it("builds a plan with target and task", async () => {
+    const dir = join("/tmp", "sandbox-test-task-" + Date.now());
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({ project: { name: "task-app" } }),
+      ".biodome/features/.gitkeep": "",
+      ".biodome/targets/local.mjs": `
+        export default function t(ctx) { ctx.useRuntime("docker-compose"); }
+      `,
+      ".biodome/tasks/review.mjs": `
+        export default function r(ctx) { ctx.addTask({ harness: "reviewer", prompt: "Review" }); }
+      `,
+    });
+
+    await expect(buildTaskPlan(dir, "local", "review")).rejects.toThrow(
+      /harness.*reviewer.*not declared/,
+    );
+  });
+
+  it("fails when task file does not exist", async () => {
+    const dir = join("/tmp", "sandbox-test-task-" + Date.now());
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({ project: { name: "task-app" } }),
+      ".biodome/features/.gitkeep": "",
+      ".biodome/targets/local.mjs": `
+        export default function t(ctx) { ctx.useRuntime("docker-compose"); }
+      `,
+    });
+
+    await expect(buildTaskPlan(dir, "local", "nonexistent")).rejects.toThrow(/not found/);
+  });
+
+  it("succeeds when harness exists", async () => {
+    const dir = join("/tmp", "sandbox-test-task-" + Date.now());
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({ project: { name: "task-app" } }),
+      ".biodome/features/codex.mjs": `
+        export default function c(ctx) {
+          ctx.addCodexHarness({ name: "coder", apiKey: { env: "TEST_KEY" }, mcpServers: {} });
+        }
+      `,
+      ".biodome/targets/local.mjs": `
+        export default function t(ctx) { ctx.useRuntime("docker-compose"); }
+      `,
+      ".biodome/tasks/review.mjs": `
+        export default function r(ctx) { ctx.addTask({ harness: "coder", prompt: "Review the code", cleanup: "always" }); }
+      `,
+    });
+
+    const plan = await buildTaskPlan(dir, "local", "review");
+    expect(plan.deployment).toBeDefined();
+    expect(plan.deployment!.task).toBeDefined();
+    expect(plan.deployment!.task!.harness).toBe("coder");
+    expect(plan.deployment!.task!.prompt).toBe("Review the code");
+    expect(plan.deployment!.task!.cleanup).toBe("always");
   });
 });

@@ -8,7 +8,7 @@ This document defines how the sandbox manager should expose a simple API for dec
 
 ## 1. Design Principles
 
-1. **Declarative, not imperative** -- users describe *what* they need, not *how* to install it.
+1. **Declarative, not imperative** -- users describe _what_ they need, not _how_ to install it.
 2. **Simple defaults, powerful overrides** -- a one-line include for common stacks; full control for advanced users.
 3. **Self-documenting** -- the config generates `AGENTS.md`/`CLAUDE.md` with connection strings, ports, and credentials.
 4. **Portable** -- same config works locally (Docker), in the cloud (Fly.io, Modal), and in CI.
@@ -46,13 +46,13 @@ version: 1
 build:
   cache:
     registry: ghcr.io/myorg/cache
-    mode: max             # "max" caches all layers, "min" caches only final
+    mode: max # "max" caches all layers, "min" caches only final
 
 # Idle management: auto-stops the sandbox after inactivity to
 # free resources. The sandbox can be started again with `sandbox up`.
 idle:
-  timeout: 30m            # duration like 30m, 1h, 2h
-  action: stop            # stop, snapshot, or hibernate
+  timeout: 30m # duration like 30m, 1h, 2h
+  action: stop # stop, snapshot, or hibernate
 ```
 
 ### 2.2 Environment: `sandbox/env.yaml`
@@ -163,20 +163,20 @@ Packages are declared inside `sandbox/env.yaml` under the `packages:` key. The s
 packages:
   apt:
     - curl
-    - git@2.40     # version pinning
+    - git@2.40 # version pinning
 ```
 
 Each package manager namespace resolves to a different installation mechanism:
 
-| Namespace | Mechanism | Example |
-|-----------|-----------|---------|
-| `apt:` | System package (Debian/Ubuntu) | `build-essential` |
-| `npm:` | Node.js package | `typescript@5.4` |
-| `pip:` | Python package | `pytest@8.0` |
-| `nix:` | Nix package (any) | `ripgrep@latest` |
-| `cargo:` | Rust crate | `bat` |
-| `go:` | Go module | `golang.org/x/tools` |
-| `gem:` | Ruby gem | `rails@7.1` |
+| Namespace | Mechanism                      | Example              |
+| --------- | ------------------------------ | -------------------- |
+| `apt:`    | System package (Debian/Ubuntu) | `build-essential`    |
+| `npm:`    | Node.js package                | `typescript@5.4`     |
+| `pip:`    | Python package                 | `pytest@8.0`         |
+| `nix:`    | Nix package (any)              | `ripgrep@latest`     |
+| `cargo:`  | Rust crate                     | `bat`                |
+| `go:`     | Go module                      | `golang.org/x/tools` |
+| `gem:`    | Ruby gem                       | `rails@7.1`          |
 
 ### Package Object Form (for advanced options)
 
@@ -204,6 +204,7 @@ packages:
 Languages are declared inside `sandbox/env.yaml` under the `languages:` key. Each language is a named entry — the key is the language name, and the value is its configuration.
 
 Languages are a higher-level abstraction over packages. They handle:
+
 - Installing the correct runtime version
 - Setting up the package manager
 - Configuring environment variables
@@ -252,22 +253,22 @@ languages:
 
 ### Common fields (available in every language)
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `version` | string | latest stable | Runtime version (`"20"`, `"lts"`, `"3.12"`) |
-| `install_deps` | bool | `false` | Auto-install project dependencies on build |
-| `env` | map | `{}` | Extra environment variables for this runtime |
-| `global_packages` | string[] | `[]` | Packages to install globally (language-specific) |
+| Field             | Type     | Default       | Description                                      |
+| ----------------- | -------- | ------------- | ------------------------------------------------ |
+| `version`         | string   | latest stable | Runtime version (`"20"`, `"lts"`, `"3.12"`)      |
+| `install_deps`    | bool     | `false`       | Auto-install project dependencies on build       |
+| `env`             | map      | `{}`          | Extra environment variables for this runtime     |
+| `global_packages` | string[] | `[]`          | Packages to install globally (language-specific) |
 
 ### Per-language extras
 
-| Language | Extra fields |
-|----------|-------------|
-| Node | `package_manager` (`npm`, `yarn`, `pnpm`) |
-| Python | `package_manager` (`pip`, `poetry`, `uv`, `pipenv`); `poetry.*` sub-config |
-| Go | `cgo_enabled` (bool); `build_cache` (bool) |
-| Rust | `components` (rustup); `targets` (cross-compile) |
-| Java | `build_tool` (`maven`, `gradle`); `gradle_version` |
+| Language | Extra fields                                                               |
+| -------- | -------------------------------------------------------------------------- |
+| Node     | `package_manager` (`npm`, `yarn`, `pnpm`)                                  |
+| Python   | `package_manager` (`pip`, `poetry`, `uv`, `pipenv`); `poetry.*` sub-config |
+| Go       | `cgo_enabled` (bool); `build_cache` (bool)                                 |
+| Rust     | `components` (rustup); `targets` (cross-compile)                           |
+| Java     | `build_tool` (`maven`, `gradle`); `gradle_version`                         |
 
 ---
 
@@ -282,7 +283,7 @@ They are the most complex part of the schema because each service type has uniqu
 ```yaml
 # sandbox/services.yaml (partial)
 postgres:
-  image: postgres:16-alpine       # defaults to postgres:{version}-alpine
+  image: postgres:16-alpine # defaults to postgres:{version}-alpine
   version: "16"
   port: 5432
   host: localhost
@@ -301,20 +302,21 @@ postgres:
     shared_buffers: 256MB
     max_connections: 100
   init_script: ./scripts/init-db.sql
-  data_volume: postgres_data      # named volume for persistence
+  data_volume: postgres_data # named volume for persistence
   healthcheck:
     test: ["CMD-SHELL", "pg_isready -U app -d myapp"]
     interval: 2s
     timeout: 5s
     retries: 10
     start_period: 10s
-  exposed: true                  # expose port to host
+  exposed: true # expose port to host
   resources:
     memory: 512MB
     cpu: 0.5
 ```
 
 **Auto-generated environment variables:**
+
 ```bash
 DATABASE_URL=postgresql://app:devpassword@localhost:5432/myapp
 PGHOST=localhost
@@ -325,6 +327,7 @@ PGDATABASE=myapp
 ```
 
 **Connection info printed on start:**
+
 ```
 PostgreSQL:
   Internal: postgres://app:devpassword@postgres:5432/myapp
@@ -354,12 +357,14 @@ mongodb:
 ```
 
 **Auto-generated environment variables:**
+
 ```bash
 MONGODB_URL=mongodb://admin:devpassword@localhost:27017/myapp
 MONGODB_URI=mongodb://admin:devpassword@localhost:27017/myapp?authSource=admin
 ```
 
 **Connection info:**
+
 ```
 MongoDB:
   Internal: mongodb://admin:devpassword@mongodb:27017/myapp?authSource=admin
@@ -386,6 +391,7 @@ redis:
 ```
 
 **Auto-generated environment variables:**
+
 ```bash
 REDIS_URL=redis://:devpassword@localhost:6379/0
 REDIS_HOST=localhost
@@ -452,6 +458,7 @@ minio:
 ## 6. React Native Support
 
 React Native (with Expo) requires special handling because it needs:
+
 - Node.js + watchman for file watching
 - Port 8081 for the Metro bundler
 - Network access for the Expo Go app on a phone
@@ -460,6 +467,7 @@ React Native (with Expo) requires special handling because it needs:
 These files under `sandbox/` configure a React Native (Expo) sandbox:
 
 **`sandbox/env.yaml`**:
+
 ```yaml
 languages:
   node:
@@ -467,12 +475,12 @@ languages:
     package_manager: npm
     install_deps: true
   java:
-    version: "17"              # required for Android builds
+    version: "17" # required for Android builds
 
 packages:
   apt:
-    - watchman                 # file watcher for Metro bundler
-    - adb                      # Android Debug Bridge
+    - watchman # file watcher for Metro bundler
+    - adb # Android Debug Bridge
   npm:
     - expo-cli
     - eas-cli
@@ -482,13 +490,14 @@ tools:
   eas: latest
 
 env:
-  REACT_NATIVE_PACKAGER_HOSTNAME: "${HOST_IP}"    # set automatically
+  REACT_NATIVE_PACKAGER_HOSTNAME: "${HOST_IP}" # set automatically
 ```
 
 **`sandbox/hooks.yaml`**:
+
 ```yaml
 pre-start:
-  - command: adb start-server    # ensure ADB is running
+  - command: adb start-server # ensure ADB is running
 ```
 
 **Note**: For Android emulator access, the dev container needs `--network=host` or special ADB forwarding setup.
@@ -522,15 +531,15 @@ Tools are well-known CLI programs that need specific install logic. They are dec
 ```yaml
 # sandbox/env.yaml
 tools:
-  gh: latest                     # GitHub CLI
-  aws-cli: "2"                   # AWS CLI v2
-  docker: true                   # enables Docker-in-Docker
-  psql: "16"                     # PostgreSQL client
+  gh: latest # GitHub CLI
+  aws-cli: "2" # AWS CLI v2
+  docker: true # enables Docker-in-Docker
+  psql: "16" # PostgreSQL client
   kubectl: "1.29"
   helm: "3.14"
   terraform: "1.7"
   vercel: latest
-  wrangler: latest               # Cloudflare Workers CLI
+  wrangler: latest # Cloudflare Workers CLI
 ```
 
 Each tool maps to a known install recipe (internal mapping, not user-facing):
@@ -610,9 +619,9 @@ services:
       dockerfile: .sandbox/Dockerfile
     image: sandbox-my-project:latest
     ports:
-      - "3000:3000"              # app port
+      - "3000:3000" # app port
     volumes:
-      - .:/workspace            # source code
+      - .:/workspace # source code
       - node_modules:/workspace/node_modules
     environment:
       DATABASE_URL: postgresql://app:devpassword@postgres:5432/myapp
@@ -624,7 +633,7 @@ services:
         condition: service_started
     networks:
       - sandbox
-    command: sleep infinity      # keep container alive
+    command: sleep infinity # keep container alive
 
   postgres:
     image: postgres:16-alpine
@@ -677,6 +686,7 @@ networks:
 Auto-generated by biodome for `my-project`.
 
 ## Languages & Tools
+
 - Node.js 20 (pnpm)
 - Python 3.12 (poetry)
 - PostgreSQL 16
@@ -685,20 +695,24 @@ Auto-generated by biodome for `my-project`.
 ## Available Services
 
 ### PostgreSQL
+
 - **Internal URL**: `postgresql://app:devpassword@postgres:5432/myapp`
 - **External URL**: `postgresql://app:devpassword@localhost:5432/myapp`
 - **Port**: 5432
 
 ### Redis
+
 - **Internal URL**: `redis://:devpassword@redis:6379/0`
 - **External URL**: `redis://:devpassword@localhost:6379/0`
 - **Port**: 6379
 
 ## Hooks
+
 - `start.post` runs migrations automatically
 - `stop.pre` backs up data
 
 ## Project Commands (run via `sandbox exec`)
+
 - `npm run dev`
 - `npm test`
 - `npx prisma studio`
@@ -717,6 +731,7 @@ For maximum adoption, the sandbox manager should work with minimal config. The a
 ### Common: just declare what's needed
 
 **`sandbox/env.yaml`:**
+
 ```yaml
 languages:
   node:
@@ -724,21 +739,24 @@ languages:
 ```
 
 **`sandbox/services.yaml`:**
+
 ```yaml
 postgres:
-  enabled: true         # defaults: version 16, port 5432
+  enabled: true # defaults: version 16, port 5432
 redis:
-  enabled: true         # defaults: version 7, port 6379
+  enabled: true # defaults: version 7, port 6379
 ```
 
 ### Full: complete control
 
 **`sandbox/config.yaml`:**
+
 ```yaml
 name: my-api
 ```
 
 **`sandbox/env.yaml`:**
+
 ```yaml
 languages:
   node:
@@ -750,6 +768,7 @@ languages:
 ```
 
 **`sandbox/services.yaml`:**
+
 ```yaml
 postgres:
   version: "16"
@@ -839,20 +858,20 @@ sandbox/ directory
 
 ## 11. Comparison: How Existing Tools Handle This
 
-| Aspect | Devbox (JSON) | devenv (Nix) | devcontainer.json | This Design |
-|--------|--------------|--------------|-------------------|-------------|
-| **Config format** | JSON (`devbox.json`) | Nix (`devenv.nix`) | JSONC (`devcontainer.json`) | Filesystem (`sandbox/` directory) |
-| **Packages** | String array `["node@20"]` | Nixpkgs attributes | Features (OCI artifacts) | Namespaced: `apt:`, `npm:`, etc. |
-| **Languages** | Plugin-based | `languages.python` module | Features | Built-in language modules |
-| **Services** | `devbox services up` (process-compose) | `services.postgres` module | Docker Compose sidecars | First-class service definitions |
-| **Ports** | N/A | `services.x.port` | `forwardPorts` array | Per-service port config + auto env vars |
-| **Connection info** | Manual | Manual env vars | Manual | Auto-generated env vars + AGENTS.md |
-| **Dockerfile gen** | `devbox generate dockerfile` | `devenv container` | Manual (Dockerfile + features) | Automatic from config |
-| **Docker Compose gen** | Manual | Manual | References existing compose | Automatic from config |
-| **Hooks** | `shell.init_hook` | `enterShell` | `postCreateCommand`, `postStartCommand` | Lifecycle hooks (pre/post build/start/stop) |
-| **Env vars** | `env` object | `env` attr | `remoteEnv` | `env` + auto-generated service URLs |
-| **Lock file** | `devbox.lock` | `devenv.lock` | No | `sandbox.lock` (locks all files under `sandbox/`) |
-| **Include/import** | `include` | `imports` | N/A | `include` in `config.yaml` for monorepo |
+| Aspect                 | Devbox (JSON)                          | devenv (Nix)               | devcontainer.json                       | This Design                                       |
+| ---------------------- | -------------------------------------- | -------------------------- | --------------------------------------- | ------------------------------------------------- |
+| **Config format**      | JSON (`devbox.json`)                   | Nix (`devenv.nix`)         | JSONC (`devcontainer.json`)             | Filesystem (`sandbox/` directory)                 |
+| **Packages**           | String array `["node@20"]`             | Nixpkgs attributes         | Features (OCI artifacts)                | Namespaced: `apt:`, `npm:`, etc.                  |
+| **Languages**          | Plugin-based                           | `languages.python` module  | Features                                | Built-in language modules                         |
+| **Services**           | `devbox services up` (process-compose) | `services.postgres` module | Docker Compose sidecars                 | First-class service definitions                   |
+| **Ports**              | N/A                                    | `services.x.port`          | `forwardPorts` array                    | Per-service port config + auto env vars           |
+| **Connection info**    | Manual                                 | Manual env vars            | Manual                                  | Auto-generated env vars + AGENTS.md               |
+| **Dockerfile gen**     | `devbox generate dockerfile`           | `devenv container`         | Manual (Dockerfile + features)          | Automatic from config                             |
+| **Docker Compose gen** | Manual                                 | Manual                     | References existing compose             | Automatic from config                             |
+| **Hooks**              | `shell.init_hook`                      | `enterShell`               | `postCreateCommand`, `postStartCommand` | Lifecycle hooks (pre/post build/start/stop)       |
+| **Env vars**           | `env` object                           | `env` attr                 | `remoteEnv`                             | `env` + auto-generated service URLs               |
+| **Lock file**          | `devbox.lock`                          | `devenv.lock`              | No                                      | `sandbox.lock` (locks all files under `sandbox/`) |
+| **Include/import**     | `include`                              | `imports`                  | N/A                                     | `include` in `config.yaml` for monorepo           |
 
 ---
 
@@ -862,8 +881,8 @@ sandbox/ directory
 
 ```yaml
 # sandbox/services.yaml
-postgres: {}           # uses defaults: version 16, port 5432
-redis: {}              # uses defaults: version 7, port 6379
+postgres: {} # uses defaults: version 16, port 5432
+redis: {} # uses defaults: version 7, port 6379
 ```
 
 ### Custom Service Templates (Plugin)
@@ -886,14 +905,14 @@ my-custom-db:
 // TypeScript plugin for a new service type
 export const myServicePlugin: ServicePlugin = {
   type: "my-database",
-  
+
   // Schema for the service's config section
   configSchema: {
     version: { type: "string", default: "latest" },
     port: { type: "number", default: 9999 },
     databases: { type: "array", items: { type: "string" } },
   },
-  
+
   // Generate docker-compose service definition
   generateCompose(config) {
     return {
@@ -908,14 +927,14 @@ export const myServicePlugin: ServicePlugin = {
       },
     };
   },
-  
+
   // Generate environment variables for the sandbox
   generateEnv(config) {
     return {
       MY_DATABASE_URL: `mydb://root:${config.rootPassword}@${config.name}:${config.port}/${config.databases[0]}`,
     };
   },
-  
+
   // Generate connection info string
   generateConnectionInfo(config) {
     return {

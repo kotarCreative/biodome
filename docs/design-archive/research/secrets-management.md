@@ -29,6 +29,7 @@ RUN --mount=type=secret,id=npmrc \
 ```
 
 **Source:** Docker BuildKit Secrets
+
 - https://docs.docker.com/build/building/secrets/
 - https://docs.docker.com/build/building/secrets/#secret-mounts
 
@@ -82,9 +83,11 @@ devpod up --no-ssh-git-credentials my-workspace
 ```
 
 **Source:** DevPod Documentation
+
 - https://devpod.sh/docs/developing-in-workspaces/credentials
 
 **How DevPod passes Git credentials:**
+
 1. Uses `ssh-agent` forwarding from local to container
 2. Injects Git credentials automatically into SSH config
 3. Allows users to override per-workspace for sensitive repos
@@ -145,9 +148,11 @@ $ echo $CODESPACES_SECRET_NAME
 ```
 
 **Source:** GitHub Codespaces Secrets
+
 - https://docs.github.com/en/codespaces/managing-codespaces/managing-development-environment-secrets-for-your-repository-or-organization
 
 **Key Features:**
+
 - Encrypted secrets during transmission and storage
 - Automatic injection into environment variables
 - Access controls per organization/repository
@@ -190,9 +195,11 @@ RUN op --service-account-token "$OP_SERVICE_ACCOUNT_TOKEN" \
 ```
 
 **Source:** 1Password Secrets Management
+
 - https://www.1password.com/features/secrets-management/
 
 **Key Advantages:**
+
 - Zero-knowledge encryption
 - Automatic retrieval via CLI/SDK
 - Audit logging
@@ -227,7 +234,7 @@ creation_rules:
   - path_regex: secrets.yaml$
     key_groups:
       - age:
-        - *publich-key*
+          - *publich-key*
 ```
 
 3. Decrypt at runtime:
@@ -282,7 +289,7 @@ API_KEY = "{{ env.APP_API_KEY }}"
 http_services = true
 
 secret_env = [
-  "APP_API_KEY"
+"APP_API_KEY"
 ]
 ```
 
@@ -354,6 +361,7 @@ stringData:
 #### Build Time Secrets (Phase 1 - MVP)
 
 **Primary Use Cases:**
+
 - Clone private Git repositories
 - Pull from private Docker registries
 - Access internal APIs during build
@@ -367,7 +375,7 @@ stringData:
 sandbox_secrets:
   # Git credentials for cloning private repos
   git_ssh_key: "${LOCAL_SSH_AGENT}"
-  # Docker credentials for private registries  
+  # Docker credentials for private registries
   docker_config: "${LOCAL_DOCKER_CONFIG}"
   # Build-specific API keys
   build_api_key: "${BUILD_API_KEY}"
@@ -389,11 +397,13 @@ RUN --mount=type=secret,id=git_ssh_key \
 #### Runtime Secrets (Phase 2+)
 
 **Primary Use Cases:**
+
 - Application configuration (database URLs, API keys)
 - Runtime behavior control
 - Service authentication
 
 **Recommended Approaches:**
+
 1. **Local Development:** Environment variables + file mounts
 2. **Cloud Production:** Platform-specific secret managers
 3. **Cross-platform:** Configuration + fallback to secrets manager
@@ -407,7 +417,7 @@ runtime_secrets:
     # Auto-generated from service definitions
     DATABASE_URL: "${POSTGRES_INTERNAL_URL}"
     API_BASE_URL: "${CONFIGURED_API_BASE}"
-  
+
   file_mounts:
     # Mount secrets files if needed
     - source: "${CONFIG_DIR}/.env"
@@ -421,7 +431,7 @@ runtime_secrets:
 
 **Required Capabilities:**
 
-1. **Build Time Secrets:** 
+1. **Build Time Secrets:**
    - SSH agent forwarding for Git
    - Docker config injection for registries
    - File-based secrets for build configuration
@@ -495,14 +505,14 @@ runtime_secrets:
 
 ## Comparison Matrix
 
-| Secret Type | Docker BuildKit | DevPod | GitHub Codespaces | 1Password | Use Case |
-|-------------|----------------|--------|------------------|-----------|----------|
-| Git SSH | ✅ (SSH mount) | ✅ (automatic) | ❌ | ✅ | Private Git repos |
-| Docker Registries | ✅ (`--secret type=env`) | ✅ (Docker credentials) | ✅ | ✅ | Private images |
-| API Keys/Secrets | ✅ (file mounts) | ❌ | ✅ (envs) | ✅ (items) | Build-time config |
-| Runtime Secrets | ❌ | ❌ | ✅ (envs) | ✅ | Application runtime |
-| GPG Keys | ✅ (SSH mount) | ✅ (GPG forwarding) | ❌ | ✅ | Signing commits |
-| Development Config | ❌ | ❌ | ✅ (envs) | ✅ (items) | Local development |
+| Secret Type        | Docker BuildKit          | DevPod                  | GitHub Codespaces | 1Password  | Use Case            |
+| ------------------ | ------------------------ | ----------------------- | ----------------- | ---------- | ------------------- |
+| Git SSH            | ✅ (SSH mount)           | ✅ (automatic)          | ❌                | ✅         | Private Git repos   |
+| Docker Registries  | ✅ (`--secret type=env`) | ✅ (Docker credentials) | ✅                | ✅         | Private images      |
+| API Keys/Secrets   | ✅ (file mounts)         | ❌                      | ✅ (envs)         | ✅ (items) | Build-time config   |
+| Runtime Secrets    | ❌                       | ❌                      | ✅ (envs)         | ✅         | Application runtime |
+| GPG Keys           | ✅ (SSH mount)           | ✅ (GPG forwarding)     | ❌                | ✅         | Signing commits     |
+| Development Config | ❌                       | ❌                      | ✅ (envs)         | ✅ (items) | Local development   |
 
 ---
 

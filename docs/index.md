@@ -37,7 +37,7 @@ biodome up               # starts dev container + MCP server
 
 ## Event capture
 
-Every lifecycle command (`build`, `up`, `down`, `exec`, `restart`, `status`, `ps`, `logs`, `config validate`) captures a structured, append-only event log by default. Pass `--no-events` to disable. Events are written to `.biodome-build/logs/events-<runId>.jsonl` and include every plan load, generated file, hook, and runtime operation with timing.
+Every lifecycle command (`build`, `up`, `down`, `exec`, `restart`, `status`, `ps`, `logs`, `config validate`) captures a structured, append-only event log by default. Pass `--no-events` to disable. Events are written to `.biodome-build/logs/events-<runId>.jsonl` and include every plan load, generated file, hook, and runtime operation with timing. Logs are automatically capped at 10 MB — once the file exceeds this limit, new events are dropped with a warning.
 
 ```bash
 biodome build
@@ -55,3 +55,5 @@ This event stream lets you audit exactly what happened during a run and is desig
 - [Processes and hooks](processes.md)
 - [API reference](api.md)
 - [Examples](examples.md)
+- [Local named task execution implementation plan](design/local-task-execution-plan.md)
+- [Security, performance, and ergonomics implementation plan](design/security-performance-ergonomics-plan.md)

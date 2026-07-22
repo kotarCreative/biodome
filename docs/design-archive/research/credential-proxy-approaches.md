@@ -4,13 +4,13 @@
 
 The current design injects credentials as environment variables into sandbox containers. Any process inside the sandbox — including AI agents — can read `process.env` or `/proc/self/environ` and exfiltrate credentials. A malicious or compromised agent can use those credentials to perform actions the developer never intended.
 
-**Goal:** Allow sandbox agents to *use* connected platforms (GitHub, AWS, Databases, APIs) without ever possessing the raw credentials.
+**Goal:** Allow sandbox agents to _use_ connected platforms (GitHub, AWS, Databases, APIs) without ever possessing the raw credentials.
 
 ---
 
 ## Approach 1: Local Authentication Proxy (Sidecar)
 
-Run a lightweight proxy *inside* the sandbox container (or as a companion container) that handles authentication. The agent connects to `localhost:PORT` and the proxy injects credentials transparently.
+Run a lightweight proxy _inside_ the sandbox container (or as a companion container) that handles authentication. The agent connects to `localhost:PORT` and the proxy injects credentials transparently.
 
 ### Architecture
 
@@ -119,7 +119,7 @@ func (p *CredentialProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 ## Approach 2: MCP-Based Credential Gateway
 
-Use the [Model Context Protocol](https://modelcontextprotocol.io) as the credential boundary. The sandbox runs an MCP server that exposes *capabilities* rather than credentials. The AI agent connects to the MCP server and asks it to perform actions; the MCP server holds the credentials internally.
+Use the [Model Context Protocol](https://modelcontextprotocol.io) as the credential boundary. The sandbox runs an MCP server that exposes _capabilities_ rather than credentials. The AI agent connects to the MCP server and asks it to perform actions; the MCP server holds the credentials internally.
 
 ### Architecture
 
@@ -261,17 +261,17 @@ Instead of giving the agent permanent credentials, vend short-lived, scoped toke
 
 ### How it Vends
 
-| Platform | Token Type | Typical Scope | Lifetime |
-|----------|-----------|---------------|----------|
-| GitHub | Fine-grained PAT | `repo:read`, `issues:write` | 1-8 hours |
-| AWS | STS AssumeRole | S3 read-only on specific bucket | 15-60 min |
-| GCP | Access Token | Specific IAM role | 1 hour |
-| GitHub | OAuth App token | Repository-level | Session |
-| Database | Temp password | `SELECT` only on `staging_*` | 1 hour |
+| Platform | Token Type       | Typical Scope                   | Lifetime  |
+| -------- | ---------------- | ------------------------------- | --------- |
+| GitHub   | Fine-grained PAT | `repo:read`, `issues:write`     | 1-8 hours |
+| AWS      | STS AssumeRole   | S3 read-only on specific bucket | 15-60 min |
+| GCP      | Access Token     | Specific IAM role               | 1 hour    |
+| GitHub   | OAuth App token  | Repository-level                | Session   |
+| Database | Temp password    | `SELECT` only on `staging_*`    | 1 hour    |
 
 ### Env Var Injection (Still Not Ideal)
 
-Even with short-lived tokens, injecting via env vars means the agent *has* them. Better to combine with the proxy approach — the STS vends tokens to the proxy, not to the agent.
+Even with short-lived tokens, injecting via env vars means the agent _has_ them. Better to combine with the proxy approach — the STS vends tokens to the proxy, not to the agent.
 
 ### Better: STS + Proxy
 
@@ -301,7 +301,7 @@ Even with short-lived tokens, injecting via env vars means the agent *has* them.
 
 ## Approach 4: Host-Level Credential Agent (SSH-Agent Pattern)
 
-Inspired by `ssh-agent`: run a credential agent on the *host* that forwards capabilities into the sandbox via a Unix socket mount. The agent never transmits the raw secret — it performs operations on behalf of the sandbox.
+Inspired by `ssh-agent`: run a credential agent on the _host_ that forwards capabilities into the sandbox via a Unix socket mount. The agent never transmits the raw secret — it performs operations on behalf of the sandbox.
 
 ### Architecture
 
@@ -335,7 +335,7 @@ Inspired by `ssh-agent`: run a credential agent on the *host* that forwards capa
 
 ### Capabilities
 
-Instead of requesting a credential, the agent requests an *operation*:
+Instead of requesting a credential, the agent requests an _operation_:
 
 ```go
 // Agent sends to Unix socket:
@@ -429,8 +429,8 @@ services:
     image: sandbox-credential-proxy:latest
     # Sidecar holds all credentials
     environment:
-      GITHUB_TOKEN: "${GITHUB_TOKEN}"      # Injected by sandbox CLI
-      AWS_ACCESS_KEY_ID: "${AWS_AK}"        # from local secret store
+      GITHUB_TOKEN: "${GITHUB_TOKEN}" # Injected by sandbox CLI
+      AWS_ACCESS_KEY_ID: "${AWS_AK}" # from local secret store
       AWS_SECRET_ACCESS_KEY: "${AWS_SK}"
       DATABASE_PASSWORD: "${DB_PASS}"
     # Proxy translates auth for each upstream
@@ -441,36 +441,40 @@ services:
 ```yaml
 static_resources:
   listeners:
-  - name: github_proxy
-    address: { socket_address: { address: 0.0.0.0, port_value: 8080 }}
-    filter_chains:
-    - filters:
-      - name: envoy.filters.network.http_connection_manager
-        typed_config:
-          "@type": ...
-          route_config:
-            virtual_hosts:
-            - name: github
-              domains: ["*"]
-              routes:
-              - match: { prefix: "/" }
-                route: { cluster: real_github }
-          http_filters:
-          - name: envoy.filters.http.header_mutation
-            typed_config:
-              mutations:
-                - append:
-                    header: { key: "Authorization", value: "Bearer %REQ(CREDENTIALS:GITHUB_TOKEN)%" }
+    - name: github_proxy
+      address: { socket_address: { address: 0.0.0.0, port_value: 8080 } }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": ...
+                route_config:
+                  virtual_hosts:
+                    - name: github
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route: { cluster: real_github }
+                http_filters:
+                  - name: envoy.filters.http.header_mutation
+                    typed_config:
+                      mutations:
+                        - append:
+                            header:
+                              {
+                                key: "Authorization",
+                                value: "Bearer %REQ(CREDENTIALS:GITHUB_TOKEN)%",
+                              }
   clusters:
-  - name: real_github
-    type: STRICT_DNS
-    connect_timeout: 5s
-    load_assignment:
-      cluster_name: real_github
-      endpoints:
-      - lb_endpoints:
-        - endpoint:
-            address: { socket_address: { address: api.github.com, port_value: 443 }}
+    - name: real_github
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: real_github
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address: { socket_address: { address: api.github.com, port_value: 443 } }
 ```
 
 ### Go Implementation (Lightweight)
@@ -524,14 +528,14 @@ func (s *SidecarProxy) ListenAndServe() {
 
 ## Comparison Matrix
 
-| Approach | Creds Enter Container? | Agent Has Raw Creds? | Protocol Support | Audit Trail | Complexity | Best For |
-|----------|----------------------|---------------------|-----------------|-------------|-----------|----------|
-| **Env vars** (current) | Yes | Yes | All | No | Low | Quick prototyping |
-| **Auth Proxy** | Yes (proxy only) | No | HTTP, TCP | Yes | Medium | REST APIs, DBs |
-| **MCP Gateway** | Yes (gateway only) | No | MCP tools only | Yes | Medium | AI/LLM agents |
-| **Token Vending** | Yes (tokens) | Yes* | All | No | Medium | Cloud platforms |
-| **Cred Agent** | No | No | Ops-based | Yes | High | Sensitive SSH/Git |
-| **Sidecar** | Yes (sidecar only) | No | HTTP, TCP | Yes | High | Multi-service sandboxes |
+| Approach               | Creds Enter Container? | Agent Has Raw Creds? | Protocol Support | Audit Trail | Complexity | Best For                |
+| ---------------------- | ---------------------- | -------------------- | ---------------- | ----------- | ---------- | ----------------------- |
+| **Env vars** (current) | Yes                    | Yes                  | All              | No          | Low        | Quick prototyping       |
+| **Auth Proxy**         | Yes (proxy only)       | No                   | HTTP, TCP        | Yes         | Medium     | REST APIs, DBs          |
+| **MCP Gateway**        | Yes (gateway only)     | No                   | MCP tools only   | Yes         | Medium     | AI/LLM agents           |
+| **Token Vending**      | Yes (tokens)           | Yes*                 | All              | No          | Medium     | Cloud platforms         |
+| **Cred Agent**         | No                     | No                   | Ops-based        | Yes         | High       | Sensitive SSH/Git       |
+| **Sidecar**            | Yes (sidecar only)     | No                   | HTTP, TCP        | Yes         | High       | Multi-service sandboxes |
 
 \* With STS + Proxy combination, agent does not have raw creds.
 
@@ -577,14 +581,14 @@ No single pattern solves every use case. Recommended architecture combines them:
 
 ### Phase-in Strategy
 
-| Phase | What | Why |
-|-------|------|-----|
-| **Phase 1** (now) | Env var injection | Works; builds the secret management foundation |
-| **Phase 1.5** | MCP Gateway | Natural for AI agents; define tool surfaces; reuses existing secret store |
-| **Phase 2** | Auth Proxy for HTTP APIs | Covers the bulk of 3rd-party integrations (GitHub, AWS, GCP, OpenAI, etc.) |
-| **Phase 2+** | TCP Proxy for DBs | PostgreSQL, Redis, MySQL — covers service credentials |
-| **Phase 3** | Credential Agent (Unix socket) | For SSH/Git operations and signing |
-| **Phase 3+** | STS Token Vending | For delegating to cloud platforms with short-lived credentials |
+| Phase             | What                           | Why                                                                        |
+| ----------------- | ------------------------------ | -------------------------------------------------------------------------- |
+| **Phase 1** (now) | Env var injection              | Works; builds the secret management foundation                             |
+| **Phase 1.5**     | MCP Gateway                    | Natural for AI agents; define tool surfaces; reuses existing secret store  |
+| **Phase 2**       | Auth Proxy for HTTP APIs       | Covers the bulk of 3rd-party integrations (GitHub, AWS, GCP, OpenAI, etc.) |
+| **Phase 2+**      | TCP Proxy for DBs              | PostgreSQL, Redis, MySQL — covers service credentials                      |
+| **Phase 3**       | Credential Agent (Unix socket) | For SSH/Git operations and signing                                         |
+| **Phase 3+**      | STS Token Vending              | For delegating to cloud platforms with short-lived credentials             |
 
 ### Key Design Decision
 
@@ -615,6 +619,7 @@ func (m *Manager) Up(ctx context.Context, config *sandbox.Config) error {
 ```
 
 The credential proxy itself can be:
+
 - A separate binary shipped with biodome (`sandbox proxy`)
 - A standalone Docker image (`sandbox-credential-proxy`)
 - Embedded in the biodome binary and launched as a child process

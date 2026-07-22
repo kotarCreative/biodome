@@ -55,14 +55,14 @@ describeIntegration("docker build integration", () => {
       execFileSync(
         "docker",
         ["buildx", "build", "-f", ".sandbox/Dockerfile", "-t", imageTag, "."],
-        { cwd: dir, stdio: "inherit" }
+        { cwd: dir, stdio: "inherit" },
       );
 
       // The venv must be on PATH and have requests installed.
       const output = execFileSync(
         "docker",
         ["run", "--rm", imageTag, "python", "-c", "import requests; print('ok')"],
-        { cwd: dir, encoding: "utf-8" }
+        { cwd: dir, encoding: "utf-8" },
       );
       expect(output.trim()).toBe("ok");
     } finally {
@@ -97,7 +97,7 @@ describeIntegration("docker build integration", () => {
       execFileSync(
         "docker",
         ["buildx", "build", "-f", ".sandbox/Dockerfile", "-t", imageTag, "."],
-        { cwd: dir, stdio: "inherit" }
+        { cwd: dir, stdio: "inherit" },
       );
     } finally {
       try {
@@ -140,21 +140,34 @@ describeIntegration("docker build integration", () => {
       execFileSync(
         "docker",
         ["compose", "-f", ".sandbox/docker-compose.yaml", "-p", project, "up", "-d", "--build"],
-        { cwd: dir, stdio: "inherit" }
+        { cwd: dir, stdio: "inherit" },
       );
 
       // Postgres must become healthy and accept connections.
       execFileSync(
         "docker",
-        ["compose", "-f", ".sandbox/docker-compose.yaml", "-p", project, "exec", "-T", "postgres",
-          "pg_isready", "-U", "postgres", "-d", "postgres"],
-        { cwd: dir, stdio: "inherit" }
+        [
+          "compose",
+          "-f",
+          ".sandbox/docker-compose.yaml",
+          "-p",
+          project,
+          "exec",
+          "-T",
+          "postgres",
+          "pg_isready",
+          "-U",
+          "postgres",
+          "-d",
+          "postgres",
+        ],
+        { cwd: dir, stdio: "inherit" },
       );
 
       const ps = execFileSync(
         "docker",
         ["compose", "-f", ".sandbox/docker-compose.yaml", "-p", project, "ps", "--format", "json"],
-        { cwd: dir, encoding: "utf-8" }
+        { cwd: dir, encoding: "utf-8" },
       );
       const services = ps
         .split("\n")
@@ -169,7 +182,7 @@ describeIntegration("docker build integration", () => {
         execFileSync(
           "docker",
           ["compose", "-f", ".sandbox/docker-compose.yaml", "-p", project, "down", "-v"],
-          { cwd: dir, stdio: "ignore" }
+          { cwd: dir, stdio: "ignore" },
         );
       } catch {
         // Ignore cleanup errors.
@@ -202,15 +215,14 @@ describeIntegration("docker build integration", () => {
       execFileSync(
         "docker",
         ["buildx", "build", "-f", ".sandbox/Dockerfile", "-t", imageTag, "."],
-        { cwd: dir, stdio: "inherit" }
+        { cwd: dir, stdio: "inherit" },
       );
 
       // The Go module cache must have been populated.
-      const output = execFileSync(
-        "docker",
-        ["run", "--rm", imageTag, "go", "env", "GOMODCACHE"],
-        { cwd: dir, encoding: "utf-8" }
-      );
+      const output = execFileSync("docker", ["run", "--rm", imageTag, "go", "env", "GOMODCACHE"], {
+        cwd: dir,
+        encoding: "utf-8",
+      });
       expect(output.trim().length).toBeGreaterThan(0);
     } finally {
       try {
@@ -251,21 +263,20 @@ describeIntegration("docker build integration", () => {
       execFileSync(
         "docker",
         ["buildx", "build", "-f", ".sandbox/Dockerfile", "-t", imageTag, "."],
-        { cwd: dir, stdio: "inherit" }
+        { cwd: dir, stdio: "inherit" },
       );
 
       const pythonOutput = execFileSync(
         "docker",
         ["run", "--rm", imageTag, "python", "--version"],
-        { cwd: dir, encoding: "utf-8" }
+        { cwd: dir, encoding: "utf-8" },
       );
       expect(pythonOutput.trim()).toContain("Python 3.12");
 
-      const nodeOutput = execFileSync(
-        "docker",
-        ["run", "--rm", imageTag, "node", "--version"],
-        { cwd: dir, encoding: "utf-8" }
-      );
+      const nodeOutput = execFileSync("docker", ["run", "--rm", imageTag, "node", "--version"], {
+        cwd: dir,
+        encoding: "utf-8",
+      });
       expect(nodeOutput.trim()).toContain("v20");
     } finally {
       try {
@@ -333,15 +344,25 @@ HTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
 
       execFileSync(
         "docker",
-        ["compose", "-f", ".sandbox/docker-compose.yaml", "-p", project, "up", "-d", "--build", "--wait"],
-        { cwd: dir, stdio: "inherit" }
+        [
+          "compose",
+          "-f",
+          ".sandbox/docker-compose.yaml",
+          "-p",
+          project,
+          "up",
+          "-d",
+          "--build",
+          "--wait",
+        ],
+        { cwd: dir, stdio: "inherit" },
       );
 
       // The dev service must be healthy, meaning the daemon passed its health check.
       const ps = execFileSync(
         "docker",
         ["compose", "-f", ".sandbox/docker-compose.yaml", "-p", project, "ps", "--format", "json"],
-        { cwd: dir, encoding: "utf-8" }
+        { cwd: dir, encoding: "utf-8" },
       );
       const services = ps
         .split("\n")
@@ -355,9 +376,21 @@ HTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
       // The healthcheck monitor program should also be running under supervisord.
       const status = execFileSync(
         "docker",
-        ["compose", "-f", ".sandbox/docker-compose.yaml", "-p", project, "exec", "-T", "dev",
-          "supervisorctl", "-c", "/workspace/.sandbox/supervisord.conf", "status"],
-        { cwd: dir, encoding: "utf-8" }
+        [
+          "compose",
+          "-f",
+          ".sandbox/docker-compose.yaml",
+          "-p",
+          project,
+          "exec",
+          "-T",
+          "dev",
+          "supervisorctl",
+          "-c",
+          "/workspace/.sandbox/supervisord.conf",
+          "status",
+        ],
+        { cwd: dir, encoding: "utf-8" },
       );
       expect(status).toContain("web");
       expect(status).toContain("web-healthcheck");
@@ -366,7 +399,7 @@ HTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
         execFileSync(
           "docker",
           ["compose", "-f", ".sandbox/docker-compose.yaml", "-p", project, "down", "-v"],
-          { cwd: dir, stdio: "ignore" }
+          { cwd: dir, stdio: "ignore" },
         );
       } catch {
         // Ignore cleanup errors.

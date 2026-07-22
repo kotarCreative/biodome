@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { generateDockerfile, generateCompose, generateSupervisordConf } from "../../docker/generator.js";
+import {
+  generateDockerfile,
+  generateCompose,
+  generateSupervisordConf,
+} from "../../docker/generator.js";
 import { createPlan } from "../../core/plan.js";
 
 describe("Docker generator snapshots", () => {
@@ -53,11 +57,15 @@ describe("Docker generator snapshots", () => {
     plan.build.dependencyFiles = ["requirements.txt"];
     plan.build.dependencyInstalls.push({
       files: ["requirements.txt"],
-      command: "RUN python -m venv /workspace/.venv && /workspace/.venv/bin/pip install -r requirements.txt",
+      command:
+        "RUN python -m venv /workspace/.venv && /workspace/.venv/bin/pip install -r requirements.txt",
     });
     plan.build.copyArtifacts.push({
       files: ["requirements.txt"],
-      lines: ["COPY --from=deps /workspace/.venv /workspace/.venv", "ENV PATH=/workspace/.venv/bin:$PATH"],
+      lines: [
+        "COPY --from=deps /workspace/.venv /workspace/.venv",
+        "ENV PATH=/workspace/.venv/bin:$PATH",
+      ],
     });
     plan.runtime.services.push({
       name: "redis",
@@ -120,30 +128,34 @@ describe("Docker generator snapshots", () => {
     const plan = createPlan("multi-lang");
     plan.build.baseImage = "debian:12-slim";
     plan.build.runtimeInstalls = [
-      'RUN apt-get update && curl -fsSL https://pyenv.run | bash',
-      'RUN apt-get update && curl -fsSL https://deb.nodesource.com/setup_20.x | bash',
+      "RUN apt-get update && curl -fsSL https://pyenv.run | bash",
+      "RUN apt-get update && curl -fsSL https://deb.nodesource.com/setup_20.x | bash",
     ];
-    plan.build.languageSnippets = ['RUN corepack enable'];
+    plan.build.languageSnippets = ["RUN corepack enable"];
     plan.build.dependencyFiles = ["requirements.txt", "package.json", "package-lock.json"];
     plan.build.dependencyInstalls.push(
       {
         files: ["requirements.txt"],
-        command: "RUN python -m venv /workspace/.venv && /workspace/.venv/bin/pip install -r requirements.txt",
+        command:
+          "RUN python -m venv /workspace/.venv && /workspace/.venv/bin/pip install -r requirements.txt",
       },
       {
         files: ["package.json", "package-lock.json"],
         command: "RUN npm ci",
-      }
+      },
     );
     plan.build.copyArtifacts.push(
       {
         files: ["requirements.txt"],
-        lines: ["COPY --from=deps /workspace/.venv /workspace/.venv", "ENV PATH=/workspace/.venv/bin:$PATH"],
+        lines: [
+          "COPY --from=deps /workspace/.venv /workspace/.venv",
+          "ENV PATH=/workspace/.venv/bin:$PATH",
+        ],
       },
       {
         files: ["package.json"],
         lines: ["COPY --from=deps /workspace/node_modules /workspace/node_modules"],
-      }
+      },
     );
     plan.build.venvVolume = true;
     plan.build.nodeModulesVolume = true;
@@ -161,7 +173,8 @@ describe("Docker generator snapshots", () => {
     plan.build.dependencyFiles = ["composer.json", "composer.lock"];
     plan.build.dependencyInstalls.push({
       files: ["composer.json", "composer.lock"],
-      command: "RUN --mount=type=cache,target=/root/.composer/cache composer install --no-interaction --no-progress --optimize-autoloader && rm -rf /root/.composer/cache/*",
+      command:
+        "RUN --mount=type=cache,target=/root/.composer/cache composer install --no-interaction --no-progress --optimize-autoloader && rm -rf /root/.composer/cache/*",
     });
     plan.build.copyArtifacts.push({
       files: ["composer.json"],
