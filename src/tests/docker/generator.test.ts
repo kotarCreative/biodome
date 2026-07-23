@@ -97,6 +97,21 @@ describe("Docker generators", () => {
     expect(dockerfile).toContain('CMD ["bash"]');
   });
 
+  it("copies target-scoped generated files for image-only runtimes", () => {
+    const dockerfile = generateDockerfile(createPlan("my-app"), {
+      generatedFilesPath: ".biodome-build/targets/staging",
+    });
+
+    expect(dockerfile).toContain("COPY .biodome-build/targets/staging/ /workspace/.biodome-build/");
+  });
+
+  it("keeps target-scoped generated files in the Docker build context", () => {
+    const dockerignore = generateDockerignore();
+
+    expect(dockerignore).toContain("!.biodome-build/targets");
+    expect(dockerignore).toContain("!.biodome-build/targets/**");
+  });
+
   it("generates compose with ports and no sleep infinity for daemon processes", () => {
     const plan = createPlan("my-app");
     plan.runtime.processes.push({
@@ -502,6 +517,25 @@ describe("Docker generators", () => {
   });
 
   describe("generatePiHarnessFiles", () => {
+    it("uses the target-scoped home in generated task wrappers", () => {
+      const plan = createPlan("test");
+      plan.runtime.piHarnesses.push({
+        name: "coder",
+        type: "pi",
+        telemetry: { enabled: false, path: "" },
+        config: {},
+      });
+      plan.deployment = {
+        target: { name: "local", driver: "docker-compose", options: {} },
+        deploymentId: "test-local",
+      };
+
+      const task = generatePiHarnessFiles(plan)["pi-homes/coder/task"];
+      expect(task).toContain(
+        "PI_CODING_AGENT_DIR=/workspace/.biodome-build/targets/local/pi-homes/coder",
+      );
+    });
+
     it("generates Pi settings, wrapper script, and telemetry extension", () => {
       const plan = createPlan("test");
       plan.runtime.piHarnesses.push({
@@ -527,6 +561,11 @@ describe("Docker generators", () => {
       expect(wrapper).toContain("PI_CODING_AGENT_DIR=/workspace/.biodome-build/pi-homes/coder");
       expect(wrapper).toContain('ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"');
       expect(wrapper).toContain("--tools read,bash,edit,write");
+
+      const task = files["pi-homes/coder/task"];
+      expect(task).toContain("#!/bin/sh");
+      expect(task).toContain("PI_CODING_AGENT_DIR=/workspace/.biodome-build/pi-homes/coder");
+      expect(task).toContain('exec pi -p "$@"');
 
       const telemetry = files["pi-homes/coder/extensions/biodome-telemetry.ts"];
       expect(telemetry).toContain("export default function (pi)");
@@ -584,6 +623,11 @@ describe("Docker generators", () => {
       expect(start).toContain("#!/bin/sh");
       expect(start).toContain("exec-server --listen ws://0.0.0.0:3003");
       expect(start).toContain("--dangerously-bypass-hook-trust");
+
+      const task = files["codex-homes/coder/task"];
+      expect(task).toContain("#!/bin/sh");
+      expect(task).toContain("HOME=/workspace/.biodome-build/codex-homes/coder");
+      expect(task).toContain('exec codex -p "$@"');
     });
   });
 
@@ -623,6 +667,12 @@ describe("Docker generators", () => {
       expect(wrapper).toContain('ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"');
       expect(wrapper).toContain("--permission-mode acceptEdits");
       expect(wrapper).not.toContain("--skip-git-repo-check");
+
+      const task = files["claude-homes/assistant/task"];
+      expect(task).toContain("#!/bin/sh");
+      expect(task).toContain("HOME=/workspace/.biodome-build/claude-homes/assistant");
+      expect(task).toContain("CLAUDE_BIODOME_TELEMETRY_PATH=");
+      expect(task).toContain('exec claude -p "$@"');
     });
   });
 });

@@ -1,7 +1,18 @@
 # Implementation Plan: Named Targets and Declarative Tasks
 
-Status: proposed. Audience: an engineer or LLM implementing this step-by-step.
-Complete tasks in order. Run each task's verification before beginning the next.
+Status: partially implemented. Audience: an engineer or LLM implementing this
+step-by-step. Complete tasks in order. Run each task's verification before
+beginning the next.
+
+The architectural spine is built: RuntimeDriver interface, driver registry,
+TargetContext/TaskContext, deployment plan types, builder
+(buildTargetPlanEffect / buildTaskPlanEffect), target-scoped output/state paths,
+full Docker Compose driver, task runner, non-interactive task wrappers, and
+unit tests. All lifecycle commands, including `run <target> <task>` and
+`target validate <target>`, are target-scoped. AWS ECS now has an initial
+schema-validated driver with rendering, ECR build/push, Fargate start/stop,
+status, CloudWatch logs, and unit tests; it remains incomplete for production
+use and does not advertise task execution or artifact collection.
 
 ## Goal
 
@@ -883,3 +894,19 @@ biodome down local
 Inspect `.biodome-build/targets/local/` and confirm it contains no resolved secret,
 and inspect the event log to confirm every lifecycle/task event carries the selected
 target and driver.
+
+## Remaining Work
+
+- **AWS ECS hardening and proof**: The initial driver can render, build/push,
+  start/stop, inspect status, and read logs, but still needs the remaining
+  production behavior from Task 7: ECS service-plan rejection, start-state
+  waiting and failure handling, immutable image digest persistence, TTL
+  handling, and an opt-in AWS integration test. It intentionally advertises no
+  `exec.command` or `artifact.collect` capability.
+- **CLI integration coverage**: Unit tests now cover `task-runner.ts`,
+  `target-context.ts`, and `task-context.ts`; local Docker integration covers
+  build/start/status/artifact/cleanup operations. Add an end-to-end CLI fixture
+  for `biodome run local review-pr`, plus dedicated driver tests where the
+  existing coverage is insufficient.
+- **Event target-scoping**: Events still write to `.biodome-build/logs/` — need
+  target-scoped paths with `target`/`driver` in payload.

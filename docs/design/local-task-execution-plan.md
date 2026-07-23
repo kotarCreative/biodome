@@ -1,318 +1,87 @@
-# Implementation Plan: Local Named Task Execution
+# Implementation Plan: End-To-End Local Task Runs
 
-Status: proposed. Audience: an engineer or smaller implementation model.
+Status: completed. This milestone turns the existing target/task primitives into a proven, CI-tested workflow that runs a declared task in the complete Docker Compose development environment and returns only declared artifacts.
 
 ## Goal
 
-Make the following workflow reliable for the Docker Compose target:
+Make this command reliable for a normal Biodome project:
 
 ```bash
 biodome run local review-pr
 ```
 
-The command must build and start the target only when necessary, execute a named
-agent task through its declared harness, collect declared workspace artifacts, and
-apply the task cleanup policy. The first complete use case is a code review task
-that writes `/workspace/review.md` and makes it available locally under the target
-build directory.
+The command must construct the selected target's full development environment, including its declared language runtime, dependency installation, workspace, runtime environment, daemon processes, services, and generated harness files. It must execute a named task in that environment, collect its declared output, and apply the task cleanup policy.
 
-This plan deliberately does **not** implement AWS ECS. ECS must consume the same
-driver/task contract after the local path is proven by integration tests.
+The completion proof is an integration test which invokes the built Biodome CLI, not driver methods or raw Docker commands. The fixture must use a harmless local harness shim and must never contact an LLM provider or require model credentials.
 
-## Current State And Constraints
+## Scope
 
-- Target/task plan loading and the runtime registry already exist.
-- `docker-compose` is the only complete driver; `aws-ecs` is a stub.
-- The CLI still has legacy un-targeted lifecycle commands. Do not keep them as
-  hidden aliases: targeted commands are the intended public interface.
-- Generated target files are host files under
-  `.biodome-build/targets/<target>/` and are available in the container at
-  `/workspace/.biodome-build/`. Harness task commands therefore use container
-  paths, never host paths.
-- Task prompts, command arguments, model credentials, agent output, and artifact
-  contents are sensitive. Do not put them in normal lifecycle events or info logs.
-- The existing `src/core/task-runner.ts` is incomplete and is not called by the
-  CLI. Replace or reshape it as part of this work; do not duplicate task logic in
-  the CLI.
+In scope:
 
-## Scope Decisions
+- Docker Compose targets only.
+- One CLI integration fixture with a Pi harness name shadowed by a local shim.
+- Full task lifecycle: preflight, render/build/start or reuse, execute, collect, cleanup, state inspection, and concise CLI output.
+- Capability preflight, timeout enforcement in the Docker execution path, and bounded command output.
+- Focused unit tests for the new behavior.
+- Documentation of the supported local workflow and its limitations.
 
-- Support task execution only on drivers advertising `exec.command`.
-- Support artifact collection only on drivers advertising `artifact.collect`.
-- Docker is the sole driver advertising `artifact.collect` in this milestone.
-- Support Pi, Claude, and Codex tasks. OpenCode tasks fail before starting a
-  deployment with an actionable unsupported-harness error.
-- A task always runs from `/workspace`.
-- Do not add arbitrary task shell commands. A task continues to select one
-  declared harness by name.
-- Do not resolve or persist secret values. Harness wrappers receive their existing
-  environment references only at container runtime.
+Out of scope:
 
-## Required User-Facing Behavior
+- Calling a real LLM in tests or resolving model credentials during plan build.
+- New task-harness families, arbitrary shell commands in task files, or OpenCode task support.
+- ECS task execution, ECS artifact collection, or a remote artifact store.
+- General event-log retention, rotation, or target-scoped log-file paths. Those belong to `security-performance-ergonomics-plan.md`.
+- Changing the public target/task file model.
 
-Given this task:
+## Required Behavior
 
-```js
-export default function reviewPr(ctx) {
-  ctx.addTask({
-    harness: "reviewer",
-    prompt: "Review the current branch and write findings to review.md.",
-    artifacts: ["review.md"],
-    timeout: "20m",
-    cleanup: "always",
-  });
-}
-```
-
-`biodome run local review-pr` must:
-
-1. Build the target/task plan and validate the selected driver and harness before
-   starting Docker.
-2. Render the target and verify Docker is available.
-3. Read validated target state. If the state is absent or the driver reports it is
-   not running, build/start the target and atomically write new state. If it is
-   running, reuse it without rebuilding.
-4. Run the generated non-interactive harness wrapper inside the `dev` container.
-5. Fail the task when the harness exits non-zero or exceeds its validated timeout.
-6. On successful execution, copy only declared artifacts from `/workspace` into
-   `.biodome-build/targets/local/artifacts/`.
-7. Apply cleanup: `always` stops/removes state after success or failure;
-   `on-success` only after exit code zero; `never` retains the deployment/state.
-8. Print artifact local paths and a concise result. Do not print the task prompt
-   or complete agent command.
-
-## Implementation Tasks
-
-Complete tasks in order. Run the listed verification before moving on.
-
-### Task 1: Finish The Driver Contract
-
-Files:
-
-- `src/core/capabilities.ts`
-- `src/runtime/driver.ts`
-- `src/runtime/docker-compose.ts`
-- new `src/tests/runtime/docker-compose.test.ts` if focused driver tests do not fit
-  existing Docker test files
-
-1. Add the `artifact.collect` capability.
-2. Add `collectArtifacts(input)` to `RuntimeDriver`. Its input is
-   `RuntimeOperationInput` plus `paths: string[]`; it returns artifact metadata
-   only: requested relative path, byte size, and local generated path. Do not
-   return artifact bytes.
-3. Make status return the normalized state union already described in the named
-   targets design (`pending`, `running`, `stopped`, `failed`, `unknown`) rather
-   than an unconstrained `string`.
-4. Add the capability to Docker and implement `collectArtifacts` with `docker cp`
-   from `<deploymentId>-dev:/workspace/<relative path>` into
-   `<outputDir>/artifacts/<relative path>`.
-5. Preserve artifact subdirectories. Create output parent directories as needed.
-   Reject any path that is not already a valid task artifact path; never pass an
-   absolute or traversal path to Docker.
-6. Calculate copied file size after copying. If Docker reports a missing artifact,
-   return a task/runtime error naming only the declared relative path.
-7. Do not add `collectArtifacts` to the ECS stub yet. It must advertise no such
-   capability.
-
-Verify:
+Given a project with `.biodome/targets/local.mjs` and `.biodome/tasks/review-pr.mjs`, running:
 
 ```bash
-npm run typecheck
-npm run test:run
+biodome run local review-pr
 ```
 
-### Task 2: Generate Explicit Non-Interactive Task Wrappers
+must perform these steps in this order:
 
-Files:
+1. Load and validate the target/task plan before Docker starts.
+2. Reject an unsupported harness, missing `exec.command`, or missing `artifact.collect` (when artifacts are declared) before rendering, building, starting, or otherwise mutating a deployment.
+3. Render target-scoped files below `.biodome-build/targets/local/` and verify Docker is available.
+4. Read validated state. Reuse it only if the selected driver's `status` result is `running`; otherwise stop stale resources, remove stale state, render, build, start, and atomically write fresh state.
+5. Execute the selected generated wrapper inside the `dev` container with its working directory set to `/workspace`.
+6. Enforce the validated timeout against the process inside the container, not merely an outer JavaScript promise. A timeout must terminate the harness and produce a task failure.
+7. Treat non-zero exit as failure. Only after a zero exit, collect exactly the declared relative artifact paths from `/workspace` into `.biodome-build/targets/local/artifacts/`.
+8. Apply cleanup accurately: `always` after success or failure, `on-success` after a zero exit only, and `never` never automatically stops/removes state.
+9. Print the target/task identity, result, and local artifact paths. Do not print the prompt, command arguments, credentials, task output, or artifact body.
 
-- `src/docker/generator.ts`
-- `src/tests/docker/generator.test.ts`
+## Implementation Rules
 
-1. Add one generated executable task wrapper per supported Pi, Claude, and Codex
-   harness. Place wrappers with that harness's generated home directory.
-2. The wrapper must configure its isolated home/config, preserve the existing
-   telemetry setup, and invoke the provider's documented non-interactive command
-   with the prompt passed as an argument.
-3. Do not use Codex `exec-server` for a task. Generate a distinct Codex
-   non-interactive wrapper; its server-start wrapper remains for daemon use.
-4. Return a command builder result using fixed container paths such as
-   `/workspace/.biodome-build/claude-homes/<name>/task`, never `existsSync` or a
-   host output path.
-5. Put this pure command-building function in `src/core/task-runner.ts` (export it
-   for unit tests) or a small adjacent module. It must reject OpenCode before any
-   runtime action.
-6. Add generator tests asserting each wrapper has the correct absolute container
-   home, is executable, and does not contain a resolved API key.
+- Keep `executeTask` target-neutral. The CLI loads the plan and calls it; it must not duplicate deployment, task, or cleanup logic.
+- Capability checks happen before any runtime action. `RuntimeDriver.exec` must not be called solely because a driver happens to have a method implementation.
+- Preserve `RuntimeError` as the primary error. If cleanup fails after a task failure, log or attach cleanup context without replacing the task failure.
+- Artifact paths remain schema-validated relative POSIX paths. Docker must reject invalid paths defensively too.
+- Do not write prompt text, command arguments, credential values, command output, or artifact contents to lifecycle/task events.
+- Do not add a test-only production harness primitive. The integration fixture must use the ordinary declared Pi harness and a fixture-local executable shim.
 
-Verify:
+## Tasks
 
-```bash
-npm run check
-```
-
-### Task 3: Make Target State Safe And Usable
-
-Files:
-
-- `src/runtime/state.ts`
-- `src/runtime/output.ts`
-- `src/tests/runtime/state.test.ts` (new)
-
-1. Make `readState` validate `target`, `driver`, and `deploymentId`, not only the
-   deployment ID. Add expected driver as an argument.
-2. Change `removeState` to unlink the state file. Do not rename it to `.bak`, which
-   leaves stale state and violates cleanup semantics.
-3. Ensure the target output directory is mode `0700` where supported and state is
-   written atomically with mode `0600`.
-4. Add a helper for the artifact root only if it avoids duplicating the exact path
-   in the Docker driver and task runner. Do not add a general filesystem utility
-   layer.
-5. Test state rejection for a mismatched target, driver, deployment ID, invalid
-   schema version, and malformed JSON; test successful state removal.
-
-Verify:
-
-```bash
-npm run typecheck
-npm run test:run
-```
-
-### Task 4: Implement One Target-Neutral Task Runner
-
-Files:
-
-- `src/core/task-runner.ts`
-- `src/core/events.ts`
-- new `src/tests/core/task-runner.test.ts`
-
-1. Refactor `executeTask` to own the complete algorithm below. It receives the
-   root directory, finalized task plan, selected driver, and any required event
-   service. The CLI must not reproduce any part of this algorithm.
-2. Before each optional operation, check the advertised driver capability. Return
-   a clear error before calling the driver when a capability is absent.
-3. Render and call `ensureAvailable`. Read matching state. Call `driver.status`
-   when state exists; reuse only a `running` deployment. For missing, invalid, or
-   non-running state, build/start and write new state.
-4. Run the pure harness command through `driver.exec`. Enforce the parsed task
-   timeout in the driver process invocation, not with an unbounded outer promise.
-   Bound captured stdout/stderr using the same policy as MCP command execution.
-5. Treat a non-zero command exit code as task failure. Collect artifacts only after
-   exit code zero.
-6. For non-empty artifacts, require `artifact.collect`; invoke collection once and
-   return metadata/local paths.
-7. Emit `task.started`, `task.completed`, and `task.failed` metadata events. Events
-   include target, driver, task name, harness, duration, exit code, and artifact
-   metadata. They must exclude prompt text, command arguments, output, credentials,
-   and artifact bodies.
-8. Apply cleanup in a finalizer-style path. Preserve the primary task failure if
-   cleanup also fails; attach the cleanup failure as secondary context. Never stop
-   a reused deployment for `on-success` after a failing task.
-9. Unit-test with a fake `RuntimeDriver`; do not require Docker for these cases.
-   Cover fresh start, reuse, non-zero exit, timeout propagation, each cleanup mode,
-   unsupported capability, collection only after success, event redaction, and
-   cleanup failure preserving the primary error.
-
-Verify:
-
-```bash
-npm run check
-```
-
-### Task 5: Replace Legacy Lifecycle CLI Paths
-
-Files:
-
-- `src/cli/index.ts`
-- `src/cli/helpers.ts`
-- CLI helper tests
-
-1. Remove the legacy CLI-owned Docker generation/runtime path (`writeGeneratedFiles`,
-   `createRuntime`, and imports used solely by it). Keep base-plan `info`,
-   `generate agents.md`, and `config validate` unchanged.
-2. Convert lifecycle syntax to:
-
-```text
-biodome build <target>
-biodome up <target> [--build] [--wait]
-biodome down <target>
-biodome exec <target> <command...>
-biodome logs <target> [process]
-biodome ps <target>
-biodome status <target>
-biodome restart <target> [process]
-biodome run <target> <task>
-```
-
-3. Each lifecycle command must load `buildTargetPlanEffect`, get the driver from
-   the registry, use `targetBuildDir`, validate/read state where required, and
-   enforce the relevant driver capability before invoking it.
-4. `build` renders, checks availability, and builds; `up` renders, checks
-   availability, builds only with `--build`, starts, and writes state; `down`
-   validates state, stops, then removes state only after a successful stop.
-5. Make `run` call only `executeTask`. Remove its current unconditional start,
-   inline harness command building, and inline cleanup.
-6. Do not log the generated harness command. Print target/task identity, outcome,
-   and artifact paths only.
-7. Target-scope event log paths and include target/driver in lifecycle events while
-   retaining a base-plan event path only for base-plan commands.
-8. Update Commander argument ordering carefully: `exec` is
-   `exec <target> <command...>` and still accepts command flags.
-
-Verify:
-
-```bash
-npm run check
-```
-
-### Task 6: Prove The Real Local Workflow
-
-Files:
-
-- `src/tests/integration/` fixtures and tests
-- `README.md`
-- `docs/index.md`
-- `docs/file-layout.md`
-- `docs/processes.md`
-- `docs/ROADMAP.md`
-
-1. Add an integration fixture with a local target, a supported mock harness, and a
-   task that writes a small known `review.md` in `/workspace`. It must not call an
-   LLM provider or need credentials.
-2. Run `biodome run local review-pr` against the fixture and assert the copied
-   artifact exists beneath `targets/local/artifacts/review.md`, has expected
-   contents, and Docker is stopped for `cleanup: "always"`.
-3. Add integration coverage for targeted `build local`, `up local`, `status local`,
-   and `down local`. Add a two-target render test proving separate output
-   directories and Compose project identities.
-4. Document the target/task layout, the `run` command, artifact location, cleanup
-   policies, and the limitation that ECS task execution/artifacts are not yet
-   available.
-5. Update the roadmap: this work is complete only after every test above passes.
-   ECS remains the next cloud milestone.
-
-Verify:
-
-```bash
-npm run check
-npm run build
-npm run test:integration
-```
+- [x] Task 1: Make Task Preflight Complete
+- [x] Task 2: Bound Docker Task Execution
+- [x] Task 3: Add A Real CLI Fixture
+- [x] Task 4: Invoke The Built CLI And Assert The Contract
+- [x] Task 5: Cover Reuse And Cleanup Semantics End To End
+- [x] Task 6: Document The Proven Workflow
 
 ## Acceptance Criteria
 
-- `biodome run local review-pr` works against a Docker target without an LLM call
-  in CI.
-- A running target is reused; a stopped or missing target starts once and writes
-  validated state.
-- Declared artifacts are copied only from `/workspace` to the selected target's
-  artifact directory.
-- Cleanup behavior matches `always`, `on-success`, and `never` for success and
-  failure.
-- Prompts, commands, credentials, output, and artifact bodies are absent from
-  default CLI lifecycle events and logs.
-- All lifecycle commands require a target and no longer instantiate the legacy
-  Docker runtime directly.
-- ECS remains a stub and cannot claim task execution or artifact capabilities.
+- [x] `npm run test:integration` invokes the built `biodome run local review-pr` command against a fixture, with Docker as its only external dependency.
+- [x] The task runs through a generated production harness wrapper, but the test harness never calls an LLM provider or needs credentials.
+- [x] The resulting report demonstrates access to the fixture's language runtime, installed dependency, workspace source, declared environment, and daemon process.
+- [x] The artifact is copied only from `/workspace/review.md` to the selected target's artifact directory after a successful task.
+- [x] Missing required task capabilities fail before Docker deployment changes.
+- [x] Task timeout terminates the in-container harness process and returns a bounded actionable failure.
+- [x] `always`, `on-success`, and `never` cleanup behavior is covered at the appropriate unit/integration level.
+- [x] Default CLI output and task events do not disclose task prompts, command arguments, credentials, output, or artifact contents.
+- [x] `npm run check`, `npm run build`, and `npm run test:integration` pass.
 
 ## Final Verification
 

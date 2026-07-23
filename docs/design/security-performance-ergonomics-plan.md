@@ -1,6 +1,8 @@
 # Implementation Plan: Security, Performance, and Developer Ergonomics
 
-Status: completed. All 12 tasks have been implemented and pass `npm run check`.
+Status: partially implemented. Tasks 1–4 (Oxlint/Oxfmt, dependency vulns,
+McpConfig, MCP auth) and Task 6 (local proxy-volume containment) are complete.
+Tasks 5 and 7–12 have significant remaining work; see "Remaining Work" below.
 
 ## Goal
 
@@ -523,3 +525,27 @@ Create small, reviewable pull requests in this order:
 
 Do not defer tests to a follow-up pull request. Each pull request must add tests
 for the security or performance behavior it changes and must pass `npm run check`.
+
+## Remaining Work
+
+- **Task 5** (secret/telemetry hardening): Harness-level telemetry (OpenCode, Pi,
+  Codex, Claude) still captures full prompts, args, and output by default. Needs
+  metadata-only defaults + an opt-in payload capture setting.
+- **Task 7** (volume pagination): `VolumeAdapter.list()` has no `{limit,
+cursor?}` API. S3, GCS, and Azure adapters all fetch unbounded results before
+  returning.
+- **Task 8** (non-blocking I/O): `readFileSync` remains in MCP plan loading;
+  `appendFileSync` + `existsSync` + `mkdirSync` remain in `logMcpEvent` (called
+  on every tool invocation). No async bounded log queue.
+- **Task 9** (container privilege): No non-root user set in generated compose
+  files or Dockerfile. Supervisor runs as root. `--allow-other` is always passed
+  to rclone. No validation warning for direct cloud mounts.
+- **Task 10** (SSH hardening): Uses `StrictHostKeyChecking=accept-new` instead
+  of `yes`. No user-facing known-hosts configuration field. No validation
+  requiring known-hosts for SSH URLs.
+- **Task 11** (event storage): Events are dropped when the log file exceeds max
+  size instead of rotating. CLI `--limit` not implemented. `--run` reads all
+  files and filters in memory. Malformed JSON lines crash the CLI events
+  command.
+- **Task 12** (docs/release): `SECURITY.md`, `dependabot.yml`, and migration
+  guide for breaking changes are all missing.

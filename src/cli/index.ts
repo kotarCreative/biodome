@@ -1,16 +1,6 @@
 import { Command } from "commander";
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-  copyFileSync,
-  chmodSync,
-} from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Effect, Layer } from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
@@ -18,33 +8,20 @@ import {
   buildPlanEffect,
   buildTargetPlanEffect,
   buildTaskPlanEffect,
-  validateConfigEffect,
   validateFeaturesEffect,
   validatePlan,
 } from "../builder/index.js";
-import {
-  generateDockerfile,
-  generateSupervisordConf,
-  generateCompose,
-  generateDockerignore,
-  generateHealthcheckScripts,
-  generateRepoScripts,
-  generateHarnessFiles,
-  generatePiHarnessFiles,
-  generateCodexHarnessFiles,
-  generateClaudeHarnessFiles,
-} from "../docker/generator.js";
-import { DockerRuntime } from "../docker/runner.js";
 import { formatInfo, formatAgentsMd } from "../core/info.js";
 import { Plan } from "../core/plan.js";
-import { generatePlanJson } from "../mcp/generator.js";
 import { getDriver } from "../runtime/registry.js";
 import { executeTask } from "../core/task-runner.js";
-import type { SandboxRuntime } from "../core/runtime.js";
-import { PlanError, SandboxError } from "../core/errors.js";
+import { targetBuildDir } from "../runtime/output.js";
+import { readState, writeState, removeState } from "../runtime/state.js";
+import { hasCapability } from "../core/capabilities.js";
+import { PlanError, RuntimeError, SandboxError } from "../core/errors.js";
 import { NodeRuntime } from "../core/runtime-node.js";
 import { BiodomeTelemetry } from "../core/telemetry.js";
-import { detectStarterLanguages, generateStarterFeature, runHooks, runSafe } from "./helpers.js";
+import { detectStarterLanguages, generateStarterFeature, runSafe } from "./helpers.js";
 import {
   EventStore,
   FileEventStoreLive,
@@ -57,134 +34,28 @@ import {
 const CONFIG_DIR = ".biodome";
 const BUILD_DIR = ".biodome-build";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-function mcpServerSourcePath(): string {
-  // When running from dist/cli/index.js, the built MCP server is at dist/mcp/server.js.
-  return join(__dirname, "..", "mcp", "server.js");
-}
-
-function ensureBuildDir(rootDir: string): void {
-  mkdirSync(join(rootDir, BUILD_DIR), { recursive: true });
-}
-
-function ensureGitignore(rootDir: string): void {
-  const gitignorePath = join(rootDir, ".gitignore");
-  const entry = ".biodome-build/";
-  if (!existsSync(gitignorePath)) {
-    writeFileSync(gitignorePath, `# biodome build output\n${entry}\n`);
-    return;
-  }
-  const content = readFileSync(gitignorePath, "utf-8");
-  if (!content.split("\n").some((line) => line.trim() === entry)) {
-    writeFileSync(gitignorePath, content.trimEnd() + `\n# biodome build output\n${entry}\n`);
-  }
-}
-
-function writeBuildFile(filePath: string, content: string): void {
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, content);
-  if (content.startsWith("#!/")) {
-    chmodSync(filePath, 0o755);
-  }
-}
-
-function writeGeneratedFiles(rootDir: string, plan: Plan): string[] {
-  ensureBuildDir(rootDir);
-  writeFileSync(join(rootDir, BUILD_DIR, "Dockerfile"), generateDockerfile(plan));
-
-  const supervisord = generateSupervisordConf(plan);
-  if (supervisord) {
-    writeFileSync(join(rootDir, BUILD_DIR, "supervisord.conf"), supervisord);
-  }
-
-  writeFileSync(join(rootDir, BUILD_DIR, "docker-compose.yaml"), generateCompose(plan));
-
-  const healthcheckDir = join(rootDir, BUILD_DIR, "healthchecks");
-  rmSync(healthcheckDir, { recursive: true, force: true });
-  mkdirSync(healthcheckDir, { recursive: true });
-  const healthchecks = generateHealthcheckScripts(plan);
-  for (const [name, content] of Object.entries(healthchecks)) {
-    writeFileSync(join(healthcheckDir, name), content);
-  }
-
-  const repoDir = join(rootDir, BUILD_DIR, "repos");
-  rmSync(repoDir, { recursive: true, force: true });
-  mkdirSync(repoDir, { recursive: true });
-  const repos = generateRepoScripts(plan);
-  for (const [name, content] of Object.entries(repos)) {
-    writeFileSync(join(repoDir, name), content);
-  }
-
-  const harnessFiles = generateHarnessFiles(plan);
-  for (const [name, content] of Object.entries(harnessFiles)) {
-    writeBuildFile(join(rootDir, BUILD_DIR, name), content);
-  }
-
-  const piHarnessFiles = generatePiHarnessFiles(plan);
-  for (const [name, content] of Object.entries(piHarnessFiles)) {
-    writeBuildFile(join(rootDir, BUILD_DIR, name), content);
-  }
-
-  const codexHarnessFiles = generateCodexHarnessFiles(plan);
-  for (const [name, content] of Object.entries(codexHarnessFiles)) {
-    writeBuildFile(join(rootDir, BUILD_DIR, name), content);
-  }
-
-  const claudeHarnessFiles = generateClaudeHarnessFiles(plan);
-  for (const [name, content] of Object.entries(claudeHarnessFiles)) {
-    writeBuildFile(join(rootDir, BUILD_DIR, name), content);
-  }
-
-  const dockerignorePath = join(rootDir, ".dockerignore");
-  if (!existsSync(dockerignorePath)) {
-    writeFileSync(dockerignorePath, generateDockerignore());
-  }
-
-  ensureGitignore(rootDir);
-
-  if (plan.build.mcpEnabled) {
-    writeFileSync(join(rootDir, BUILD_DIR, "plan.json"), generatePlanJson(plan));
-    copyFileSync(mcpServerSourcePath(), join(rootDir, BUILD_DIR, "mcp-server.js"));
-  }
-
-  return [
-    join(rootDir, BUILD_DIR, "Dockerfile"),
-    join(rootDir, BUILD_DIR, "docker-compose.yaml"),
-    join(rootDir, BUILD_DIR, "supervisord.conf"),
-    ...Object.keys(healthchecks).map((name) => join(healthcheckDir, name)),
-    ...Object.keys(repos).map((name) => join(repoDir, name)),
-    ...Object.keys(harnessFiles).map((name) => join(rootDir, BUILD_DIR, name)),
-    ...Object.keys(piHarnessFiles).map((name) => join(rootDir, BUILD_DIR, name)),
-    ...Object.keys(codexHarnessFiles).map((name) => join(rootDir, BUILD_DIR, name)),
-    ...Object.keys(claudeHarnessFiles).map((name) => join(rootDir, BUILD_DIR, name)),
-  ].filter((p) => existsSync(p));
-}
-
-function createRuntime(project: string): SandboxRuntime {
-  return new DockerRuntime(project);
-}
-
 function buildEventStoreLayer(
   rootDir: string,
   enabled: boolean,
   runId: string,
+  targetName?: string,
 ): Layer.Layer<EventStore> {
   if (!enabled) {
     return NoOpEventStoreLive(runId);
   }
-  return FileEventStoreLive({
-    runId,
-    path: eventLogPath(rootDir, runId),
-  });
+  const path = targetName
+    ? join(targetBuildDir(rootDir, targetName), "logs", `events-${runId}.jsonl`)
+    : eventLogPath(rootDir, runId);
+  return FileEventStoreLive({ runId, path });
 }
 
 function buildLayers(
   rootDir: string,
   enabled: boolean,
   runId: string,
+  targetName?: string,
 ): Layer.Layer<ChildProcessSpawner.ChildProcessSpawner | EventStore, never, never> {
-  return Layer.merge(NodeRuntime, buildEventStoreLayer(rootDir, enabled, runId));
+  return Layer.merge(NodeRuntime, buildEventStoreLayer(rootDir, enabled, runId, targetName));
 }
 
 function withLayers<E>(
@@ -192,9 +63,10 @@ function withLayers<E>(
   rootDir: string,
   enabled: boolean,
   runId: string,
+  targetName?: string,
 ): Effect.Effect<void, E, never> {
   return program.pipe(
-    Effect.provide(buildLayers(rootDir, enabled, runId)),
+    Effect.provide(buildLayers(rootDir, enabled, runId, targetName)),
     Effect.provide(BiodomeTelemetry),
   ) as Effect.Effect<void, E, never>;
 }
@@ -227,7 +99,7 @@ function wrapRunEvents(
   });
 }
 
-function emitPlanLoaded(plan: Plan): Effect.Effect<void, never, EventStore> {
+function emitPlanLoaded(plan: Plan, targetName?: string): Effect.Effect<void, never, EventStore> {
   return Effect.gen(function* () {
     const store = yield* EventStore;
     yield* store.emit("plan.loaded", {
@@ -235,17 +107,8 @@ function emitPlanLoaded(plan: Plan): Effect.Effect<void, never, EventStore> {
       languages: plan.build.languageRequests.map((l) => l.name),
       services: plan.runtime.services.map((s) => s.name),
       processes: plan.runtime.processes.map((p) => p.name),
+      ...(targetName ? { target: targetName } : {}),
     });
-  });
-}
-
-function emitFilesGenerated(
-  rootDir: string,
-  files: string[],
-): Effect.Effect<void, never, EventStore> {
-  return Effect.gen(function* () {
-    const store = yield* EventStore;
-    yield* store.emit("files.generated", { rootDir, files });
   });
 }
 
@@ -277,7 +140,9 @@ program
       const projectName = rootDir.split("/").pop() || "project";
 
       if (existsSync(configDir)) {
-        return yield* new PlanError({ message: "Config directory .biodome already exists" });
+        return yield* new PlanError({
+          message: "Config directory .biodome already exists",
+        });
       }
 
       yield* Effect.try({
@@ -303,7 +168,6 @@ program
             );
           }
 
-          // Create default local target and tasks directory.
           mkdirSync(join(configDir, "targets"), { recursive: true });
           writeFileSync(
             join(configDir, "targets", "local.mjs"),
@@ -324,50 +188,72 @@ program
     runSafe(cliProgram);
   });
 
+// --- Targeted lifecycle commands ---
+
 program
-  .command("build")
-  .description("Prepare the development environment")
-  .action(() => {
+  .command("build <target>")
+  .description("Prepare a named target development environment")
+  .action((targetName: string) => {
     const runId = randomUUID();
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd();
-      const plan = yield* buildPlanEffect(rootDir);
-      yield* emitPlanLoaded(plan);
-      const files = writeGeneratedFiles(rootDir, plan);
-      yield* emitFilesGenerated(rootDir, files);
-      const runtime = createRuntime(plan.project);
-      yield* runtime.ensureAvailable();
-      yield* runHooks(plan, "build.pre", runtime, rootDir);
-      yield* runtime.build(rootDir);
-      yield* runHooks(plan, "build.post", runtime, rootDir);
-      yield* Effect.logInfo(`Environment ready for ${plan.project}`);
-    }).pipe(Effect.scoped);
+      const plan = yield* buildTargetPlanEffect(rootDir, targetName);
+      yield* emitPlanLoaded(plan, targetName);
+      const driver = yield* getDriver(plan.deployment!.target.driver);
+      yield* driver.ensureAvailable(plan.deployment!.target);
+      const outputDir = targetBuildDir(rootDir, targetName);
+      yield* driver.render({ rootDir, outputDir, plan, target: plan.deployment!.target });
+      yield* driver.build({
+        rootDir,
+        outputDir,
+        plan,
+        target: plan.deployment!.target,
+        deploymentId: plan.deployment!.deploymentId,
+      });
+      yield* Effect.logInfo(`Target "${targetName}" built`);
+    });
 
     const wrapped = wrapRunEvents("build", cliProgram);
-    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId));
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId, targetName));
   });
 
 program
-  .command("up")
-  .description("Start the development environment")
-  .option("--build", "Rebuild the environment before starting")
+  .command("up <target>")
+  .description("Start a named target sandbox")
+  .option("--build", "Rebuild the image before starting")
   .option("--wait", "Block until Ctrl+C is pressed")
-  .action((options) => {
+  .action((targetName: string, options) => {
     const runId = randomUUID();
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd();
-      const plan = yield* buildPlanEffect(rootDir);
-      yield* emitPlanLoaded(plan);
-      const files = writeGeneratedFiles(rootDir, plan);
-      yield* emitFilesGenerated(rootDir, files);
+      const plan = yield* buildTargetPlanEffect(rootDir, targetName);
+      yield* emitPlanLoaded(plan, targetName);
+      const driver = yield* getDriver(plan.deployment!.target.driver);
+      yield* driver.ensureAvailable(plan.deployment!.target);
+      const outputDir = targetBuildDir(rootDir, targetName);
+      const deploymentId = plan.deployment!.deploymentId;
 
-      const runtime = createRuntime(plan.project);
-      yield* runtime.ensureAvailable();
-      yield* runHooks(plan, "start.pre", runtime, rootDir);
-      yield* runtime.start(rootDir, options.build);
-      yield* runHooks(plan, "start.post", runtime, rootDir);
+      if (options.build) {
+        yield* driver.render({ rootDir, outputDir, plan, target: plan.deployment!.target });
+        yield* driver.build({
+          rootDir,
+          outputDir,
+          plan,
+          target: plan.deployment!.target,
+          deploymentId,
+        });
+      }
 
-      yield* Effect.logInfo(`Workspace ${plan.project} is running`);
+      const state = yield* driver.start({
+        rootDir,
+        outputDir,
+        plan,
+        target: plan.deployment!.target,
+        deploymentId,
+      });
+      writeState(rootDir, targetName, state);
+
+      yield* Effect.logInfo(`Target "${targetName}" is running`);
 
       if (options.wait) {
         yield* Effect.logInfo("Press Ctrl+C to stop");
@@ -376,54 +262,80 @@ program
             resume(Effect.void);
           });
         });
-        yield* runtime.stop(rootDir);
+        yield* driver.stop({
+          rootDir,
+          outputDir,
+          plan,
+          target: plan.deployment!.target,
+          deploymentId,
+        });
+        removeState(rootDir, targetName);
       }
     }).pipe(Effect.scoped);
 
     const wrapped = wrapRunEvents("up", cliProgram);
-    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId));
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId, targetName));
   });
 
 program
-  .command("down")
-  .description("Stop the development environment")
-  .action(() => {
+  .command("down <target>")
+  .description("Stop a named target sandbox")
+  .action((targetName: string) => {
     const runId = randomUUID();
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd();
-      const plan = yield* buildPlanEffect(rootDir);
-      yield* emitPlanLoaded(plan);
-      const runtime = createRuntime(plan.project);
-      yield* runtime.ensureAvailable();
-      yield* runHooks(plan, "stop.pre", runtime, rootDir);
-      yield* runtime.stop(rootDir);
-      yield* runHooks(plan, "stop.post", runtime, rootDir);
-      yield* Effect.logInfo("Stopped");
-    }).pipe(Effect.scoped);
+      const plan = yield* buildTargetPlanEffect(rootDir, targetName, { dryRun: true });
+      const driver = yield* getDriver(plan.deployment!.target.driver);
+      const deploymentId = plan.deployment!.deploymentId;
+      const outputDir = targetBuildDir(rootDir, targetName);
+
+      readState(rootDir, targetName, deploymentId, driver.id);
+      yield* driver.stop({
+        rootDir,
+        outputDir,
+        plan,
+        target: plan.deployment!.target,
+        deploymentId,
+      });
+      removeState(rootDir, targetName);
+      yield* Effect.logInfo(`Target "${targetName}" stopped`);
+    });
 
     const wrapped = wrapRunEvents("down", cliProgram);
-    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId));
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId, targetName));
   });
 
 program
-  .command("exec <command...>")
-  .description("Run a command in the dev container")
+  .command("exec <target> <command...>")
+  .description("Run a command in a target sandbox container")
   .allowUnknownOption()
-  .action((cmd: string[]) => {
+  .action((targetName: string, cmd: string[]) => {
     const runId = randomUUID();
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd();
-      const plan = yield* buildPlanEffect(rootDir);
-      yield* emitPlanLoaded(plan);
-      const runtime = createRuntime(plan.project);
-      yield* runtime.ensureAvailable();
-      yield* runHooks(plan, "exec.pre", runtime, rootDir);
-      yield* runtime.exec(cmd);
-      yield* runHooks(plan, "exec.post", runtime, rootDir);
+      const plan = yield* buildTargetPlanEffect(rootDir, targetName);
+      yield* emitPlanLoaded(plan, targetName);
+      const driver = yield* getDriver(plan.deployment!.target.driver);
+      if (!hasCapability(driver.capabilities, "exec.command")) {
+        return yield* new RuntimeError({
+          message: `Driver "${driver.id}" does not support exec.command`,
+        });
+      }
+      const deploymentId = plan.deployment!.deploymentId;
+      const outputDir = targetBuildDir(rootDir, targetName);
+      yield* driver.exec({
+        rootDir,
+        outputDir,
+        plan,
+        target: plan.deployment!.target,
+        command: cmd,
+        deploymentId,
+      });
+      yield* Effect.logInfo(`Command completed on target "${targetName}"`);
     }).pipe(Effect.scoped);
 
     const wrapped = wrapRunEvents("exec", cliProgram);
-    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId));
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId, targetName));
   });
 
 program
@@ -442,87 +354,194 @@ program
   });
 
 program
-  .command("logs [process]")
-  .description("Tail logs from a managed process")
-  .action((processName?: string) => {
+  .command("logs <target> [process]")
+  .description("Tail logs from a managed process in a target sandbox")
+  .action((targetName: string, processName?: string) => {
     const runId = randomUUID();
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd();
-      const config = yield* validateConfigEffect(rootDir);
-      const runtime = createRuntime(config.project.name);
-      yield* runtime.ensureAvailable();
-      yield* runtime.logs(processName);
+      const plan = yield* buildTargetPlanEffect(rootDir, targetName, { dryRun: true });
+      const driver = yield* getDriver(plan.deployment!.target.driver);
+      if (!hasCapability(driver.capabilities, "logs.stream")) {
+        return yield* new RuntimeError({
+          message: `Driver "${driver.id}" does not support logs.stream`,
+        });
+      }
+      const deploymentId = plan.deployment!.deploymentId;
+      const outputDir = targetBuildDir(rootDir, targetName);
+      yield* driver.logs({
+        rootDir,
+        outputDir,
+        plan,
+        target: plan.deployment!.target,
+        deploymentId,
+        processName,
+      });
     }).pipe(Effect.scoped);
 
     const wrapped = wrapRunEvents("logs", cliProgram);
-    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId));
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId, targetName));
   });
 
 program
-  .command("ps")
-  .description("Show running containers for the project")
-  .action(() => {
+  .command("ps <target>")
+  .description("Show running containers for a target sandbox")
+  .action((targetName: string) => {
     const runId = randomUUID();
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd();
-      const config = yield* validateConfigEffect(rootDir);
-      const runtime = createRuntime(config.project.name);
-      yield* runtime.ensureAvailable();
-      yield* runtime.status();
-    }).pipe(Effect.scoped);
+      const plan = yield* buildTargetPlanEffect(rootDir, targetName, { dryRun: true });
+      const driver = yield* getDriver(plan.deployment!.target.driver);
+      if (!hasCapability(driver.capabilities, "status.read")) {
+        return yield* new RuntimeError({
+          message: `Driver "${driver.id}" does not support status.read`,
+        });
+      }
+      const deploymentId = plan.deployment!.deploymentId;
+      const outputDir = targetBuildDir(rootDir, targetName);
+      const st = yield* driver.status({
+        rootDir,
+        outputDir,
+        plan,
+        target: plan.deployment!.target,
+        deploymentId,
+      });
+      yield* Effect.logInfo(
+        `Target "${targetName}" status: ${st.state}${st.message ? ` - ${st.message}` : ""}`,
+      );
+    });
 
     const wrapped = wrapRunEvents("ps", cliProgram);
-    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId));
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId, targetName));
   });
 
 program
-  .command("status")
-  .description("Report container health and running processes")
-  .action(() => {
+  .command("status <target>")
+  .description("Report container health and process status for a target")
+  .action((targetName: string) => {
     const runId = randomUUID();
     const cliProgram = Effect.gen(function* () {
       const rootDir = process.cwd();
-      const config = yield* validateConfigEffect(rootDir);
-      const runtime = createRuntime(config.project.name);
-      yield* runtime.ensureAvailable();
+      const plan = yield* buildTargetPlanEffect(rootDir, targetName, { dryRun: true });
+      const driver = yield* getDriver(plan.deployment!.target.driver);
+      if (!hasCapability(driver.capabilities, "status.read")) {
+        return yield* new RuntimeError({
+          message: `Driver "${driver.id}" does not support status.read`,
+        });
+      }
+      const deploymentId = plan.deployment!.deploymentId;
+      const outputDir = targetBuildDir(rootDir, targetName);
       console.log("Container status");
-      yield* runtime.status();
-      console.log("\nProcess status");
-      yield* runtime.exec([
-        "supervisorctl",
-        "-c",
-        "/workspace/.biodome-build/supervisord.conf",
-        "status",
-      ]);
-    }).pipe(Effect.scoped);
+      const st = yield* driver.status({
+        rootDir,
+        outputDir,
+        plan,
+        target: plan.deployment!.target,
+        deploymentId,
+      });
+      yield* Effect.logInfo(
+        `Target "${targetName}" status: ${st.state}${st.message ? ` - ${st.message}` : ""}`,
+      );
 
-    const wrapped = wrapRunEvents("status", cliProgram);
-    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId));
-  });
-
-program
-  .command("restart [process]")
-  .description("Restart a managed process or all daemon processes")
-  .action((processName?: string) => {
-    const runId = randomUUID();
-    const cliProgram = Effect.gen(function* () {
-      const rootDir = process.cwd();
-      const plan = yield* buildPlanEffect(rootDir);
-      yield* emitPlanLoaded(plan);
-      const runtime = createRuntime(plan.project);
-      yield* runtime.ensureAvailable();
-      if (processName) {
-        yield* runtime.restart(processName);
-      } else {
-        for (const proc of plan.runtime.processes.filter((p) => p.mode === "daemon")) {
-          yield* runtime.restart(proc.name);
-        }
+      if (hasCapability(driver.capabilities, "exec.command")) {
+        console.log("\nProcess status");
+        yield* driver.exec({
+          rootDir,
+          outputDir,
+          plan,
+          target: plan.deployment!.target,
+          deploymentId,
+          command: [
+            "supervisorctl",
+            "-c",
+            `/workspace/.biodome-build/targets/${targetName}/supervisord.conf`,
+            "status",
+          ],
+        });
       }
     }).pipe(Effect.scoped);
 
-    const wrapped = wrapRunEvents("restart", cliProgram);
-    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId));
+    const wrapped = wrapRunEvents("status", cliProgram);
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId, targetName));
   });
+
+program
+  .command("restart <target> [process]")
+  .description("Restart a managed process or all daemon processes in a target")
+  .action((targetName: string, processName?: string) => {
+    const runId = randomUUID();
+    const cliProgram = Effect.gen(function* () {
+      const rootDir = process.cwd();
+      const plan = yield* buildTargetPlanEffect(rootDir, targetName);
+      yield* emitPlanLoaded(plan, targetName);
+      const driver = yield* getDriver(plan.deployment!.target.driver);
+      const deploymentId = plan.deployment!.deploymentId;
+      const outputDir = targetBuildDir(rootDir, targetName);
+
+      if (processName) {
+        if (!hasCapability(driver.capabilities, "process.signal")) {
+          return yield* new RuntimeError({
+            message: `Driver "${driver.id}" does not support process.signal`,
+          });
+        }
+        yield* driver.restart({
+          rootDir,
+          outputDir,
+          plan,
+          target: plan.deployment!.target,
+          deploymentId,
+          processName,
+        });
+      } else {
+        for (const proc of plan.runtime.processes.filter((p) => p.mode === "daemon")) {
+          if (!hasCapability(driver.capabilities, "process.signal")) {
+            yield* Effect.logWarning(
+              `Driver "${driver.id}" does not support process.signal, skipping ${proc.name}`,
+            );
+            continue;
+          }
+          yield* driver.restart({
+            rootDir,
+            outputDir,
+            plan,
+            target: plan.deployment!.target,
+            deploymentId,
+            processName: proc.name,
+          });
+        }
+      }
+      yield* Effect.logInfo(`Restart completed on target "${targetName}"`);
+    }).pipe(Effect.scoped);
+
+    const wrapped = wrapRunEvents("restart", cliProgram);
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId, targetName));
+  });
+
+program
+  .command("run <target> <task>")
+  .description("Execute a named task against a target sandbox")
+  .action((targetName: string, taskName: string) => {
+    const runId = randomUUID();
+    const cliProgram = Effect.gen(function* () {
+      const rootDir = process.cwd();
+      const plan = yield* buildTaskPlanEffect(rootDir, targetName, taskName);
+      const driver = yield* getDriver(plan.deployment!.target.driver);
+      yield* driver.ensureAvailable(plan.deployment!.target);
+      yield* Effect.logInfo(`Running task "${taskName}" against sandbox "${targetName}"`);
+      const result = yield* executeTask(rootDir, plan, driver);
+      yield* Effect.logInfo(`Task "${taskName}" completed with exit code ${result.exitCode}`);
+      if (result.artifacts && result.artifacts.length > 0) {
+        for (const a of result.artifacts) {
+          yield* Effect.logInfo(`  Artifact: ${a.path} (${a.sizeBytes} bytes) -> ${a.localPath}`);
+        }
+      }
+    });
+
+    const wrapped = wrapRunEvents("run", cliProgram);
+    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId, targetName));
+  });
+
+// --- Non-targeted commands ---
 
 program
   .command("events")
@@ -531,37 +550,44 @@ program
   .action((options) => {
     const cliProgram = Effect.sync(() => {
       const rootDir = process.cwd();
-      const logsDir = join(rootDir, BUILD_DIR, "logs");
-      if (!existsSync(logsDir)) {
+      const buildDir = join(rootDir, BUILD_DIR);
+
+      // Search both global logs and target-scoped logs.
+      const logDirs: string[] = [join(buildDir, "logs")];
+      const targetsDir = join(buildDir, "targets");
+      if (existsSync(targetsDir)) {
+        for (const entry of readdirSync(targetsDir)) {
+          const targetLogs = join(targetsDir, entry, "logs");
+          if (existsSync(targetLogs)) {
+            logDirs.push(targetLogs);
+          }
+        }
+      }
+
+      const events: SandboxEvent[] = [];
+      for (const logDir of logDirs) {
+        if (!existsSync(logDir)) continue;
+        const files = readdirSync(logDir).filter(
+          (f) => f.startsWith("events-") && f.endsWith(".jsonl"),
+        );
+        for (const file of files) {
+          const text = readFileSync(join(logDir, file), "utf-8");
+          for (const line of text.split("\n").filter((l: string) => l.trim().length > 0)) {
+            const event = JSON.parse(line) as SandboxEvent;
+            events.push(event);
+          }
+        }
+      }
+
+      if (events.length === 0) {
         console.log("No events captured yet");
         return;
       }
 
-      const files = readdirSync(logsDir).filter(
-        (f) => f.startsWith("events-") && f.endsWith(".jsonl"),
-      );
-      if (files.length === 0) {
-        console.log("No event logs found");
-        return;
-      }
-
-      const events = files
-        .flatMap((file: string) => {
-          const text = readFileSync(join(logsDir, file), "utf-8");
-          return text
-            .split("\n")
-            .filter((line: string) => line.trim().length > 0)
-            .map((line: string) => JSON.parse(line) as SandboxEvent);
-        })
-        .filter((event: SandboxEvent) => !options.run || event.runId === options.run)
-        .sort(
-          (a: SandboxEvent, b: SandboxEvent) =>
-            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-        );
-
-      for (const event of events) {
-        console.log(formatEvent(event));
-      }
+      const filtered = options.run ? events.filter((e) => e.runId === options.run) : events;
+      filtered
+        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+        .forEach((event) => console.log(formatEvent(event)));
     });
 
     runSafe(cliProgram);
@@ -603,25 +629,6 @@ targetCmd
     });
 
     runSafe(cliProgram);
-  });
-
-program
-  .command("run <target> <task>")
-  .description("Execute a named task against a target sandbox")
-  .action((targetName: string, taskName: string) => {
-    const runId = randomUUID();
-    const cliProgram = Effect.gen(function* () {
-      const rootDir = process.cwd();
-      const plan = yield* buildTaskPlanEffect(rootDir, targetName, taskName);
-      const driver = yield* getDriver(plan.deployment!.target.driver);
-      yield* driver.ensureAvailable(plan.deployment!.target);
-      yield* Effect.logInfo(`Running task "${taskName}" against sandbox "${targetName}"`);
-      const result = yield* executeTask(rootDir, plan, driver);
-      yield* Effect.logInfo(`Task "${taskName}" completed with exit code ${result.exitCode}`);
-    });
-
-    const wrapped = wrapRunEvents("run", cliProgram);
-    runSafe(withLayers(wrapped, process.cwd(), program.opts().events, runId));
   });
 
 const generateCmd = program.command("generate").description("Generate project files");

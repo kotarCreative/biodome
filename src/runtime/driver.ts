@@ -4,6 +4,8 @@ import type { EventStore } from "../core/events.js";
 import type { Capabilities } from "../core/capabilities.js";
 import type { Plan, RuntimeTarget } from "../core/plan.js";
 
+export type DeploymentStatus = "pending" | "running" | "stopped" | "failed" | "unknown";
+
 export interface RuntimeOperationInput {
   rootDir: string;
   outputDir: string;
@@ -31,12 +33,18 @@ export interface CommandResult {
   stdout: string;
   stderr: string;
   durationMs: number;
+  timedOut?: boolean;
 }
 
 export interface Artifact {
   path: string;
   sizeBytes: number;
   localPath: string;
+}
+
+export interface StatusResult {
+  state: DeploymentStatus;
+  message?: string;
 }
 
 export interface RuntimeDriver {
@@ -55,14 +63,12 @@ export interface RuntimeDriver {
   start(input: RuntimeOperationInput): Effect.Effect<DeploymentState, RuntimeError, EventStore>;
   stop(input: RuntimeOperationInput): Effect.Effect<void, RuntimeError, EventStore>;
   exec(
-    input: RuntimeOperationInput & { command: string[] },
+    input: RuntimeOperationInput & { command: string[]; timeoutMs?: number },
   ): Effect.Effect<CommandResult, RuntimeError, EventStore>;
   collectArtifacts(
     input: RuntimeOperationInput & { paths: string[] },
   ): Effect.Effect<Artifact[], RuntimeError, EventStore>;
-  status(
-    input: RuntimeOperationInput,
-  ): Effect.Effect<{ state: string; message?: string }, RuntimeError, EventStore>;
+  status(input: RuntimeOperationInput): Effect.Effect<StatusResult, RuntimeError, EventStore>;
   logs(
     input: RuntimeOperationInput & { processName?: string },
   ): Effect.Effect<void, RuntimeError, EventStore>;

@@ -21,6 +21,7 @@ export type Capability =
   | "snapshot.restore"
   | "network.policy"
   | "volume.mount"
+  | "artifact.collect"
   | (string & {});
 
 /** A read-only set of capabilities advertised by a runtime backend. */

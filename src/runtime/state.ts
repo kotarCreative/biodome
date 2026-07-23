@@ -1,4 +1,11 @@
-import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  unlinkSync,
+  existsSync,
+  mkdirSync,
+} from "node:fs";
 import { join, dirname } from "node:path";
 import { targetBuildDir } from "./output.js";
 import { ValidationError } from "../core/errors.js";
@@ -22,6 +29,7 @@ export function readState(
   rootDir: string,
   targetName: string,
   expectedDeploymentId: string,
+  expectedDriver: string,
 ): DeploymentState {
   const path = statePath(rootDir, targetName);
   if (!existsSync(path)) {
@@ -44,6 +52,18 @@ export function readState(
     });
   }
 
+  if (raw.target !== targetName) {
+    throw new ValidationError({
+      message: `State target mismatch: expected "${targetName}", got "${raw.target}"`,
+    });
+  }
+
+  if (raw.driver !== expectedDriver) {
+    throw new ValidationError({
+      message: `State driver mismatch for target "${targetName}". Expected "${expectedDriver}", got "${raw.driver}".`,
+    });
+  }
+
   return raw;
 }
 
@@ -57,7 +77,7 @@ export function writeState(
 ): void {
   const path = statePath(rootDir, targetName);
   const dir = dirname(path);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
 
   const enriched: DeploymentState = {
     schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -76,6 +96,6 @@ export function writeState(
 export function removeState(rootDir: string, targetName: string): void {
   const path = statePath(rootDir, targetName);
   if (existsSync(path)) {
-    renameSync(path, path + ".bak");
+    unlinkSync(path);
   }
 }

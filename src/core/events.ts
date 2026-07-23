@@ -47,6 +47,9 @@ export const EVENT_TYPES = [
   "service.stop.failed",
   "service.health_check",
   "config.validated",
+  "task.started",
+  "task.completed",
+  "task.failed",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
@@ -102,6 +105,25 @@ export interface EventData {
   "service.stop.failed": { name: string; error: string };
   "service.health_check": { name: string; status: string; failingStreak?: number };
   "config.validated": { project: string; valid: boolean };
+  "task.started": { target: string; driver: string; task: string; harness: string };
+  "task.completed": {
+    target: string;
+    driver: string;
+    task: string;
+    harness: string;
+    durationMs: number;
+    exitCode: number;
+    artifacts?: Array<{ path: string; sizeBytes: number; localPath: string }>;
+  };
+  "task.failed": {
+    target: string;
+    driver: string;
+    task: string;
+    harness: string;
+    durationMs: number;
+    exitCode?: number;
+    error: string;
+  };
 }
 
 export interface EventStore {

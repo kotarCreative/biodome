@@ -1,8 +1,6 @@
 # Implementation Plan: Remote MCP Providers + Code Mode
 
-Status: ready to execute. Audience: an engineer or LLM implementing this
-step-by-step. Do the tasks in order. After each task, run the verification
-commands and do not proceed until they pass.
+Status: completed. All 10 tasks have been implemented — `UpstreamRegistry`, code-mode facade, sugar helpers, plan.json serialization, tests, and docs. Hand-rolled Jira/Linear REST tools have been removed.
 
 ## Goal
 
@@ -669,20 +667,20 @@ rg -n "jiraRequest|linearRequest|jiraAttachmentRequest" src   # expect no matche
 
 ## Acceptance criteria
 
-- [ ] `addMcpProvider` + five sugar helpers exist and delegate to `addProvider`.
-- [ ] Provider credential env refs land in the `biodome-mcp` process env only
+- [x] `addMcpProvider` + five sugar helpers exist and delegate to `addProvider`.
+- [x] Provider credential env refs land in the `biodome-mcp` process env only
       (`mergeEnv:false`), never in the dev container global env.
-- [ ] `plan.json` carries `mcpUrl`/`authHeader`/`authScheme`/`authCredential`
+- [x] `plan.json` carries `mcpUrl`/`authHeader`/`authScheme`/`authCredential`
       and keeps credentials as `{ env }` refs.
-- [ ] `biodome-mcp` exposes exactly `provider_search`, `provider_describe`,
+- [x] `biodome-mcp` exposes exactly `provider_search`, `provider_describe`,
       `provider_execute`, and `get_providers` for providers (plus existing
       sandbox/volume tools); no per-provider tools.
-- [ ] `provider_execute` routes to the correct upstream MCP server, attaches the
+- [x] `provider_execute` routes to the correct upstream MCP server, attaches the
       credential server-side, and returns the upstream result.
-- [ ] A failing upstream provider is reported via `errors` and does not break the
+- [x] A failing upstream provider is reported via `errors` and does not break the
       others.
-- [ ] All hand-rolled Jira/Linear REST/GraphQL code is deleted.
-- [ ] `npm run typecheck` and `npm run test:run` pass.
+- [x] All hand-rolled Jira/Linear REST/GraphQL code is deleted.
+- [x] `npm run typecheck` and `npm run test:run` pass.
 
 ## Notes / gotchas for the executor
 

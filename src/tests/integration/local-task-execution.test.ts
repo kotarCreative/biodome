@@ -1,0 +1,334 @@
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
+
+const REPOSITORY_ROOT = resolve(import.meta.dirname, "../../..");
+const CLI_PATH = join(REPOSITORY_ROOT, "dist/cli/index.js");
+const OUTPUT_LIMIT_BYTES = 64 * 1024;
+const CLI_TIMEOUT_MS = 8 * 60 * 1000;
+const PROJECT_NAME = "biodome-local-task-fixture";
+const TARGET_NAME = "local";
+const TASK_NAME = "review-pr";
+const PRIVATE_PROMPT = "PRIVATE_FIXTURE_PROMPT_DO_NOT_PRINT";
+const ARTIFACT_BODY = [
+  "source: ok",
+  "dependency: ok",
+  "daemon: ok",
+  "environment: ok",
+  "pi-arguments: ok",
+  "",
+].join("\n");
+
+interface ProcessResult {
+  readonly exitCode: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly timedOut: boolean;
+  readonly outputExceeded: boolean;
+}
+
+function hasDocker(): boolean {
+  const result = spawnSync("docker", ["version"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 15_000,
+    maxBuffer: OUTPUT_LIMIT_BYTES,
+  });
+  return result.status === 0;
+}
+
+function deploymentId(project: string, target: string): string {
+  const slug = `${project}-${target}`.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
+  const hash = createHash("sha256").update(slug).digest("hex").slice(0, 8);
+  return `${slug.slice(0, 48)}-${hash}`;
+}
+
+function writeFixtureFile(rootDir: string, path: string, content: string): void {
+  const fullPath = join(rootDir, path);
+  mkdirSync(dirname(fullPath), { recursive: true });
+  writeFileSync(fullPath, content);
+}
+
+function createFixture(rootDir: string): void {
+  const files: Record<string, string> = {
+    ".biodome/config.json": `${JSON.stringify({ project: { name: PROJECT_NAME } }, null, 2)}\n`,
+    ".biodome/services.mjs": "export default function services() {}\n",
+    ".biodome/features/dev.mjs": `
+export default function dev(ctx) {
+  ctx.addLanguage("node", { version: "20" });
+  ctx.addEnv("FIXTURE_RUNTIME_VALUE", { value: "runtime-environment-ok" });
+  ctx.addEnv("PATH", {
+    value: "/workspace/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+  });
+  ctx.addProcess({
+    name: "fixture-daemon",
+    command: ["node", "src/daemon.mjs"],
+    healthCheck: {
+      type: "http",
+      url: "http://localhost:4317/health",
+      interval: "1s",
+      timeout: "1s",
+      retries: 10,
+      startPeriod: "1s",
+    },
+  });
+  ctx.addPiHarness({ name: "reviewer", telemetry: { enabled: false } });
+}
+`,
+    ".biodome/targets/local.mjs": `
+export default function local(ctx) {
+  ctx.useRuntime("docker-compose");
+}
+`,
+    ".biodome/tasks/review-pr.mjs": `
+export default function reviewPr(ctx) {
+  ctx.addTask({
+    harness: "reviewer",
+    prompt: ${JSON.stringify(PRIVATE_PROMPT)},
+    artifacts: ["review.md"],
+    timeout: "30s",
+    cleanup: "always",
+  });
+}
+`,
+    "package.json": `${JSON.stringify(
+      {
+        name: PROJECT_NAME,
+        version: "1.0.0",
+        private: true,
+        type: "module",
+        dependencies: { picocolors: "1.1.1" },
+      },
+      null,
+      2,
+    )}\n`,
+    "package-lock.json": `${JSON.stringify(
+      {
+        name: PROJECT_NAME,
+        version: "1.0.0",
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          "": {
+            name: PROJECT_NAME,
+            version: "1.0.0",
+            dependencies: { picocolors: "1.1.1" },
+          },
+          "node_modules/picocolors": {
+            version: "1.1.1",
+            resolved: "https://registry.npmjs.org/picocolors/-/picocolors-1.1.1.tgz",
+            integrity:
+              "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==",
+            license: "ISC",
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    "src/app.mjs": 'export const applicationMarker = "workspace-source-ok";\n',
+    "src/daemon.mjs": `
+import { createServer } from "node:http";
+
+createServer((request, response) => {
+  if (request.url === "/health") {
+    response.writeHead(200, { "content-type": "text/plain" });
+    response.end("daemon-ready");
+    return;
+  }
+  response.writeHead(404);
+  response.end();
+}).listen(4317, "127.0.0.1");
+`,
+    "bin/pi": `#!/usr/bin/env node
+import { readFile, writeFile } from "node:fs/promises";
+import pc from "picocolors";
+
+if (process.argv.length !== 4 || process.argv[2] !== "-p") {
+  throw new Error("Pi shim expected exactly: -p <prompt>");
+}
+
+const source = await readFile("/workspace/src/app.mjs", "utf8");
+if (!source.includes("workspace-source-ok")) throw new Error("workspace source unavailable");
+if (typeof pc.green !== "function") throw new Error("installed dependency unavailable");
+if (process.env.FIXTURE_RUNTIME_VALUE !== "runtime-environment-ok") {
+  throw new Error("runtime environment unavailable");
+}
+
+let daemonReady = false;
+for (let attempt = 0; attempt < 30; attempt += 1) {
+  try {
+    const response = await fetch("http://127.0.0.1:4317/health");
+    daemonReady = response.ok && (await response.text()) === "daemon-ready";
+  } catch {}
+  if (daemonReady) break;
+  await new Promise((resolve) => setTimeout(resolve, 200));
+}
+if (!daemonReady) throw new Error("managed daemon unavailable");
+
+await writeFile("/workspace/review.md", ${JSON.stringify(ARTIFACT_BODY)});
+`,
+  };
+
+  rmSync(rootDir, { recursive: true, force: true });
+  mkdirSync(rootDir, { recursive: true });
+  for (const [path, content] of Object.entries(files)) {
+    writeFixtureFile(rootDir, path, content.trimStart());
+  }
+  chmodSync(join(rootDir, "bin/pi"), 0o755);
+}
+
+function runCli(rootDir: string): Promise<ProcessResult> {
+  return new Promise((resolveResult, reject) => {
+    const child = spawn(
+      process.execPath,
+      [CLI_PATH, "--no-events", "run", TARGET_NAME, TASK_NAME],
+      {
+        cwd: rootDir,
+        env: process.env,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = Buffer.alloc(0);
+    let stderr = Buffer.alloc(0);
+    let timedOut = false;
+    let outputExceeded = false;
+
+    const append = (current: Buffer, chunk: Buffer): Buffer => {
+      const remaining = OUTPUT_LIMIT_BYTES - current.length;
+      if (remaining <= 0) return current;
+      return Buffer.concat([current, chunk.subarray(0, remaining)]);
+    };
+    const capture = (stream: "stdout" | "stderr", chunk: Buffer): void => {
+      if (stream === "stdout") stdout = append(stdout, chunk);
+      else stderr = append(stderr, chunk);
+      if (stdout.length + stderr.length >= OUTPUT_LIMIT_BYTES) {
+        outputExceeded = true;
+        child.kill("SIGKILL");
+      }
+    };
+
+    child.stdout.on("data", (chunk: Buffer) => capture("stdout", chunk));
+    child.stderr.on("data", (chunk: Buffer) => capture("stderr", chunk));
+    child.once("error", reject);
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, CLI_TIMEOUT_MS);
+    timer.unref();
+
+    child.once("close", (exitCode) => {
+      clearTimeout(timer);
+      resolveResult({
+        exitCode,
+        stdout: stdout.toString("utf8"),
+        stderr: stderr.toString("utf8"),
+        timedOut,
+        outputExceeded,
+      });
+    });
+  });
+}
+
+function removeComposeProject(rootDir: string): void {
+  const composePath = join(rootDir, ".biodome-build/targets/local/docker-compose.yaml");
+  if (!existsSync(composePath)) return;
+  spawnSync(
+    "docker",
+    [
+      "compose",
+      "-f",
+      composePath,
+      "-p",
+      deploymentId(PROJECT_NAME, TARGET_NAME),
+      "down",
+      "--volumes",
+      "--remove-orphans",
+    ],
+    {
+      cwd: rootDir,
+      stdio: "ignore",
+      timeout: 60_000,
+    },
+  );
+}
+
+const describeDocker = hasDocker() ? describe : describe.skip;
+
+describeDocker("built CLI local task execution", () => {
+  let fixtureRoot: string | undefined;
+
+  beforeAll(() => {
+    const build = spawnSync("npm", ["run", "build"], {
+      cwd: REPOSITORY_ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 120_000,
+      maxBuffer: OUTPUT_LIMIT_BYTES,
+    });
+    expect(build.status, `CLI build failed:\n${build.stdout}\n${build.stderr}`).toBe(0);
+    expect(existsSync(CLI_PATH)).toBe(true);
+  }, 130_000);
+
+  afterEach(() => {
+    if (!fixtureRoot) return;
+    removeComposeProject(fixtureRoot);
+    rmSync(fixtureRoot, { recursive: true, force: true });
+    fixtureRoot = undefined;
+  });
+
+  it(
+    "runs a Pi task in the complete environment and returns only its artifact",
+    async () => {
+      fixtureRoot = join(tmpdir(), `biodome-local-task-${process.pid}-${Date.now()}`);
+      createFixture(fixtureRoot);
+
+      const result = await runCli(fixtureRoot);
+      const diagnostics = `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`;
+      expect(result.timedOut, diagnostics).toBe(false);
+      expect(result.outputExceeded, diagnostics).toBe(false);
+      expect(result.exitCode, diagnostics).toBe(0);
+
+      const output = `${result.stdout}\n${result.stderr}`;
+      expect(output).toContain(TARGET_NAME);
+      expect(output).toContain(TASK_NAME);
+      expect(output).toContain("artifacts/review.md");
+      expect(output).not.toContain(PRIVATE_PROMPT);
+      expect(output).not.toContain("pi-homes/reviewer/task");
+      expect(output).not.toContain(ARTIFACT_BODY.trim());
+
+      const targetDir = join(fixtureRoot, ".biodome-build/targets/local");
+      const artifactPath = join(targetDir, "artifacts/review.md");
+      expect(readFileSync(artifactPath, "utf8")).toBe(ARTIFACT_BODY);
+      expect(existsSync(join(targetDir, "state.json"))).toBe(false);
+
+      const composePs = spawnSync(
+        "docker",
+        [
+          "compose",
+          "-f",
+          join(targetDir, "docker-compose.yaml"),
+          "-p",
+          deploymentId(PROJECT_NAME, TARGET_NAME),
+          "ps",
+          "-q",
+          "dev",
+        ],
+        {
+          cwd: fixtureRoot,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 30_000,
+          maxBuffer: OUTPUT_LIMIT_BYTES,
+        },
+      );
+      expect(composePs.status, composePs.stderr).toBe(0);
+      expect(composePs.stdout.trim()).toBe("");
+    },
+    CLI_TIMEOUT_MS + 30_000,
+  );
+});

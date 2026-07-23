@@ -135,7 +135,14 @@ describeIntegration("docker build integration", () => {
       if (supervisord) {
         writeFileSync(join(dir, ".sandbox", "supervisord.conf"), supervisord);
       }
-      writeFileSync(join(dir, ".sandbox", "docker-compose.yaml"), generateCompose(plan));
+      writeFileSync(
+        join(dir, ".sandbox", "docker-compose.yaml"),
+        generateCompose(plan, {
+          buildContext: "..",
+          dockerfile: ".sandbox/Dockerfile",
+          workspace: "..",
+        }),
+      );
 
       execFileSync(
         "docker",
@@ -332,14 +339,22 @@ HTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
       writeFileSync(join(dir, ".sandbox", "Dockerfile"), generateDockerfile(plan));
       const supervisord = generateSupervisordConf(plan);
       if (supervisord) {
-        writeFileSync(join(dir, ".sandbox", "supervisord.conf"), supervisord);
+        mkdirSync(join(dir, ".biodome-build"), { recursive: true });
+        writeFileSync(join(dir, ".biodome-build", "supervisord.conf"), supervisord);
       }
-      writeFileSync(join(dir, ".sandbox", "docker-compose.yaml"), generateCompose(plan));
+      writeFileSync(
+        join(dir, ".sandbox", "docker-compose.yaml"),
+        generateCompose(plan, {
+          buildContext: "..",
+          dockerfile: ".sandbox/Dockerfile",
+          workspace: "..",
+        }),
+      );
 
       const healthchecks = generateHealthcheckScripts(plan);
-      mkdirSync(join(dir, ".sandbox", "healthchecks"), { recursive: true });
+      mkdirSync(join(dir, ".biodome-build", "healthchecks"), { recursive: true });
       for (const [name, content] of Object.entries(healthchecks)) {
-        writeFileSync(join(dir, ".sandbox", "healthchecks", name), content);
+        writeFileSync(join(dir, ".biodome-build", "healthchecks", name), content);
       }
 
       execFileSync(
@@ -387,7 +402,7 @@ HTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
           "dev",
           "supervisorctl",
           "-c",
-          "/workspace/.sandbox/supervisord.conf",
+          "/workspace/.biodome-build/supervisord.conf",
           "status",
         ],
         { cwd: dir, encoding: "utf-8" },

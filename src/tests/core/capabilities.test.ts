@@ -1,29 +1,28 @@
 import { describe, it, expect } from "vitest";
-import { DockerRuntime } from "../../docker/runner.js";
 import { hasCapability } from "../../core/capabilities.js";
+import { dockerComposeDriver } from "../../runtime/docker-compose.js";
 
-describe("DockerRuntime capabilities", () => {
+describe("dockerComposeDriver capabilities", () => {
+  const caps = dockerComposeDriver.capabilities;
+
   it("advertises the lifecycle and operational capabilities it supports", () => {
-    const runtime = new DockerRuntime("test-project");
-
-    expect(runtime.capabilities).toBeInstanceOf(Set);
-    expect(hasCapability(runtime.capabilities, "lifecycle.build")).toBe(true);
-    expect(hasCapability(runtime.capabilities, "lifecycle.start")).toBe(true);
-    expect(hasCapability(runtime.capabilities, "lifecycle.stop")).toBe(true);
-    expect(hasCapability(runtime.capabilities, "lifecycle.restart")).toBe(true);
-    expect(hasCapability(runtime.capabilities, "exec.command")).toBe(true);
-    expect(hasCapability(runtime.capabilities, "logs.stream")).toBe(true);
-    expect(hasCapability(runtime.capabilities, "status.read")).toBe(true);
-    expect(hasCapability(runtime.capabilities, "process.signal")).toBe(true);
+    expect(caps).toBeInstanceOf(Set);
+    expect(hasCapability(caps, "lifecycle.build")).toBe(true);
+    expect(hasCapability(caps, "lifecycle.start")).toBe(true);
+    expect(hasCapability(caps, "lifecycle.stop")).toBe(true);
+    expect(hasCapability(caps, "lifecycle.restart")).toBe(true);
+    expect(hasCapability(caps, "exec.command")).toBe(true);
+    expect(hasCapability(caps, "logs.stream")).toBe(true);
+    expect(hasCapability(caps, "status.read")).toBe(true);
+    expect(hasCapability(caps, "process.signal")).toBe(true);
+    expect(hasCapability(caps, "volume.mount")).toBe(true);
+    expect(hasCapability(caps, "artifact.collect")).toBe(true);
   });
 
-  it("does not advertise capabilities that DockerRuntime does not implement", () => {
-    const runtime = new DockerRuntime("test-project");
-
-    expect(hasCapability(runtime.capabilities, "snapshot.create")).toBe(false);
-    expect(hasCapability(runtime.capabilities, "snapshot.restore")).toBe(false);
-    expect(hasCapability(runtime.capabilities, "exec.pty")).toBe(false);
-    expect(hasCapability(runtime.capabilities, "network.policy")).toBe(false);
-    expect(hasCapability(runtime.capabilities, "volume.mount")).toBe(false);
+  it("does not advertise capabilities that dockerComposeDriver does not implement", () => {
+    expect(hasCapability(caps, "snapshot.create")).toBe(false);
+    expect(hasCapability(caps, "snapshot.restore")).toBe(false);
+    expect(hasCapability(caps, "exec.pty")).toBe(false);
+    expect(hasCapability(caps, "network.policy")).toBe(false);
   });
 });
