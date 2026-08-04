@@ -32,7 +32,7 @@ The executor must not:
 | [02](02-runtime-layout.md)               | Runtime paths       | P0       | complete | One target-aware host/container layout                |
 | [03](03-dependency-vulnerabilities.md)   | Dependency security | P0       | complete | No high/critical production audit findings            |
 | [04](04-deep-plan-builder.md)            | Plan builder        | P1       | proposed | Deep domain modules behind a narrow context           |
-| [05](05-schema-source-of-truth.md)       | Domain schemas      | P1       | proposed | Schema-derived types with invalid states removed      |
+| [05](05-schema-source-of-truth.md)       | Domain schemas      | P1       | complete | Schema-derived types with invalid states removed      |
 | [06](06-shared-artifact-renderer.md)     | Runtime rendering   | P1       | proposed | One common artifact renderer for all drivers          |
 | [07](07-testable-mcp-application.md)     | MCP architecture    | P1       | proposed | Side-effect-free, dependency-injected MCP application |
 | [08](08-bounded-cloud-volumes.md)        | Cloud volumes       | P1       | proposed | Paginated lists and bounded reads                     |
