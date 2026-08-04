@@ -14,8 +14,6 @@ import {
   ServiceOptionsSchema,
   EndpointSpecSchema,
   ProviderSpecSchema,
-  EnvSpecSchema,
-  EnvVar,
   ProcessHealthCheckSpecSchema,
   VolumeSpecSchema,
   Volume,
@@ -76,35 +74,12 @@ import { toolHandlers } from "./tools.js";
 import { ValidationError } from "./errors.js";
 import { runtimeLayout } from "../runtime/layout.js";
 import { createNodeProjectIO, type ProjectIO } from "./plan-builder/project-io.js";
+import { EnvironmentBuilder } from "./plan-builder/environment.js";
 
 function validatePort(value: unknown, label: string): void {
   if (value === undefined) return;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 65535) {
     throw new ValidationError({ message: `${label} must be an integer between 1 and 65535` });
-  }
-}
-
-// POSIX-ish env var name: letters, digits, underscore; not starting with a digit.
-const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-function validateEnvKey(key: string, label: string): void {
-  if (typeof key !== "string" || !ENV_KEY_PATTERN.test(key)) {
-    throw new ValidationError({
-      message: `${label} must match ${ENV_KEY_PATTERN.source}`,
-    });
-  }
-}
-
-// Docker Compose interpolation ${VAR:-default} cannot contain characters that
-// terminate or alter the interpolation (}:, :, ?, ${) or control characters.
-const SAFE_INTERPOLATION_DEFAULT = /^[^:${}?\x00-\x1f\x7f]+$/; // oxlint-disable-line no-control-regex
-
-function validateInterpolationDefault(value: string | undefined, label: string): void {
-  if (value === undefined) return;
-  if (!SAFE_INTERPOLATION_DEFAULT.test(value)) {
-    throw new ValidationError({
-      message: `${label} contains characters that are not safe inside a Docker Compose interpolation default`,
-    });
   }
 }
 
@@ -127,6 +102,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
   private readonly layout = runtimeLayout("");
   private dryRun: boolean;
   private io: ProjectIO;
+  private environment: EnvironmentBuilder;
 
   constructor(
     rootDir: string,
@@ -137,6 +113,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
     this.dryRun = dryRun;
     this.io = io;
     this.plan = createPlan(project);
+    this.environment = new EnvironmentBuilder(this.plan);
   }
 
   addProcess(spec: ProcessSpec): void {
@@ -484,41 +461,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
   }
 
   addEnv(key: string, spec: EnvSpec): void {
-    validateEnvKey(key, `Env ${key}: key`);
-    const validated = Schema.decodeSync(EnvSpecSchema)(spec);
-
-    const hasValue = validated.value !== undefined;
-
-    if (this.plan.runtime.envVars.some((e) => e.key === key)) {
-      throw new ValidationError({ message: `Duplicate env variable: ${key}` });
-    }
-
-    if (!hasValue) validateInterpolationDefault(validated.default, `Env ${key}: default`);
-
-    const scope = validated.scope ?? "runtime";
-    const envVar: EnvVar = hasValue
-      ? { key, scope, value: validated.value }
-      : {
-          key,
-          scope,
-          from: { env: validated.from!.env },
-          required: validated.required,
-          default: validated.default,
-        };
-    this.plan.runtime.envVars.push(envVar);
-
-    // Literal values are mirrored into the flat environment maps so they flow
-    // into the Dockerfile ENV layer / compose exactly as before. Passthrough
-    // references are deliberately NOT written here — they never touch the image
-    // or plan.json and are resolved from the host at `up` time.
-    if (hasValue) {
-      if (scope === "build" || scope === "both") {
-        this.plan.build.environment[key] = validated.value!;
-      }
-      if (scope === "runtime" || scope === "both") {
-        this.plan.runtime.environment[key] = validated.value!;
-      }
-    }
+    this.environment.add(key, spec);
   }
 
   addVolume(spec: VolumeSpec): void {
