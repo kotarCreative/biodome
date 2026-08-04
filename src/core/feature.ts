@@ -1,4 +1,4 @@
-import { Plan, type RuntimeDriverId, type TaskSpec } from "./plan.js";
+import { type RuntimeDriverId, type TaskSpec } from "./plan.js";
 
 export type { TaskSpec };
 import type {
@@ -222,8 +222,6 @@ export interface Feature {
 }
 
 export interface FeatureContext {
-  plan: Plan;
-
   addProcess(spec: ProcessSpec): void;
   addHook(spec: HookSpec): void;
 

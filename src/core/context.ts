@@ -1,6 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
-import { execSync } from "node:child_process";
-import { join } from "node:path";
 import { Schema } from "effect";
 import {
   createPlan,
@@ -78,6 +75,7 @@ import { serviceConfigs, defaultImage } from "./services.js";
 import { toolHandlers } from "./tools.js";
 import { ValidationError } from "./errors.js";
 import { runtimeLayout } from "../runtime/layout.js";
+import { createNodeProjectIO, type ProjectIO } from "./plan-builder/project-io.js";
 
 function validatePort(value: unknown, label: string): void {
   if (value === undefined) return;
@@ -127,12 +125,17 @@ function validateEnv(
 export class SandboxContext implements FeatureContext, BuildContext {
   plan: Plan;
   private readonly layout = runtimeLayout("");
-  private rootDir: string;
   private dryRun: boolean;
+  private io: ProjectIO;
 
-  constructor(rootDir: string, project: string, dryRun = false) {
-    this.rootDir = rootDir;
+  constructor(
+    rootDir: string,
+    project: string,
+    dryRun = false,
+    io: ProjectIO = createNodeProjectIO(rootDir),
+  ) {
     this.dryRun = dryRun;
+    this.io = io;
     this.plan = createPlan(project);
   }
 
@@ -1203,15 +1206,15 @@ export class SandboxContext implements FeatureContext, BuildContext {
   }
 
   fileExists(path: string): boolean {
-    return existsSync(join(this.rootDir, path));
+    return this.io.fileExists(path);
   }
 
   readFile(path: string): string {
-    return readFileSync(join(this.rootDir, path), "utf-8");
+    return this.io.readFile(path);
   }
 
   readJSON(path: string): unknown {
-    return JSON.parse(this.readFile(path));
+    return this.io.readJSON(path);
   }
 
   exec(command: string): { stdout: string; stderr: string; exitCode: number } {
@@ -1221,21 +1224,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
     }
 
     console.log(`[exec] ${command}`);
-    try {
-      const stdout = execSync(command, {
-        cwd: this.rootDir,
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      return { stdout, stderr: "", exitCode: 0 };
-    } catch (error) {
-      const err = error as Error & { stdout?: string; stderr?: string; status?: number };
-      return {
-        stdout: err.stdout || "",
-        stderr: err.stderr || "",
-        exitCode: err.status || 1,
-      };
-    }
+    return this.io.exec(command);
   }
 
   // BuildContext helpers — encapsulate plan mutations.

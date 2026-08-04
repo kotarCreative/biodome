@@ -3,13 +3,13 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { Effect, Schema } from "effect";
-import { SandboxContext } from "../core/context.js";
+import { PlanBuilder } from "../core/plan-builder/plan-builder.js";
 import { Plan, Port, ConfigSchema, validateTargetName } from "../core/plan.js";
 import { TargetContextImpl } from "../core/target-context.js";
 import { TaskContextImpl } from "../core/task-context.js";
 import { getDriver } from "../runtime/registry.js";
 import { runtimeLayout } from "../runtime/layout.js";
-import type { TargetContext, TaskContext } from "../core/feature.js";
+import type { FeatureContext, TargetContext, TaskContext } from "../core/feature.js";
 import {
   ConfigError,
   FeatureError,
@@ -47,7 +47,8 @@ export const buildPlanEffect = Effect.fnUntraced(function* (
   options: BuildPlanOptions = {},
 ) {
   const config = yield* readConfig(rootDir);
-  const ctx = new SandboxContext(rootDir, config.project.name, options.dryRun);
+  const builder = new PlanBuilder(rootDir, config.project.name, options.dryRun);
+  const ctx = builder.context;
 
   yield* loadServices(rootDir, ctx);
   yield* loadFeatures(rootDir, ctx);
@@ -55,7 +56,7 @@ export const buildPlanEffect = Effect.fnUntraced(function* (
   if (config.mcp?.enabled) {
     const port = config.mcp.port ?? 3001;
     const mcpToken = config.mcp.token;
-    ctx.configureMcp(port, {
+    builder.configureMcp(port, {
       token: mcpToken && typeof mcpToken === "object" ? mcpToken : undefined,
       allowExec: config.mcp.allowExec,
       allowProcessControl: config.mcp.allowProcessControl,
@@ -65,11 +66,12 @@ export const buildPlanEffect = Effect.fnUntraced(function* (
     });
   }
 
-  ctx.finalizeBuildPlan();
+  builder.finalize();
 
-  yield* validatePlan(ctx.plan);
+  const plan = builder.getPlan();
+  yield* validatePlan(plan);
 
-  return ctx.plan;
+  return plan;
 });
 
 export async function buildPlan(rootDir: string, options: BuildPlanOptions = {}): Promise<Plan> {
@@ -128,7 +130,7 @@ const checkModuleExports = Effect.fnUntraced(function* (path: string) {
         message: error instanceof Error ? error.message : String(error),
         path,
       }),
-  })) as { default?: (ctx: SandboxContext) => void | Promise<void> };
+  })) as { default?: (ctx: FeatureContext) => void | Promise<void> };
 
   if (typeof mod.default !== "function") {
     return yield* new FeatureError({
@@ -212,7 +214,7 @@ export function validatePlan(plan: Plan): Effect.Effect<void, SandboxError, neve
   });
 }
 
-const loadServices = Effect.fnUntraced(function* (rootDir: string, ctx: SandboxContext) {
+const loadServices = Effect.fnUntraced(function* (rootDir: string, ctx: FeatureContext) {
   for (const name of ["services.mjs", "services.js"]) {
     const path = join(rootDir, BIODOME_DIR, name);
     const exists = yield* Effect.sync(() => existsSync(path));
@@ -223,7 +225,7 @@ const loadServices = Effect.fnUntraced(function* (rootDir: string, ctx: SandboxC
   }
 });
 
-const loadFeatures = Effect.fnUntraced(function* (rootDir: string, ctx: SandboxContext) {
+const loadFeatures = Effect.fnUntraced(function* (rootDir: string, ctx: FeatureContext) {
   const featuresDir = join(rootDir, BIODOME_DIR, "features");
   const exists = yield* Effect.sync(() => existsSync(featuresDir));
   if (!exists) {
@@ -242,7 +244,7 @@ const loadFeatures = Effect.fnUntraced(function* (rootDir: string, ctx: SandboxC
   }
 });
 
-const executeFeatureModule = Effect.fnUntraced(function* (path: string, ctx: SandboxContext) {
+const executeFeatureModule = Effect.fnUntraced(function* (path: string, ctx: FeatureContext) {
   const url = pathToFileURL(path).href;
   const mod = (yield* Effect.tryPromise<unknown, FeatureError>({
     try: () => import(url),
@@ -251,7 +253,7 @@ const executeFeatureModule = Effect.fnUntraced(function* (path: string, ctx: San
         message: error instanceof Error ? error.message : String(error),
         path,
       }),
-  })) as { default?: (ctx: SandboxContext) => void | Promise<void> };
+  })) as { default?: (ctx: FeatureContext) => void | Promise<void> };
 
   if (typeof mod.default !== "function") {
     return yield* new FeatureError({
