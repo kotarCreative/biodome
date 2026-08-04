@@ -44,12 +44,13 @@ The executor must not:
 | [14](14-split-generators.md)             | Generator modules   | P2       | proposed | Cohesive output-oriented generator modules            |
 | [15](15-contract-test-suites.md)         | Contract tests      | P2       | proposed | Shared boundary tests across implementations          |
 | [16](16-performance-budgets.md)          | Performance         | P3       | proposed | Repeatable benchmarks and regression budgets          |
+| [17](17-runtime-artifact-hardening.md)   | Artifact hardening  | P1       | proposed | Safe cross-platform writes and complete MCP assets    |
 
 ## Dependency Graph
 
 ```text
 01 -------------------------------> 15 ----> 16
-02 ----> 06 ----> 14 ------------> 15 ----> 16
+02 ----> 06 ----> 17 ----> 14 ----> 15 ----> 16
  |        |
  |        +-----------------------> 15
  +-------> 04
@@ -92,6 +93,7 @@ Start only after the indicated Wave 1 plans merge:
 - Plan 08 after Plan 07
 - Plan 10 after Plans 02 and 09
 - Plan 13 after Plan 07
+- Plan 17 after Plan 06
 
 ### Wave 3: Consolidation
 
