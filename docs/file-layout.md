@@ -1,12 +1,16 @@
 # File layout
 
-Every biodome project has a `.biodome/` directory at the repository root. The directory contains metadata, services, and feature files. Generated build artifacts are written to `.biodome-build/` so config and generated output stay separate.
+Every biodome project has a `.biodome/` directory at the repository root. The directory contains metadata, services, implicit application entries, and feature files. Generated build artifacts are written to `.biodome-build/` so config and generated output stay separate.
 
 ```
 my-project/
 ├── .biodome/
 │   ├── config.json          # project metadata
 │   ├── services.mjs         # backing services
+│   ├── apps/
+│   │   ├── backend.mjs      # implicit application declaration
+│   │   └── frontend.mjs
+│   ├── lib/                 # explicitly imported app helpers; never auto-loaded
 │   ├── features/
 │   │   ├── django.mjs       # daemon process
 │   │   ├── migrate.mjs      # one-shot hook
@@ -66,6 +70,13 @@ export default function services(ctx) {
 Feature files declare languages, packages, tools, processes, and hooks. They are loaded in sorted order and each receives the shared context.
 
 > Legacy `.js` extensions are also supported (`.biodome/features/*.js`).
+
+## `.biodome/apps/*.mjs`
+
+Applications are immediate implicit entrypoints loaded after services and before
+features. One file declares one app, using the filename as its name. Apps expand
+recipes or local functions into the same repositories, hooks, processes, and
+endpoints used elsewhere in Biodome. See [Applications and recipes](apps.md).
 
 ```javascript
 // .biodome/features/python.mjs

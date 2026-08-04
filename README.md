@@ -27,6 +27,10 @@ npx @kotarcreative/biodome down local
 - `biodome plan <target> <task> [--json]` — compile the portable execution plan and preflight it against the selected provider without starting anything.
 - `biodome run <target> <task>` — execute a named task (e.g. `review-pr`) against a target.
 - `biodome info` — show services, ports, and connection strings.
+- `biodome app list` — list implicit applications declared in `.biodome/apps/`.
+- `biodome app inspect <name> [--json]` — show an app's expanded primitives and provenance.
+- `biodome app validate` — validate implicit apps, references, features, and the final plan.
+- `biodome app add <package> --yes` / `app remove <package>` — manage trusted npm app recipes in `.biodome/package.json`.
 - `biodome config validate` — validate `.biodome/`, feature/service module exports, and the computed plan (including port conflicts) without building.
 - `biodome target validate <target>` — validate a named target configuration without building or deploying.
 - `biodome generate agents.md` — create `AGENTS.md` for AI context.
@@ -42,6 +46,7 @@ Every lifecycle command captures a structured event stream to `.biodome-build/lo
 
 - [Overview](docs/index.md)
 - [File layout](docs/file-layout.md)
+- [Applications and recipes](docs/apps.md)
 - [Primitives](docs/primitives.md)
 - [Processes and hooks](docs/processes.md)
 - [API reference](docs/api.md)

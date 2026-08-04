@@ -1037,7 +1037,6 @@ export class SandboxContext implements FeatureContext, BuildContext {
 
   exec(command: string): { stdout: string; stderr: string; exitCode: number } {
     if (this.dryRun) {
-      console.log(`[exec] (dry run) ${command}`);
       return { stdout: "", stderr: "", exitCode: 0 };
     }
 

@@ -57,7 +57,10 @@ describe("published package", () => {
       readFileSync(join(installedDir, "package.json"), "utf8"),
     ) as {
       dependencies: Record<string, string>;
-      exports: { ".": { import: string; types: string } };
+      exports: {
+        ".": { import: string; types: string };
+        "./app": { import: string; types: string };
+      };
       main: string;
       types: string;
       bin: { biodome: string };
@@ -71,6 +74,8 @@ describe("published package", () => {
     for (const path of [
       installedPackage.exports["."].import,
       installedPackage.exports["."].types,
+      installedPackage.exports["./app"].import,
+      installedPackage.exports["./app"].types,
       installedPackage.main,
       installedPackage.types,
       installedPackage.bin.biodome,
@@ -103,6 +108,17 @@ describe("published package", () => {
       "validateFeaturesEffect",
       "validatePlan",
     ]);
+
+    const appExportedNames = execFileSync(
+      "node",
+      [
+        "--input-type=module",
+        "-e",
+        'import("@kotarcreative/biodome/app").then((module) => console.log(Object.keys(module).sort().join(",")))',
+      ],
+      { cwd: projectDir, encoding: "utf8" },
+    ).trim();
+    expect(appExportedNames).toContain("defineAppRecipe");
 
     execFileSync("node", [join(installedDir, installedPackage.bin.biodome), "--help"], {
       cwd: projectDir,

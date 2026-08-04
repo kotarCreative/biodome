@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { Effect, Schema } from "effect";
 import { PlanBuilder } from "../core/plan-builder/plan-builder.js";
+import { loadAppsEffect } from "../apps/loader.js";
 import { Plan, Port, ConfigSchema, validateTargetName } from "../core/plan.js";
 import { TargetContextImpl } from "../core/target-context.js";
 import { TaskContextImpl } from "../core/task-context.js";
@@ -51,6 +52,7 @@ export const buildPlanEffect = Effect.fnUntraced(function* (
   const ctx = builder.context;
 
   yield* loadServices(rootDir, ctx);
+  yield* loadAppsEffect(rootDir, builder);
   yield* loadFeatures(rootDir, ctx);
 
   if (config.mcp?.enabled) {

@@ -165,6 +165,15 @@ export function formatInfo(plan: Plan): string {
   lines.push(`Project: ${plan.project}`);
   lines.push(`Base image: ${plan.build.baseImage || "(default debian:12-slim)"}`);
 
+  if (plan.runtime.applications.length > 0) {
+    lines.push("");
+    lines.push("Applications:");
+    for (const application of plan.runtime.applications) {
+      const recipe = application.recipe ? ` (${application.recipe.id})` : "";
+      lines.push(`  - ${application.name}${recipe} → ${application.root}`);
+    }
+  }
+
   if (plan.build.languageRequests.length > 0) {
     lines.push("");
     lines.push("Languages:");

@@ -354,6 +354,7 @@ export function generateDockerignore(): string {
     "",
     ".git",
     ".gitignore",
+    ".biodome/node_modules/",
     ".biodome-build/*",
     "!.biodome-build/supervisord.conf",
     "!.biodome-build/targets",

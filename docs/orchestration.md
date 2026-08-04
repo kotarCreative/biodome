@@ -3,7 +3,7 @@
 Biodome separates the thing a task needs from the system that runs it.
 
 ```text
-.biodome features, services, task, target
+.biodome services, apps, features, task, target
                  │
                  ▼
         portable ExecutionPlan
@@ -167,3 +167,10 @@ biodome run local review-pr
 For Docker Sandboxes, first verify `sbx version` and `sbx login`, then replace
 `local` with `secure-local`. Running against a real agent may consume provider
 credits and use the credentials available to that target.
+
+# Application declarations
+
+Before a target and task are selected, Biodome loads services, implicit apps,
+and then features. Apps are authoring sugar only: they expand to the existing
+portable plan primitives before orchestration compiles an execution plan. This
+keeps a task portable across providers without framework-specific runtime code.

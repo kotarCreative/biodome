@@ -28,6 +28,20 @@ export default function example(ctx) {
 }
 ```
 
+## App recipe API
+
+The root runtime export remains intentionally small. App recipe packages import
+the separate public subpath:
+
+```typescript
+import { app, service, defineAppRecipe } from "@kotarcreative/biodome/app";
+```
+
+`defineAppRecipe()` creates a portable recipe factory. `app(name).endpoint()`
+and `service(name)` create frozen serializable references; they do not look up a
+project while a module is imported. See [Applications and recipes](apps.md) for
+implicit app entrypoints and the scoped builder API.
+
 ## Context methods
 
 ### `addProcess(spec)`

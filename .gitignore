@@ -1,7 +1,8 @@
 /biodome
 /biodome.exe
 .biodome/
+!examples/apps-demo/.biodome/
+!examples/apps-demo/.biodome/**
 .biodome-build/
 node_modules
 dist
-

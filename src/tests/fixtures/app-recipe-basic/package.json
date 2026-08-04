@@ -1,0 +1,13 @@
+{
+  "name": "@biodome-test/app-basic",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": "./index.mjs",
+  "peerDependencies": {
+    "@kotarcreative/biodome": "*"
+  },
+  "biodome": {
+    "type": "app-recipe",
+    "apiVersion": 1
+  }
+}

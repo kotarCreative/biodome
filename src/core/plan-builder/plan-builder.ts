@@ -28,4 +28,9 @@ export class PlanBuilder {
   getPlan(): Plan {
     return this.contextImpl.plan;
   }
+
+  /** Internal bridge for app recipes; keeps all primitive mutation in SandboxContext. */
+  get mutableContext(): SandboxContext {
+    return this.contextImpl;
+  }
 }

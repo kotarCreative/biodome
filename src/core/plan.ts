@@ -2,6 +2,7 @@
 // Every feature contributes to a shared Plan, and generators read from it.
 
 import { Schema } from "effect";
+import type { Application, ContributionProvenance } from "../apps/types.js";
 
 export interface LanguageRequest {
   name: string;
@@ -325,6 +326,8 @@ export interface ProcessHealthCheck {
   startPeriod?: string;
 }
 
+export type { Application, ContributionProvenance };
+
 export type LifecyclePoint =
   | "build.pre"
   | "build.post"
@@ -403,6 +406,8 @@ export function createPlan(project: string): Plan {
       codexHarnesses: [],
       claudeHarnesses: [],
       llmProviders: [],
+      applications: [],
+      contributions: [],
     },
   };
 }
@@ -1146,6 +1151,44 @@ export const LlmProviderSchema = Schema.Struct({
   models: Schema.Record(Schema.String, Schema.Struct({ name: Schema.optional(Schema.String) })),
 });
 
+export const AppRecipeMetadataSchema = Schema.Struct({
+  id: Schema.String,
+  version: Schema.optional(Schema.String),
+  declarationPath: Schema.String,
+});
+export const ApplicationSchema = Schema.Struct({
+  name: Schema.String,
+  root: Schema.String,
+  recipe: Schema.optional(AppRecipeMetadataSchema),
+  declarationPath: Schema.String,
+  repositories: Schema.Array(Schema.String),
+  hooks: Schema.Array(Schema.String),
+  processes: Schema.Array(Schema.String),
+  endpoints: Schema.Array(Schema.String),
+  requiredServices: Schema.Array(Schema.String),
+  dependencies: Schema.Array(Schema.String),
+});
+export const ContributionSourceSchema = Schema.Struct({
+  application: Schema.String,
+  recipe: Schema.optional(Schema.String),
+  recipeVersion: Schema.optional(Schema.String),
+  declarationPath: Schema.String,
+  localName: Schema.String,
+});
+export const ContributionProvenanceSchema = Schema.Struct({
+  kind: Schema.Literals([
+    "repository",
+    "hook",
+    "process",
+    "endpoint",
+    "language",
+    "tool",
+    "package",
+  ]),
+  qualifiedName: Schema.String,
+  source: ContributionSourceSchema,
+});
+
 export const RuntimePlanSchema = Schema.Struct({
   services: Schema.Array(ServiceSchema),
   networks: Schema.Array(NetworkSchema),
@@ -1163,6 +1206,8 @@ export const RuntimePlanSchema = Schema.Struct({
   codexHarnesses: Schema.Array(CodexHarnessSchema),
   claudeHarnesses: Schema.Array(ClaudeHarnessSchema),
   llmProviders: Schema.Array(LlmProviderSchema),
+  applications: Schema.Array(ApplicationSchema),
+  contributions: Schema.Array(ContributionProvenanceSchema),
 });
 
 export const PlanSchema = Schema.Struct({

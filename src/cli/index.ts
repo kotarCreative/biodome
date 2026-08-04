@@ -26,6 +26,8 @@ import { PlanError, RuntimeError, SandboxError } from "../core/errors.js";
 import { NodeRuntime } from "../core/runtime-node.js";
 import { BiodomeTelemetry } from "../core/telemetry.js";
 import { detectStarterLanguages, generateStarterFeature, runSafe } from "./helpers.js";
+import { appInspection, formatAppInspection, formatAppList } from "../apps/format.js";
+import { addAppPackage, removeAppPackage } from "../apps/package-manager.js";
 import {
   EventStore,
   FileEventStoreLive,
@@ -159,6 +161,8 @@ program
             "export default function services(ctx) {\n  // Define backing services here\n}\n",
           );
           mkdirSync(join(configDir, "features"), { recursive: true });
+          mkdirSync(join(configDir, "apps"), { recursive: true });
+          writeFileSync(join(configDir, "apps", ".gitkeep"), "");
 
           if (options.bare) {
             writeFileSync(join(configDir, "features", ".gitkeep"), "");
@@ -353,6 +357,80 @@ program
     });
 
     runSafe(cliProgram);
+  });
+
+const appCmd = program.command("app").description("Inspect and manage implicit applications");
+
+appCmd
+  .command("list")
+  .description("List implicitly loaded applications")
+  .action(() => {
+    const cliProgram = Effect.gen(function* () {
+      const plan = yield* buildPlanEffect(process.cwd(), { dryRun: true });
+      console.log(formatAppList(plan));
+    });
+    runSafe(cliProgram);
+  });
+
+appCmd
+  .command("inspect <name>")
+  .description("Show an application's expanded primitives and provenance")
+  .option("--json", "Print only JSON")
+  .action((name: string, options) => {
+    const cliProgram = Effect.gen(function* () {
+      const plan = yield* buildPlanEffect(process.cwd(), { dryRun: true });
+      const inspection = appInspection(plan, name);
+      console.log(
+        options.json ? JSON.stringify(inspection, null, 2) : formatAppInspection(plan, name),
+      );
+    });
+    runSafe(cliProgram);
+  });
+
+appCmd
+  .command("validate")
+  .description("Validate services, applications, features, references, and the final plan")
+  .action(() => {
+    const cliProgram = Effect.gen(function* () {
+      const plan = yield* buildPlanEffect(process.cwd(), { dryRun: true });
+      yield* validatePlan(plan);
+      yield* Effect.logInfo("Applications are valid");
+    });
+    runSafe(cliProgram);
+  });
+
+appCmd
+  .command("add <package>")
+  .description("Install a trusted npm-distributed app recipe into .biodome")
+  .option("--no-scaffold", "Reserved for future recipe scaffolding")
+  .option("--yes", "Acknowledge that app recipes are trusted host-side code")
+  .action((packageSpec: string, options) => {
+    if (!options.yes) {
+      console.error("App recipes are trusted host-side JavaScript. Re-run with --yes to install.");
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const installed = addAppPackage(process.cwd(), packageSpec);
+      console.log(`Installed ${installed.name}@${installed.version}`);
+      console.log("Create .biodome/apps/<name>.mjs and import the recipe from this package.");
+    } catch (error) {
+      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    }
+  });
+
+appCmd
+  .command("remove <package>")
+  .description("Remove an npm-distributed app recipe from .biodome")
+  .action((packageSpec: string) => {
+    try {
+      removeAppPackage(process.cwd(), packageSpec);
+      console.log(`Removed ${packageSpec}`);
+    } catch (error) {
+      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    }
   });
 
 program

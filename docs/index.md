@@ -23,7 +23,8 @@ npx @kotarcreative/biodome up local
 
 - **Primitives:** The building blocks you add to a biodome. `process`, `hook`, `language`, `package`, `tool`, `service`.
 - **Plan:** The intermediate representation of your environment. Each feature contributes to it.
-- **Features:** JavaScript modules in `.biodome/features/` that export a default function receiving the biodome context.
+- **Applications:** Implicit modules in `.biodome/apps/` that expand a local app or npm-distributed recipe into ordinary primitives.
+- **Features:** JavaScript modules in `.biodome/features/` that export a default function receiving the biodome context and extend the base plan after applications.
 - **Services:** Backing containers like Postgres or Redis, declared in `.biodome/services.mjs`.
 
 ## MCP (Model Context Protocol)
@@ -51,6 +52,7 @@ This event stream lets you audit exactly what happened during a run and is desig
 ## Documentation
 
 - [File layout](file-layout.md)
+- [Applications and app recipes](apps.md)
 - [Primitives](primitives.md)
 - [Processes and hooks](processes.md)
 - [API reference](api.md)
