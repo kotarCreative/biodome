@@ -27,7 +27,7 @@ import { NodeRuntime } from "../core/runtime-node.js";
 import { BiodomeTelemetry } from "../core/telemetry.js";
 import { detectStarterLanguages, generateStarterFeature, runSafe } from "./helpers.js";
 import { appInspection, formatAppInspection, formatAppList } from "../apps/format.js";
-import { addAppPackage, removeAppPackage } from "../apps/package-manager.js";
+import { addAppPackageEffect, removeAppPackageEffect } from "../apps/package-manager.js";
 import {
   EventStore,
   FileEventStoreLive,
@@ -410,27 +410,23 @@ appCmd
       process.exitCode = 1;
       return;
     }
-    try {
-      const installed = addAppPackage(process.cwd(), packageSpec);
+    const cliProgram = Effect.gen(function* () {
+      const installed = yield* addAppPackageEffect(process.cwd(), packageSpec);
       console.log(`Installed ${installed.name}@${installed.version}`);
       console.log("Create .biodome/apps/<name>.mjs and import the recipe from this package.");
-    } catch (error) {
-      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
-      process.exitCode = 1;
-    }
+    });
+    runSafe(cliProgram);
   });
 
 appCmd
   .command("remove <package>")
   .description("Remove an npm-distributed app recipe from .biodome")
   .action((packageSpec: string) => {
-    try {
-      removeAppPackage(process.cwd(), packageSpec);
+    const cliProgram = Effect.gen(function* () {
+      yield* removeAppPackageEffect(process.cwd(), packageSpec);
       console.log(`Removed ${packageSpec}`);
-    } catch (error) {
-      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
-      process.exitCode = 1;
-    }
+    });
+    runSafe(cliProgram);
   });
 
 program

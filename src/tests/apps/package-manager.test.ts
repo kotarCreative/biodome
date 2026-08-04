@@ -2,9 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { Effect } from "effect";
 import {
-  addAppPackage,
-  removeAppPackage,
+  addAppPackageEffect,
+  removeAppPackageEffect,
   validateAppPackageSpec,
   type NpmRunner,
 } from "../../apps/package-manager.js";
@@ -62,7 +63,7 @@ describe("app package manager", () => {
     expect(() => validateAppPackageSpec(spec)).toThrow("Invalid npm app package spec");
   });
 
-  it("uses npm argument arrays in .biodome and validates installed metadata", () => {
+  it("uses npm argument arrays in .biodome and validates installed metadata", async () => {
     const project = root();
     const calls: Array<{ args: string[]; cwd: string }> = [];
     const runner: NpmRunner = {
@@ -80,7 +81,9 @@ describe("app package manager", () => {
         biodome: { type: "app-recipe", apiVersion: 1 },
       }),
     );
-    expect(addAppPackage(project, "@test/recipe", runner)).toEqual({
+    await expect(
+      Effect.runPromise(addAppPackageEffect(project, "@test/recipe", runner)),
+    ).resolves.toEqual({
       name: "@test/recipe",
       version: "1.2.3",
     });
@@ -90,7 +93,7 @@ describe("app package manager", () => {
     expect(calls[0].args.join(" ")).not.toContain(";");
   });
 
-  it("removes only the validated package name", () => {
+  it("removes only the validated package name", async () => {
     const project = root();
     mkdirSync(join(project, ".biodome"), { recursive: true });
     writeFileSync(join(project, ".biodome", "package.json"), "{}\n");
@@ -100,7 +103,22 @@ describe("app package manager", () => {
         calls.push(args);
       },
     };
-    removeAppPackage(project, "@scope/basic@1.0.0", runner);
+    await Effect.runPromise(removeAppPackageEffect(project, "@scope/basic@1.0.0", runner));
     expect(calls).toEqual([["uninstall", "@scope/basic"]]);
+  });
+
+  it("maps package-manager failures to ValidationError", async () => {
+    const runner: NpmRunner = {
+      run() {
+        throw new Error("npm unavailable");
+      },
+    };
+
+    await expect(
+      Effect.runPromise(addAppPackageEffect(root(), "recipe", runner)),
+    ).rejects.toMatchObject({
+      _tag: "ValidationError",
+      message: expect.stringContaining("npm unavailable"),
+    });
   });
 });

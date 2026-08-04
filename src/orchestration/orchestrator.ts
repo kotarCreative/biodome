@@ -6,7 +6,7 @@ import { executeTask, type TaskResult } from "../core/task-runner.js";
 import { compileExecutionPlan, executionPlanDigest, providerProfile } from "./compiler.js";
 import { validateCompatibility, type CompatibilityReport } from "./compatibility.js";
 import { createRunRecord, transitionRun, type RunRecord } from "./run-record.js";
-import { writeRunRecord } from "./run-store.js";
+import { writeRunRecordEffect } from "./run-store.js";
 import { EventStore } from "../core/events.js";
 
 export interface OrchestrationResult extends TaskResult {
@@ -45,35 +45,37 @@ export function orchestrateTask(
       provider: driver.id,
       planDigest: executionPlanDigest(portablePlan),
     });
-    writeRunRecord(rootDir, run);
+    yield* writeRunRecordEffect(rootDir, run);
 
     run = transitionRun(run, "preparing");
-    writeRunRecord(rootDir, run);
+    yield* writeRunRecordEffect(rootDir, run);
     run = transitionRun(run, "ready");
     run = transitionRun(run, "executing");
     run = {
       ...run,
       attempts: [{ number: 1, startedAt: run.startedAt ?? new Date().toISOString() }],
     };
-    writeRunRecord(rootDir, run);
+    yield* writeRunRecordEffect(rootDir, run);
 
     const result = yield* executeTask(rootDir, plan, driver).pipe(
-      Effect.catch((error) => {
-        run = transitionRun(run, error.message.includes("timed out") ? "timed-out" : "failed");
-        run = {
-          ...run,
-          attempts: run.attempts.map((attempt) => ({
-            ...attempt,
-            completedAt: new Date().toISOString(),
-            error: error.message,
-          })),
-        };
-        writeRunRecord(rootDir, run);
-        if (portablePlan.task.cleanup === "always") run = transitionRun(run, "cleaning-up");
-        run = transitionRun(run, "complete");
-        writeRunRecord(rootDir, run);
-        return Effect.fail(error);
-      }),
+      Effect.catch((error) =>
+        Effect.gen(function* () {
+          run = transitionRun(run, error.message.includes("timed out") ? "timed-out" : "failed");
+          run = {
+            ...run,
+            attempts: run.attempts.map((attempt) => ({
+              ...attempt,
+              completedAt: new Date().toISOString(),
+              error: error.message,
+            })),
+          };
+          yield* writeRunRecordEffect(rootDir, run);
+          if (portablePlan.task.cleanup === "always") run = transitionRun(run, "cleaning-up");
+          run = transitionRun(run, "complete");
+          yield* writeRunRecordEffect(rootDir, run);
+          return yield* Effect.fail(error);
+        }),
+      ),
     );
 
     if (portablePlan.task.artifacts.length > 0) run = transitionRun(run, "collecting");
@@ -94,10 +96,10 @@ export function orchestrateTask(
         };
       }),
     };
-    writeRunRecord(rootDir, run);
+    yield* writeRunRecordEffect(rootDir, run);
     if (portablePlan.task.cleanup !== "never") run = transitionRun(run, "cleaning-up");
     run = transitionRun(run, "complete");
-    writeRunRecord(rootDir, run);
+    yield* writeRunRecordEffect(rootDir, run);
     return { ...result, run, compatibility };
   });
 }

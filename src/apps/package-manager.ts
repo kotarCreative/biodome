@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { Effect } from "effect";
 import { join } from "node:path";
 import { ValidationError } from "../core/errors.js";
 import { APP_RECIPE_API_VERSION } from "./types.js";
@@ -111,28 +112,46 @@ function validateInstalledMetadata(dir: string, spec: string): { name: string; v
   return { name: manifest.name ?? name, version: manifest.version ?? "unknown" };
 }
 
-export function addAppPackage(
-  rootDir: string,
-  spec: string,
-  runner: NpmRunner = defaultRunner,
-): { name: string; version: string } {
-  validateAppPackageSpec(spec);
-  const dir = biodomeDir(rootDir);
-  ensureManifest(dir);
-  ensureIgnored(rootDir);
-  runner.run(["install", "--save", spec], dir);
-  return validateInstalledMetadata(dir, spec);
+function packageManagerError(operation: string, error: unknown): ValidationError {
+  return error instanceof ValidationError
+    ? error
+    : new ValidationError({
+        message: `Failed to ${operation} app package: ${error instanceof Error ? error.message : String(error)}`,
+      });
 }
 
-export function removeAppPackage(
+export function addAppPackageEffect(
   rootDir: string,
   spec: string,
   runner: NpmRunner = defaultRunner,
-): void {
-  validateAppPackageSpec(spec);
-  const dir = biodomeDir(rootDir);
-  if (!existsSync(join(dir, "package.json"))) {
-    throw new ValidationError({ message: "No .biodome/package.json exists" });
-  }
-  runner.run(["uninstall", packageName(spec)], dir);
+): Effect.Effect<{ name: string; version: string }, ValidationError> {
+  return Effect.try({
+    try: () => {
+      validateAppPackageSpec(spec);
+      const dir = biodomeDir(rootDir);
+      ensureManifest(dir);
+      ensureIgnored(rootDir);
+      runner.run(["install", "--save", spec], dir);
+      return validateInstalledMetadata(dir, spec);
+    },
+    catch: (error) => packageManagerError("install", error),
+  });
+}
+
+export function removeAppPackageEffect(
+  rootDir: string,
+  spec: string,
+  runner: NpmRunner = defaultRunner,
+): Effect.Effect<void, ValidationError> {
+  return Effect.try({
+    try: () => {
+      validateAppPackageSpec(spec);
+      const dir = biodomeDir(rootDir);
+      if (!existsSync(join(dir, "package.json"))) {
+        throw new ValidationError({ message: "No .biodome/package.json exists" });
+      }
+      runner.run(["uninstall", packageName(spec)], dir);
+    },
+    catch: (error) => packageManagerError("remove", error),
+  });
 }

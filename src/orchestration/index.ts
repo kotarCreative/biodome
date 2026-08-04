@@ -35,4 +35,4 @@ export type {
 export { compileExecutionPlan, executionPlanDigest, providerProfile } from "./compiler.js";
 export { orchestrateTask } from "./orchestrator.js";
 export type { OrchestrationResult } from "./orchestrator.js";
-export { readRunRecord, runRecordPath, writeRunRecord } from "./run-store.js";
+export { readRunRecordEffect, runRecordPath, writeRunRecordEffect } from "./run-store.js";

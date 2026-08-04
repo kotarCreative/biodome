@@ -9,7 +9,7 @@ import { capabilitiesOf } from "../../core/capabilities.js";
 import type { RuntimeDriver } from "../../runtime/driver.js";
 import { EventStore, type EventStore as EventStoreService } from "../../core/events.js";
 import { orchestrateTask } from "../../orchestration/orchestrator.js";
-import { readRunRecord } from "../../orchestration/run-store.js";
+import { readRunRecordEffect } from "../../orchestration/run-store.js";
 
 function eventStore(): EventStoreService {
   return {
@@ -87,7 +87,9 @@ describe("orchestrateTask", () => {
     );
     expect(result.run.status).toBe("complete");
     expect(result.run.artifacts[0]).toMatchObject({ path: "review.md", sizeBytes: 12 });
-    expect(readRunRecord(rootDir, "local", result.run.runId).status).toBe("complete");
+    expect(
+      (await Effect.runPromise(readRunRecordEffect(rootDir, "local", result.run.runId))).status,
+    ).toBe("complete");
   });
 
   it("rejects incompatible providers before provisioning", async () => {
@@ -109,5 +111,14 @@ describe("orchestrateTask", () => {
     );
     expect(outcome.ok).toBe(false);
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it("maps missing run records to RuntimeError", async () => {
+    await expect(
+      Effect.runPromise(readRunRecordEffect(rootDir, "local", "missing")),
+    ).rejects.toMatchObject({
+      _tag: "RuntimeError",
+      message: expect.stringContaining("Run record not found"),
+    });
   });
 });
