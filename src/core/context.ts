@@ -485,29 +485,14 @@ export class SandboxContext implements FeatureContext, BuildContext {
     const validated = Schema.decodeSync(EnvSpecSchema)(spec);
 
     const hasValue = validated.value !== undefined;
-    const hasFrom = validated.from !== undefined;
-    if (hasValue === hasFrom) {
-      throw new ValidationError({
-        message: `Env ${key}: provide exactly one of 'value' (literal) or 'from' (host passthrough)`,
-      });
-    }
-    if (hasFrom && validated.scope === "build") {
-      throw new ValidationError({
-        message: `Env ${key}: passthrough ('from') variables cannot be build-scoped because Docker builds cannot read the host environment. Use scope "runtime" or "both".`,
-      });
-    }
-    if (hasValue && (validated.required || validated.default !== undefined)) {
-      throw new ValidationError({
-        message: `Env ${key}: 'required' and 'default' only apply to passthrough ('from') variables`,
-      });
-    }
-    validateInterpolationDefault(validated.default, `Env ${key}: default`);
 
     if (this.plan.runtime.envVars.some((e) => e.key === key)) {
       throw new ValidationError({ message: `Duplicate env variable: ${key}` });
     }
 
-    const scope = validated.scope || "runtime";
+    if (!hasValue) validateInterpolationDefault(validated.default, `Env ${key}: default`);
+
+    const scope = validated.scope ?? "runtime";
     const envVar: EnvVar = hasValue
       ? { key, scope, value: validated.value }
       : {
@@ -545,26 +530,10 @@ export class SandboxContext implements FeatureContext, BuildContext {
     const readOnly = validated.readOnly || validated.options?.readOnly === "true";
 
     const volume: Volume = {
-      name: validated.name,
-      type: validated.type,
-      source: validated.source,
-      target: validated.target,
-      bucket: validated.bucket,
-      prefix: validated.prefix,
-      path: validated.path,
-      endpoint: validated.endpoint,
-      account: validated.account,
-      container: validated.container,
-      host: validated.host,
-      port: validated.port,
-      export: validated.export,
-      share: validated.share,
-      url: validated.url,
-      vendor: validated.vendor,
+      ...validated,
+      readOnly,
       credentials: validated.credentials ? { ...validated.credentials } : undefined,
       options: validated.options ? { ...validated.options } : undefined,
-      proxy: validated.proxy,
-      readOnly,
       allowedPaths: validated.allowedPaths ? [...validated.allowedPaths] : undefined,
     };
 

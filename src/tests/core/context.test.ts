@@ -814,24 +814,24 @@ describe("SandboxContext", () => {
       const ctx = new SandboxContext("/tmp", "test");
       expect(() =>
         ctx.addVolume({ name: "data", type: "local", target: "/workspace/data" } as any),
-      ).toThrow(/local volumes require a source path/);
+      ).toThrow(/Missing key/);
     });
 
     it("rejects S3 volumes without a bucket", () => {
       const ctx = new SandboxContext("/tmp", "test");
       expect(() =>
         ctx.addVolume({ name: "s3", type: "s3", target: "/workspace/s3" } as any),
-      ).toThrow(/S3 volumes require a bucket/);
+      ).toThrow(/Missing key/);
     });
 
     it("rejects cloud volumes without a path", () => {
       const ctx = new SandboxContext("/tmp", "test");
       expect(() =>
         ctx.addVolume({ name: "db", type: "dropbox", target: "/workspace/db" } as any),
-      ).toThrow(/dropbox volumes require a path/);
+      ).toThrow(/Missing key/);
       expect(() =>
         ctx.addVolume({ name: "gd", type: "gdrive", target: "/workspace/gd" } as any),
-      ).toThrow(/gdrive volumes require a path/);
+      ).toThrow(/Missing key/);
     });
 
     it("adds GCS, Azure, SFTP, SMB, and WebDAV mounts", () => {

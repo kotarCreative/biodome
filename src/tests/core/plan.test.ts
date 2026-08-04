@@ -10,6 +10,8 @@ import {
   RuntimeTargetSchema,
   TaskSchema,
   DeploymentPlanSchema,
+  EnvSpecSchema,
+  VolumeSpecSchema,
 } from "../../core/plan.js";
 
 describe("validateTargetName", () => {
@@ -194,6 +196,53 @@ describe("TaskSpecSchema", () => {
         timeout: "not-a-duration",
       }),
     ).toThrow();
+  });
+});
+
+describe("EnvSpecSchema", () => {
+  it("requires exactly one value source", () => {
+    expect(() => Schema.decodeSync(EnvSpecSchema)({})).toThrow();
+    expect(() =>
+      Schema.decodeSync(EnvSpecSchema)({ value: "x", from: { env: "TOKEN" } }),
+    ).toThrow();
+  });
+
+  it("rejects build-scoped passthrough variables", () => {
+    expect(() =>
+      Schema.decodeSync(EnvSpecSchema)({ from: { env: "TOKEN" }, scope: "build" }),
+    ).toThrow();
+  });
+});
+
+describe("VolumeSpecSchema", () => {
+  const common = { name: "data", target: "/workspace/data" };
+
+  it.each([
+    { ...common, type: "local", source: "./data" },
+    { ...common, type: "s3", bucket: "bucket" },
+    { ...common, type: "gcs", bucket: "bucket" },
+    { ...common, type: "azure", account: "account", container: "container" },
+    { ...common, type: "sftp", host: "host", path: "/data" },
+    { ...common, type: "smb", host: "host", share: "share" },
+    { ...common, type: "webdav", url: "https://example.com" },
+    { ...common, type: "dropbox", path: "/data" },
+    { ...common, type: "gdrive", path: "/data" },
+  ])("validates a $type volume", (volume) => {
+    expect(Schema.decodeSync(VolumeSpecSchema)(volume)).toMatchObject(volume);
+  });
+
+  it.each([
+    { ...common, type: "local" },
+    { ...common, type: "s3" },
+    { ...common, type: "gcs" },
+    { ...common, type: "azure", account: "account" },
+    { ...common, type: "sftp", host: "host" },
+    { ...common, type: "smb", host: "host" },
+    { ...common, type: "webdav" },
+    { ...common, type: "dropbox" },
+    { ...common, type: "gdrive" },
+  ])("rejects a $type volume without provider fields", (volume) => {
+    expect(() => Schema.decodeSync(VolumeSpecSchema)(volume)).toThrow();
   });
 });
 

@@ -786,61 +786,86 @@ export const ProviderSpecSchema = Schema.Struct({
 
 export const VolumeCredentialsSchema = Schema.Record(Schema.String, SecretValueSchema);
 
-export const VolumeSpecSchema = Schema.Struct({
+const VolumeSpecFields = {
   name: Schema.String.check(Schema.isMinLength(1)),
-  type: Schema.Literals([
-    "local",
-    "s3",
-    "gcs",
-    "azure",
-    "sftp",
-    "smb",
-    "webdav",
-    "dropbox",
-    "gdrive",
-  ]),
-  source: Schema.optional(Schema.String),
   target: Schema.String.check(Schema.isMinLength(1)),
-  bucket: Schema.optional(Schema.String),
   prefix: Schema.optional(Schema.String),
-  path: Schema.optional(Schema.String),
   endpoint: Schema.optional(Schema.String),
-  account: Schema.optional(Schema.String),
-  container: Schema.optional(Schema.String),
-  host: Schema.optional(Schema.String),
   port: Schema.optional(Schema.Number),
   export: Schema.optional(Schema.String),
-  share: Schema.optional(Schema.String),
-  url: Schema.optional(Schema.String),
   vendor: Schema.optional(Schema.String),
   credentials: Schema.optional(VolumeCredentialsSchema),
   options: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   proxy: Schema.optional(Schema.Boolean),
   readOnly: Schema.optional(Schema.Boolean),
   allowedPaths: Schema.optional(Schema.Array(Schema.String)),
-});
+};
+
+export const VolumeSpecSchema = Schema.Union([
+  Schema.Struct({ ...VolumeSpecFields, type: Schema.Literal("local"), source: Schema.String }),
+  Schema.Struct({ ...VolumeSpecFields, type: Schema.Literal("s3"), bucket: Schema.String }),
+  Schema.Struct({ ...VolumeSpecFields, type: Schema.Literal("gcs"), bucket: Schema.String }),
+  Schema.Struct({
+    ...VolumeSpecFields,
+    type: Schema.Literal("azure"),
+    account: Schema.String,
+    container: Schema.String,
+    path: Schema.optional(Schema.String),
+  }),
+  Schema.Struct({
+    ...VolumeSpecFields,
+    type: Schema.Literal("sftp"),
+    host: Schema.String,
+    path: Schema.String,
+  }),
+  Schema.Struct({
+    ...VolumeSpecFields,
+    type: Schema.Literal("smb"),
+    host: Schema.String,
+    share: Schema.String,
+  }),
+  Schema.Struct({
+    ...VolumeSpecFields,
+    type: Schema.Literal("webdav"),
+    url: Schema.String,
+    path: Schema.optional(Schema.String),
+  }),
+  Schema.Struct({ ...VolumeSpecFields, type: Schema.Literal("dropbox"), path: Schema.String }),
+  Schema.Struct({ ...VolumeSpecFields, type: Schema.Literal("gdrive"), path: Schema.String }),
+]);
 
 export const EnvScopeSchema = Schema.Literals(["build", "runtime", "both"]);
 
 // Input spec for addEnv. Exactly one of `value` (literal) or `from` (host
 // passthrough) must be provided; addEnv enforces that XOR at runtime.
+const EnvReferenceSchema = Schema.Struct({
+  env: Schema.String.check(Schema.isMinLength(1)).check(
+    Schema.makeFilter((value) =>
+      ENV_VAR_NAME_PATTERN.test(value) ? undefined : "must be a valid environment variable name",
+    ),
+  ),
+});
+
 export const EnvSpecSchema = Schema.Struct({
   value: Schema.optional(Schema.String),
-  from: Schema.optional(
-    Schema.Struct({
-      env: Schema.String.check(Schema.isMinLength(1)).check(
-        Schema.makeFilter((value) =>
-          ENV_VAR_NAME_PATTERN.test(value)
-            ? undefined
-            : "must be a valid environment variable name",
-        ),
-      ),
-    }),
-  ),
+  from: Schema.optional(EnvReferenceSchema),
   scope: Schema.optional(EnvScopeSchema),
   required: Schema.optional(Schema.Boolean),
   default: Schema.optional(Schema.String),
-});
+}).pipe(
+  Schema.check(
+    Schema.makeFilter((spec) => {
+      const hasValue = spec.value !== undefined;
+      const hasFrom = spec.from !== undefined;
+      if (hasValue === hasFrom) return "provide exactly one of 'value' or 'from'";
+      if (hasFrom && spec.scope === "build") return "passthrough variables cannot be build-scoped";
+      if (hasValue && (spec.required || spec.default !== undefined)) {
+        return "required and default only apply to passthrough variables";
+      }
+      return undefined;
+    }),
+  ),
+);
 
 // Normalized EnvVar as stored on the plan (round-trippable in plan.json).
 export const EnvVarSchema = Schema.Struct({

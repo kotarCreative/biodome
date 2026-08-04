@@ -32,8 +32,10 @@ describe("published package", () => {
           encoding: "utf8",
         },
       ),
-    ) as Array<{ filename: string; files: Array<{ path: string }> }>;
-    const [{ filename, files }] = packed;
+    ) as
+      | Array<{ filename: string; files: Array<{ path: string }> }>
+      | Record<string, { filename: string; files: Array<{ path: string }> }>;
+    const { filename, files } = Array.isArray(packed) ? packed[0] : Object.values(packed)[0];
 
     expect(files.length).toBeLessThan(200);
     expect(files.map((file) => file.path)).not.toEqual(
