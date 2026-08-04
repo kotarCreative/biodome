@@ -1,5 +1,25 @@
 # API reference
 
+## Programmatic API
+
+The package root intentionally exports only plan-building and validation APIs:
+
+```typescript
+import {
+  buildPlan,
+  buildTargetPlan,
+  buildTaskPlan,
+  validateConfig,
+  validateFeatures,
+  validatePlan,
+} from "@kotarcreative/biodome";
+```
+
+Effect variants (`buildPlanEffect`, `buildTargetPlanEffect`, `buildTaskPlanEffect`,
+`validateConfigEffect`, and `validateFeaturesEffect`) are also exported for callers
+that compose Biodome work in an Effect application. Type-only exports include the
+builder options/configuration, plan, and feature context/specification types.
+
 Feature files are ECMAScript modules. Each file must export a default function that receives the `FeatureContext` for the current project.
 
 ```javascript
