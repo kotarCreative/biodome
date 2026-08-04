@@ -8,6 +8,7 @@ import { Plan, Port, ConfigSchema, validateTargetName } from "../core/plan.js";
 import { TargetContextImpl } from "../core/target-context.js";
 import { TaskContextImpl } from "../core/task-context.js";
 import { getDriver } from "../runtime/registry.js";
+import { runtimeLayout } from "../runtime/layout.js";
 import type { TargetContext, TaskContext } from "../core/feature.js";
 import {
   ConfigError,
@@ -363,6 +364,7 @@ export const buildTargetPlanEffect = Effect.fnUntraced(function* (
     target: rt,
     deploymentId,
   };
+  applyTargetRuntimeLayout(plan, targetName);
 
   yield* validatePlan(plan);
 
@@ -375,6 +377,27 @@ export async function buildTargetPlan(
   options: BuildPlanOptions = {},
 ): Promise<Plan> {
   return Effect.runPromise(buildTargetPlanEffect(rootDir, targetName, options));
+}
+
+function applyTargetRuntimeLayout(plan: Plan, targetName: string): void {
+  const baseRoot = runtimeLayout("").container.root;
+  const targetRoot = runtimeLayout("", targetName).container.root;
+  const rebase = (value: string): string => value.replaceAll(baseRoot, targetRoot);
+
+  for (const process of plan.runtime.processes) {
+    process.command = process.command.map(rebase);
+    process.environment = Object.fromEntries(
+      Object.entries(process.environment).map(([key, value]) => [key, rebase(value)]),
+    );
+  }
+  for (const harness of plan.runtime.agentHarnesses)
+    harness.telemetry.path = rebase(harness.telemetry.path);
+  for (const harness of plan.runtime.piHarnesses)
+    harness.telemetry.path = rebase(harness.telemetry.path);
+  for (const harness of plan.runtime.codexHarnesses)
+    harness.telemetry.path = rebase(harness.telemetry.path);
+  for (const harness of plan.runtime.claudeHarnesses)
+    harness.telemetry.path = rebase(harness.telemetry.path);
 }
 
 export const buildTaskPlanEffect = Effect.fnUntraced(function* (

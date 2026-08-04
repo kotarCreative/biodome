@@ -41,6 +41,7 @@ import type { RuntimeTarget } from "../core/plan.js";
 import { RuntimeError } from "../core/errors.js";
 import { capabilitiesOf } from "../core/capabilities.js";
 import type { EventStore } from "../core/events.js";
+import { runtimeLayout } from "./layout.js";
 
 const COMPOSE_FILE = "docker-compose.yaml";
 const COMMAND_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
@@ -145,13 +146,14 @@ export const dockerComposeDriver: RuntimeDriver = {
   }): Effect.Effect<string[], RuntimeError, never> {
     return Effect.try({
       try: () => {
-        mkdirSync(input.outputDir, { recursive: true });
+        const layout = runtimeLayout(input.rootDir, input.target.name);
+        mkdirSync(layout.host.root, { recursive: true });
 
         const plan = input.plan;
         const files: string[] = [];
 
         // Dockerfile
-        const dockerfilePath = join(input.outputDir, "Dockerfile");
+        const dockerfilePath = layout.host.dockerfile;
         writeFileSync(
           dockerfilePath,
           generateDockerfile(plan, {
@@ -163,13 +165,13 @@ export const dockerComposeDriver: RuntimeDriver = {
         // supervisord.conf
         const supervisord = generateSupervisordConf(plan);
         if (supervisord) {
-          const spPath = join(input.outputDir, "supervisord.conf");
+          const spPath = layout.host.supervisordConfig;
           writeFileSync(spPath, supervisord);
           files.push(spPath);
         }
 
         // docker-compose.yaml
-        const composePath = join(input.outputDir, "docker-compose.yaml");
+        const composePath = layout.host.composeFile;
         const buildContext = relative(input.outputDir, input.rootDir) || ".";
         const dockerfile = relative(input.rootDir, dockerfilePath);
         writeFileSync(
@@ -183,7 +185,7 @@ export const dockerComposeDriver: RuntimeDriver = {
         files.push(composePath);
 
         // Healthcheck scripts
-        const healthcheckDir = join(input.outputDir, "healthchecks");
+        const healthcheckDir = layout.host.healthchecks;
         rmSync(healthcheckDir, { recursive: true, force: true });
         mkdirSync(healthcheckDir, { recursive: true });
         const healthchecks = generateHealthcheckScripts(plan);
@@ -195,7 +197,7 @@ export const dockerComposeDriver: RuntimeDriver = {
         }
 
         // Repo scripts
-        const repoDir = join(input.outputDir, "repos");
+        const repoDir = layout.host.repositories;
         rmSync(repoDir, { recursive: true, force: true });
         mkdirSync(repoDir, { recursive: true });
         const repos = generateRepoScripts(plan);
@@ -208,22 +210,22 @@ export const dockerComposeDriver: RuntimeDriver = {
 
         // Harness files
         for (const [name, content] of Object.entries(generateHarnessFiles(plan))) {
-          const path = join(input.outputDir, name);
+          const path = join(layout.host.root, name);
           writeBuildFile(path, content);
           files.push(path);
         }
         for (const [name, content] of Object.entries(generatePiHarnessFiles(plan))) {
-          const path = join(input.outputDir, name);
+          const path = join(layout.host.root, name);
           writeBuildFile(path, content);
           files.push(path);
         }
         for (const [name, content] of Object.entries(generateCodexHarnessFiles(plan))) {
-          const path = join(input.outputDir, name);
+          const path = join(layout.host.root, name);
           writeBuildFile(path, content);
           files.push(path);
         }
         for (const [name, content] of Object.entries(generateClaudeHarnessFiles(plan))) {
-          const path = join(input.outputDir, name);
+          const path = join(layout.host.root, name);
           writeBuildFile(path, content);
           files.push(path);
         }
@@ -236,11 +238,11 @@ export const dockerComposeDriver: RuntimeDriver = {
 
         // MCP plan and server
         if (plan.build.mcpEnabled) {
-          writeFileSync(join(input.outputDir, "plan.json"), generatePlanJson(plan));
+          writeFileSync(layout.host.mcpPlan, generatePlanJson(plan));
           const __dirname = dirname(fileURLToPath(import.meta.url));
           const mcpServerSource = join(__dirname, "..", "mcp", "server.js");
           if (existsSync(mcpServerSource)) {
-            copyFileSync(mcpServerSource, join(input.outputDir, "mcp-server.js"));
+            copyFileSync(mcpServerSource, layout.host.mcpServer);
           }
         }
 
@@ -445,7 +447,7 @@ export const dockerComposeDriver: RuntimeDriver = {
         `${input.deploymentId}-dev`,
         "supervisorctl",
         "-c",
-        `/workspace/.biodome-build/targets/${input.target.name}/supervisord.conf`,
+        runtimeLayout(input.rootDir, input.target.name).container.supervisordConfig,
         "restart",
         input.processName,
       ],

@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { runtimeLayout } from "../../runtime/layout.js";
 
 function makeEcrClient(sendFn?: ReturnType<typeof vi.fn>) {
   return {
@@ -143,11 +144,10 @@ describe("createAwsEcsDriver", () => {
 
   describe("render", () => {
     it("generates a Dockerfile and other build files", () => {
-      const outputDir = join(tmpdir(), `ecs-render-${randomUUID()}`);
-      mkdirSync(outputDir, { recursive: true });
+      const rootDir = join(tmpdir(), `ecs-root-${randomUUID()}`);
+      const outputDir = runtimeLayout(rootDir, sampleTarget.name).host.root;
+      mkdirSync(rootDir, { recursive: true });
       try {
-        const rootDir = join(tmpdir(), `ecs-root-${randomUUID()}`);
-        mkdirSync(rootDir, { recursive: true });
         const driver = createAwsEcsDriver(makeClients());
         const result = Effect.runSync(
           driver.render({
@@ -164,7 +164,7 @@ describe("createAwsEcsDriver", () => {
           "COPY .biodome-build/targets/test-target/ /workspace/.biodome-build/",
         );
       } finally {
-        rmSync(outputDir, { recursive: true, force: true });
+        rmSync(rootDir, { recursive: true, force: true });
       }
     });
 

@@ -2,36 +2,33 @@ import { existsSync } from "node:fs";
 import { Effect } from "effect";
 import { parseDuration, type Plan } from "./plan.js";
 import type { RuntimeDriver } from "../runtime/driver.js";
-import { targetBuildDir } from "../runtime/output.js";
+import { runtimeLayout } from "../runtime/layout.js";
 import { statePath, readState, writeState, removeState } from "../runtime/state.js";
 import { EventStore } from "./events.js";
 import { RuntimeError, ValidationError } from "./errors.js";
 import { hasCapability } from "./capabilities.js";
 
 export function harnessTaskCommand(plan: Plan, harnessName: string, prompt: string): string[] {
-  const targetName = plan.deployment?.target.name;
-  const harnessDir = targetName
-    ? `/workspace/.biodome-build/targets/${targetName}`
-    : "/workspace/.biodome-build";
+  const layout = runtimeLayout("", plan.deployment?.target.name);
 
   const piHarness = plan.runtime.piHarnesses.find((h) => h.name === harnessName);
   if (piHarness) {
-    return [`${harnessDir}/pi-homes/${piHarness.name}/task`, prompt];
+    return [`${layout.container.piHomes}/${piHarness.name}/task`, prompt];
   }
 
   const claudeHarness = plan.runtime.claudeHarnesses.find((h) => h.name === harnessName);
   if (claudeHarness) {
-    return [`${harnessDir}/claude-homes/${claudeHarness.name}/task`, prompt];
+    return [`${layout.container.claudeHomes}/${claudeHarness.name}/task`, prompt];
   }
 
   const codexHarness = plan.runtime.codexHarnesses.find((h) => h.name === harnessName);
   if (codexHarness) {
-    return [`${harnessDir}/codex-homes/${codexHarness.name}/task`, prompt];
+    return [`${layout.container.codexHomes}/${codexHarness.name}/task`, prompt];
   }
 
   const agentHarness = plan.runtime.agentHarnesses.find((h) => h.name === harnessName);
   if (agentHarness) {
-    return [`${harnessDir}/opencode-homes/${agentHarness.name}/task`, prompt];
+    return [`${layout.container.opencodeHomes}/${agentHarness.name}/task`, prompt];
   }
 
   throw new ValidationError({
@@ -58,7 +55,7 @@ export function executeTask(
 
   const target = plan.deployment!.target;
   const targetName = target.name;
-  const outputDir = targetBuildDir(rootDir, targetName);
+  const outputDir = runtimeLayout(rootDir, targetName).host.root;
   const deploymentId = plan.deployment!.deploymentId;
   const startTime = Date.now();
 

@@ -408,6 +408,45 @@ describe("buildTargetPlan", () => {
     expect(plan.deployment!.deploymentId).toContain("target-app");
   });
 
+  it("rebases generated process and harness paths to the target layout", async () => {
+    const dir = join("/tmp", "sandbox-test-layout-" + Date.now());
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({
+        project: { name: "layout-app" },
+        mcp: { enabled: true },
+      }),
+      ".biodome/features/harnesses.mjs": `
+        export default function harnesses(ctx) {
+          ctx.addOpencodeHarness({ name: "open" });
+          ctx.addPiHarness({ name: "pi" });
+          ctx.addCodexHarness({ name: "codex" });
+          ctx.addClaudeHarness({ name: "claude" });
+        }
+      `,
+      ".biodome/targets/local.mjs": `
+        export default function local(ctx) {
+          ctx.useRuntime("docker-compose");
+        }
+      `,
+    });
+
+    const plan = await buildTargetPlan(dir, "local");
+    const root = "/workspace/.biodome-build/targets/local";
+    expect(plan.runtime.processes.flatMap((process) => process.command)).toEqual(
+      expect.arrayContaining([`${root}/mcp-server.js`, `${root}/opencode-homes/open/start.sh`]),
+    );
+    expect(plan.runtime.agentHarnesses[0].telemetry.path).toBe(
+      `${root}/logs/opencode-events.jsonl`,
+    );
+    expect(plan.runtime.piHarnesses[0].telemetry.path).toBe(`${root}/logs/pi-pi-events.jsonl`);
+    expect(plan.runtime.codexHarnesses[0].telemetry.path).toBe(
+      `${root}/logs/codex-codex-events.jsonl`,
+    );
+    expect(plan.runtime.claudeHarnesses[0].telemetry.path).toBe(
+      `${root}/logs/claude-claude-events.jsonl`,
+    );
+  });
+
   it("fails when target file does not exist", async () => {
     const dir = join("/tmp", "sandbox-test-target-" + Date.now());
     createProject(dir, {

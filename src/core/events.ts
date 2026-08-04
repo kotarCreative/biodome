@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { runtimeLayout } from "../runtime/layout.js";
 
 export const EVENT_TYPES = [
   "run.started",
@@ -248,10 +249,7 @@ export const NoOpEventStoreLive = (runId = "noop"): Layer.Layer<EventStore> =>
   });
 
 export function eventLogPath(rootDir: string, runId: string, targetName?: string): string {
-  if (targetName) {
-    return join(rootDir, ".biodome-build", "targets", targetName, "logs", `events-${runId}.jsonl`);
-  }
-  return join(rootDir, ".biodome-build", "logs", `events-${runId}.jsonl`);
+  return join(runtimeLayout(rootDir, targetName).host.logs, `events-${runId}.jsonl`);
 }
 
 export function formatEvent(event: SandboxEvent): string {

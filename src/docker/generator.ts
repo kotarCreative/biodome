@@ -13,6 +13,7 @@ import {
   ClaudeHarness,
   LlmProvider,
 } from "../core/plan.js";
+import { runtimeLayout } from "../runtime/layout.js";
 
 interface ComposeService {
   image?: string;
@@ -50,11 +51,8 @@ export interface DockerfileOptions {
   generatedFilesPath?: string;
 }
 
-function generatedRuntimeDir(plan: Plan): string {
-  const targetName = plan.deployment?.target.name;
-  return targetName
-    ? `/workspace/.biodome-build/targets/${targetName}`
-    : "/workspace/.biodome-build";
+function generatedRuntimeDir(plan?: Plan): string {
+  return runtimeLayout("", plan?.deployment?.target.name).container.root;
 }
 
 export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}): string {
@@ -231,7 +229,7 @@ export function generateHarnessFiles(plan: Plan): Record<string, string> {
       );
       files[`${homeDir}/.config/opencode/plugins/${harness.name}-telemetry.js`] =
         opencodeTelemetryPlugin(harness, plan);
-      files[`${homeDir}/start.sh`] = opencodeStartScript(harness);
+      files[`${homeDir}/start.sh`] = opencodeStartScript(harness, plan);
       files[`${homeDir}/task`] = opencodeTaskScript(harness, plan);
     }
   }
@@ -764,8 +762,8 @@ function opencodeConfig(harness: AgentHarness, llmProviders: LlmProvider[]): str
   return JSON.stringify(config, null, 2) + "\n";
 }
 
-function opencodeStartScript(harness: AgentHarness): string {
-  const configPath = `/workspace/.biodome-build/opencode-homes/${harness.name}/.config/opencode/opencode.json`;
+function opencodeStartScript(harness: AgentHarness, plan: Plan): string {
+  const configPath = `${runtimeLayout("", plan.deployment?.target.name).container.opencodeHomes}/${harness.name}/.config/opencode/opencode.json`;
   return [
     "#!/bin/sh",
     `# Auto-generated OpenCode start script for ${harness.name}`,
@@ -786,7 +784,7 @@ function opencodeStartScript(harness: AgentHarness): string {
 }
 
 function opencodeTaskScript(harness: AgentHarness, plan?: Plan): string {
-  const homeDir = `${plan ? generatedRuntimeDir(plan) : "/workspace/.biodome-build"}/opencode-homes/${harness.name}`;
+  const homeDir = `${generatedRuntimeDir(plan)}/opencode-homes/${harness.name}`;
   const configPath = `${homeDir}/.config/opencode/opencode.json`;
   return [
     "#!/bin/sh",
@@ -911,7 +909,7 @@ function piSettings(harness: PiHarness, plan?: Plan): string {
   const resources: string[] = [];
   if (harness.telemetry.enabled) {
     resources.push(
-      `${plan ? generatedRuntimeDir(plan) : "/workspace/.biodome-build"}/pi-homes/${harness.name}/extensions/biodome-telemetry.ts`,
+      `${generatedRuntimeDir(plan)}/pi-homes/${harness.name}/extensions/biodome-telemetry.ts`,
     );
   }
   if (harness.extensions) resources.push(...harness.extensions);
@@ -925,7 +923,7 @@ function piSettings(harness: PiHarness, plan?: Plan): string {
 }
 
 function piWrapperScript(harness: PiHarness, plan?: Plan): string {
-  const homeDir = `${plan ? generatedRuntimeDir(plan) : "/workspace/.biodome-build"}/pi-homes/${harness.name}`;
+  const homeDir = `${generatedRuntimeDir(plan)}/pi-homes/${harness.name}`;
   const envExports: string[] = [`export PI_CODING_AGENT_DIR=${homeDir}`];
   if (harness.apiKey && typeof harness.apiKey === "object" && "env" in harness.apiKey) {
     envExports.push(`export ${harness.apiKey.env}="$${harness.apiKey.env}"`);
@@ -1038,7 +1036,7 @@ function codexConfig(harness: CodexHarness): string {
 }
 
 function codexHooks(harness: CodexHarness, plan?: Plan): string {
-  const homeDir = `${plan ? generatedRuntimeDir(plan) : "/workspace/.biodome-build"}/codex-homes/${harness.name}`;
+  const homeDir = `${generatedRuntimeDir(plan)}/codex-homes/${harness.name}`;
   const script = `${homeDir}/hooks/telemetry.js`;
   const events = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse"];
   const hooks: Record<string, unknown> = {};
@@ -1080,7 +1078,7 @@ function codexTelemetryScript(harness: CodexHarness, plan: Plan): string {
 }
 
 function codexStartScript(harness: CodexHarness, plan?: Plan): string {
-  const homeDir = `${plan ? generatedRuntimeDir(plan) : "/workspace/.biodome-build"}/codex-homes/${harness.name}`;
+  const homeDir = `${generatedRuntimeDir(plan)}/codex-homes/${harness.name}`;
   const configPath = `${homeDir}/.codex/config.toml`;
   return [
     "#!/bin/sh",
@@ -1113,7 +1111,7 @@ function claudeSettings(harness: ClaudeHarness, plan?: Plan): string {
     settings.permissions = { allow: harness.tools };
   }
 
-  const homeDir = `${plan ? generatedRuntimeDir(plan) : "/workspace/.biodome-build"}/claude-homes/${harness.name}`;
+  const homeDir = `${generatedRuntimeDir(plan)}/claude-homes/${harness.name}`;
   const script = `${homeDir}/hooks/telemetry.js`;
   const events = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse"];
   const hooks: Record<string, unknown> = {};
@@ -1174,7 +1172,7 @@ function claudeTelemetryScript(harness: ClaudeHarness, plan: Plan): string {
 }
 
 function claudeWrapperScript(harness: ClaudeHarness, plan?: Plan): string {
-  const homeDir = `${plan ? generatedRuntimeDir(plan) : "/workspace/.biodome-build"}/claude-homes/${harness.name}`;
+  const homeDir = `${generatedRuntimeDir(plan)}/claude-homes/${harness.name}`;
   const envExports: string[] = [
     `HOME=${homeDir}`,
     "export HOME",
@@ -1212,7 +1210,7 @@ function claudeWrapperScript(harness: ClaudeHarness, plan?: Plan): string {
 }
 
 function piTaskScript(harness: PiHarness, plan?: Plan): string {
-  const homeDir = `${plan ? generatedRuntimeDir(plan) : "/workspace/.biodome-build"}/pi-homes/${harness.name}`;
+  const homeDir = `${generatedRuntimeDir(plan)}/pi-homes/${harness.name}`;
   const lines: string[] = [
     "#!/bin/sh",
     `# Auto-generated Pi task wrapper for ${harness.name}`,
@@ -1231,7 +1229,7 @@ function piTaskScript(harness: PiHarness, plan?: Plan): string {
 }
 
 function claudeTaskScript(harness: ClaudeHarness, plan?: Plan): string {
-  const homeDir = `${plan ? generatedRuntimeDir(plan) : "/workspace/.biodome-build"}/claude-homes/${harness.name}`;
+  const homeDir = `${generatedRuntimeDir(plan)}/claude-homes/${harness.name}`;
   const lines: string[] = [
     "#!/bin/sh",
     `# Auto-generated Claude task wrapper for ${harness.name}`,
@@ -1254,7 +1252,7 @@ function claudeTaskScript(harness: ClaudeHarness, plan?: Plan): string {
 }
 
 function codexTaskScript(harness: CodexHarness, plan?: Plan): string {
-  const homeDir = `${plan ? generatedRuntimeDir(plan) : "/workspace/.biodome-build"}/codex-homes/${harness.name}`;
+  const homeDir = `${generatedRuntimeDir(plan)}/codex-homes/${harness.name}`;
   const lines: string[] = [
     "#!/bin/sh",
     `# Auto-generated Codex task wrapper for ${harness.name}`,

@@ -1,15 +1,13 @@
-import { join } from "node:path";
-
-const BUILD_DIR = ".biodome-build";
+import { runtimeLayout } from "./layout.js";
 
 export function buildRoot(rootDir: string): string {
-  return join(rootDir, BUILD_DIR);
+  return runtimeLayout(rootDir).host.root;
 }
 
 export function targetBuildDir(rootDir: string, targetName: string): string {
-  return join(buildRoot(rootDir), "targets", targetName);
+  return runtimeLayout(rootDir, targetName).host.root;
 }
 
 export function targetArtifactsDir(rootDir: string, targetName: string): string {
-  return join(targetBuildDir(rootDir, targetName), "artifacts");
+  return runtimeLayout(rootDir, targetName).host.artifacts;
 }

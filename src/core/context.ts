@@ -77,6 +77,7 @@ import { formatPackage } from "./packages.js";
 import { serviceConfigs, defaultImage } from "./services.js";
 import { toolHandlers } from "./tools.js";
 import { ValidationError } from "./errors.js";
+import { runtimeLayout } from "../runtime/layout.js";
 
 function validatePort(value: unknown, label: string): void {
   if (value === undefined) return;
@@ -125,6 +126,7 @@ function validateEnv(
 
 export class SandboxContext implements FeatureContext, BuildContext {
   plan: Plan;
+  private readonly layout = runtimeLayout("");
   private rootDir: string;
   private dryRun: boolean;
 
@@ -644,7 +646,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
     // updated) in the live workspace mount.
     this.addHook({
       name: `repo-sync-${validated.name}`,
-      command: ["sh", `/workspace/.biodome-build/repos/${validated.name}.sh`],
+      command: ["sh", `${this.layout.container.repositories}/${validated.name}.sh`],
       startOn: "start.post",
     });
   }
@@ -665,7 +667,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
 
     const telemetry = {
       enabled: validated.telemetry?.enabled ?? true,
-      path: validated.telemetry?.path ?? "/workspace/.biodome-build/logs/opencode-events.jsonl",
+      path: validated.telemetry?.path ?? `${this.layout.container.logs}/opencode-events.jsonl`,
       capturePayloads: validated.telemetry?.capturePayloads ?? false,
     };
 
@@ -691,7 +693,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
 
     this.addProcess({
       name: `opencode-agent-${validated.name}`,
-      command: ["sh", `/workspace/.biodome-build/opencode-homes/${validated.name}/start.sh`],
+      command: ["sh", `${this.layout.container.opencodeHomes}/${validated.name}/start.sh`],
       port,
       healthCheck: { type: "http", url: `http://localhost:${port}/health` },
       environment: {
@@ -699,7 +701,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
         // HOME at a generated per-harness directory so the sandbox ships its
         // own isolated config (plugins, MCP servers, provider) instead of
         // relying on the host's ~/.config.
-        HOME: `/workspace/.biodome-build/opencode-homes/${validated.name}`,
+        HOME: `${this.layout.container.opencodeHomes}/${validated.name}`,
         OPENCODE_TELEMETRY_PATH: telemetry.path,
       },
     });
@@ -722,7 +724,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       enabled: validated.telemetry?.enabled ?? true,
       path:
         validated.telemetry?.path ??
-        `/workspace/.biodome-build/logs/pi-${validated.name}-events.jsonl`,
+        `${this.layout.container.logs}/pi-${validated.name}-events.jsonl`,
       capturePayloads: validated.telemetry?.capturePayloads ?? false,
     };
 
@@ -778,7 +780,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       enabled: validated.telemetry?.enabled ?? true,
       path:
         validated.telemetry?.path ??
-        `/workspace/.biodome-build/logs/codex-${validated.name}-events.jsonl`,
+        `${this.layout.container.logs}/codex-${validated.name}-events.jsonl`,
       capturePayloads: validated.telemetry?.capturePayloads ?? false,
     };
 
@@ -801,11 +803,11 @@ export class SandboxContext implements FeatureContext, BuildContext {
 
     this.addProcess({
       name: `codex-agent-${validated.name}`,
-      command: ["sh", `/workspace/.biodome-build/codex-homes/${validated.name}/start.sh`],
+      command: ["sh", `${this.layout.container.codexHomes}/${validated.name}/start.sh`],
       port,
       healthCheck: { type: "tcp", port },
       environment: {
-        HOME: `/workspace/.biodome-build/codex-homes/${validated.name}`,
+        HOME: `${this.layout.container.codexHomes}/${validated.name}`,
         CODEX_BIODOME_TELEMETRY_PATH: telemetry.path,
       },
       mergeEnv: false,
@@ -835,7 +837,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       enabled: validated.telemetry?.enabled ?? true,
       path:
         validated.telemetry?.path ??
-        `/workspace/.biodome-build/logs/claude-${validated.name}-events.jsonl`,
+        `${this.layout.container.logs}/claude-${validated.name}-events.jsonl`,
       capturePayloads: validated.telemetry?.capturePayloads ?? false,
     };
 
@@ -1489,17 +1491,17 @@ export class SandboxContext implements FeatureContext, BuildContext {
       name: "biodome-mcp",
       command: [
         "node",
-        "/workspace/.biodome-build/mcp-server.js",
+        this.layout.container.mcpServer,
         "--port",
         String(port),
         "--plan",
-        "/workspace/.biodome-build/plan.json",
+        this.layout.container.mcpPlan,
       ],
       port,
       healthCheck: { type: "http", url: `http://localhost:${port}/health` },
       environment: {
         ...mcpEnvironment,
-        MCP_EVENTS_LOG: "/workspace/.biodome-build/logs/mcp-events.jsonl",
+        MCP_EVENTS_LOG: `${this.layout.container.logs}/mcp-events.jsonl`,
       },
       mergeEnv: false,
     });

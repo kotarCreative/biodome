@@ -16,6 +16,7 @@ import { Plan } from "../core/plan.js";
 import { getDriver } from "../runtime/registry.js";
 import { executeTask } from "../core/task-runner.js";
 import { targetBuildDir } from "../runtime/output.js";
+import { runtimeLayout } from "../runtime/layout.js";
 import { readState, writeState, removeState } from "../runtime/state.js";
 import { hasCapability } from "../core/capabilities.js";
 import { PlanError, RuntimeError, SandboxError } from "../core/errors.js";
@@ -452,7 +453,7 @@ program
           command: [
             "supervisorctl",
             "-c",
-            `/workspace/.biodome-build/targets/${targetName}/supervisord.conf`,
+            runtimeLayout(rootDir, targetName).container.supervisordConfig,
             "status",
           ],
         });

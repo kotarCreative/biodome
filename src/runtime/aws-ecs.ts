@@ -56,6 +56,7 @@ import type { Plan } from "../core/plan.js";
 import { RuntimeError } from "../core/errors.js";
 import { capabilitiesOf } from "../core/capabilities.js";
 import type { EventStore } from "../core/events.js";
+import { runtimeLayout } from "./layout.js";
 
 export interface AwsClients {
   ecr: ECRClient;
@@ -171,11 +172,12 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
       }
       return Effect.try({
         try: () => {
-          mkdirSync(input.outputDir, { recursive: true });
+          const layout = runtimeLayout(input.rootDir, input.target.name);
+          mkdirSync(layout.host.root, { recursive: true });
           const plan = input.plan;
           const files: string[] = [];
 
-          const dockerfilePath = join(input.outputDir, "Dockerfile");
+          const dockerfilePath = layout.host.dockerfile;
           writeFileSync(
             dockerfilePath,
             generateDockerfile(plan, {
@@ -186,12 +188,12 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
 
           const supervisord = generateSupervisordConf(plan);
           if (supervisord) {
-            const spPath = join(input.outputDir, "supervisord.conf");
+            const spPath = layout.host.supervisordConfig;
             writeFileSync(spPath, supervisord);
             files.push(spPath);
           }
 
-          const healthcheckDir = join(input.outputDir, "healthchecks");
+          const healthcheckDir = layout.host.healthchecks;
           rmSync(healthcheckDir, { recursive: true, force: true });
           mkdirSync(healthcheckDir, { recursive: true });
           for (const [name, content] of Object.entries(generateHealthcheckScripts(plan))) {
@@ -201,7 +203,7 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
             files.push(path);
           }
 
-          const repoDir = join(input.outputDir, "repos");
+          const repoDir = layout.host.repositories;
           rmSync(repoDir, { recursive: true, force: true });
           mkdirSync(repoDir, { recursive: true });
           for (const [name, content] of Object.entries(generateRepoScripts(plan))) {
@@ -212,20 +214,20 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
           }
 
           for (const [name, content] of Object.entries(generateHarnessFiles(plan))) {
-            writeBuildFile(join(input.outputDir, name), content);
-            files.push(join(input.outputDir, name));
+            writeBuildFile(join(layout.host.root, name), content);
+            files.push(join(layout.host.root, name));
           }
           for (const [name, content] of Object.entries(generatePiHarnessFiles(plan))) {
-            writeBuildFile(join(input.outputDir, name), content);
-            files.push(join(input.outputDir, name));
+            writeBuildFile(join(layout.host.root, name), content);
+            files.push(join(layout.host.root, name));
           }
           for (const [name, content] of Object.entries(generateCodexHarnessFiles(plan))) {
-            writeBuildFile(join(input.outputDir, name), content);
-            files.push(join(input.outputDir, name));
+            writeBuildFile(join(layout.host.root, name), content);
+            files.push(join(layout.host.root, name));
           }
           for (const [name, content] of Object.entries(generateClaudeHarnessFiles(plan))) {
-            writeBuildFile(join(input.outputDir, name), content);
-            files.push(join(input.outputDir, name));
+            writeBuildFile(join(layout.host.root, name), content);
+            files.push(join(layout.host.root, name));
           }
 
           const dockerignorePath = join(input.rootDir, ".dockerignore");
@@ -234,11 +236,11 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
           }
 
           if (plan.build.mcpEnabled) {
-            writeFileSync(join(input.outputDir, "plan.json"), generatePlanJson(plan));
+            writeFileSync(layout.host.mcpPlan, generatePlanJson(plan));
             const __dirname = dirname(fileURLToPath(import.meta.url));
             const mcpServerSource = join(__dirname, "..", "mcp", "server.js");
             if (existsSync(mcpServerSource)) {
-              copyFileSync(mcpServerSource, join(input.outputDir, "mcp-server.js"));
+              copyFileSync(mcpServerSource, layout.host.mcpServer);
             }
           }
 
@@ -354,7 +356,11 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
           (process) => process.mode === "daemon",
         );
         const defaultCommand = hasDaemonProcesses
-          ? ["/usr/bin/supervisord", "-c", "/workspace/.biodome-build/supervisord.conf"]
+          ? [
+              "/usr/bin/supervisord",
+              "-c",
+              runtimeLayout(input.rootDir, input.target.name).container.supervisordConfig,
+            ]
           : undefined;
         const imageRef = imageUri(opts, input.deploymentId);
 
