@@ -978,7 +978,13 @@ const CleanupSchema = Schema.Literals(["always", "on-success", "never"]);
 export const RuntimeTargetSchema = Schema.Struct({
   name: TargetNameSchema,
   driver: Schema.String.check(Schema.isMinLength(1)),
-  options: Schema.Record(Schema.String, Schema.Unknown),
+  options: Schema.Record(Schema.String, Schema.Unknown).pipe(
+    Schema.check(
+      Schema.makeFilter((value) =>
+        isJsonSafeValue(value) ? undefined : "must contain only JSON-safe values",
+      ),
+    ),
+  ),
 });
 
 export const TaskSpecSchema = Schema.Struct({
@@ -1004,109 +1010,129 @@ export const DeploymentPlanSchema = Schema.Struct({
   deploymentId: Schema.String,
 });
 
+export const LanguageRequestSchema = Schema.Struct({
+  name: Schema.String,
+  options: LanguageOptionsSchema,
+});
+
+export const DependencyInstallSchema = Schema.Struct({
+  files: Schema.Array(Schema.String),
+  command: Schema.String,
+});
+
+export const CopyArtifactSchema = Schema.Struct({
+  files: Schema.Array(Schema.String),
+  lines: Schema.Array(Schema.String),
+});
+
+export const NormalizedMcpConfigSchema = Schema.Struct({
+  enabled: Schema.Boolean,
+  port: Schema.Number,
+  token: Schema.optional(SecretValueSchema),
+  allowExec: Schema.Boolean,
+  allowProcessControl: Schema.Boolean,
+  maxReadBytes: Schema.Number,
+  maxWriteBytes: Schema.Number,
+  maxListEntries: Schema.Number,
+});
+
+export const BuildPlanSchema = Schema.Struct({
+  project: Schema.String,
+  baseImage: Schema.String,
+  aptPackages: Schema.Array(Schema.String),
+  runtimeInstalls: Schema.Array(Schema.String),
+  languageSnippets: Schema.Array(Schema.String),
+  languageRequests: Schema.Array(LanguageRequestSchema),
+  dependencyFiles: Schema.Array(Schema.String),
+  dependencyInstalls: Schema.Array(DependencyInstallSchema),
+  copyArtifacts: Schema.Array(CopyArtifactSchema),
+  environment: Schema.Record(Schema.String, Schema.String),
+  nodeModulesVolume: Schema.Boolean,
+  venvVolume: Schema.Boolean,
+  vendorVolume: Schema.Boolean,
+  mcpEnabled: Schema.Boolean,
+  mcpPort: Schema.Number,
+  mcpConfig: NormalizedMcpConfigSchema,
+});
+
+export const NetworkSchema = Schema.Struct({ name: Schema.String, driver: Schema.String });
+export const NamedVolumeSchema = Schema.Struct({ name: Schema.String });
+export const VolumeMappingSchema = Schema.Struct({ host: Schema.String, container: Schema.String });
+export const HealthCheckSchema = Schema.Struct({
+  test: Schema.Array(Schema.String),
+  interval: Schema.optional(Schema.String),
+  timeout: Schema.optional(Schema.String),
+  retries: Schema.optional(Schema.Number),
+  startPeriod: Schema.optional(Schema.String),
+});
+
+export const VolumeSchema = Schema.Struct({
+  name: Schema.String,
+  type: Schema.Literals([
+    "local",
+    "s3",
+    "gcs",
+    "azure",
+    "sftp",
+    "smb",
+    "webdav",
+    "dropbox",
+    "gdrive",
+  ]),
+  source: Schema.optional(Schema.String),
+  target: Schema.String,
+  bucket: Schema.optional(Schema.String),
+  prefix: Schema.optional(Schema.String),
+  path: Schema.optional(Schema.String),
+  endpoint: Schema.optional(Schema.String),
+  account: Schema.optional(Schema.String),
+  container: Schema.optional(Schema.String),
+  host: Schema.optional(Schema.String),
+  port: Schema.optional(Schema.Number),
+  export: Schema.optional(Schema.String),
+  share: Schema.optional(Schema.String),
+  url: Schema.optional(Schema.String),
+  vendor: Schema.optional(Schema.String),
+  credentials: Schema.optional(VolumeCredentialsSchema),
+  options: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  proxy: Schema.optional(Schema.Boolean),
+  readOnly: Schema.optional(Schema.Boolean),
+  allowedPaths: Schema.optional(Schema.Array(Schema.String)),
+});
+
+export const LlmProviderSchema = Schema.Struct({
+  name: Schema.String,
+  npm: Schema.optional(Schema.String),
+  displayName: Schema.optional(Schema.String),
+  options: Schema.Record(
+    Schema.String,
+    Schema.Union([Schema.String, Schema.Number, Schema.Boolean, SecretValueSchema]),
+  ),
+  models: Schema.Record(Schema.String, Schema.Struct({ name: Schema.optional(Schema.String) })),
+});
+
+export const RuntimePlanSchema = Schema.Struct({
+  services: Schema.Array(ServiceSchema),
+  networks: Schema.Array(NetworkSchema),
+  namedVolumes: Schema.Array(NamedVolumeSchema),
+  volumes: Schema.Array(VolumeSchema),
+  ports: Schema.Array(PortSchema),
+  environment: Schema.Record(Schema.String, Schema.String),
+  processes: Schema.Array(ProcessSchema),
+  endpoints: Schema.Array(EndpointSpecSchema),
+  providers: Schema.Array(ProviderSchema),
+  envVars: Schema.Array(EnvVarSchema),
+  repos: Schema.Array(RepoSchema),
+  agentHarnesses: Schema.Array(AgentHarnessSchema),
+  piHarnesses: Schema.Array(PiHarnessSchema),
+  codexHarnesses: Schema.Array(CodexHarnessSchema),
+  claudeHarnesses: Schema.Array(ClaudeHarnessSchema),
+  llmProviders: Schema.Array(LlmProviderSchema),
+});
+
 export const PlanSchema = Schema.Struct({
   project: Schema.String,
   deployment: Schema.optional(DeploymentPlanSchema),
-  build: Schema.Struct({
-    project: Schema.String,
-    baseImage: Schema.String,
-    aptPackages: Schema.Array(Schema.String),
-    runtimeInstalls: Schema.Array(Schema.String),
-    languageSnippets: Schema.Array(Schema.String),
-    languageRequests: Schema.Array(
-      Schema.Struct({
-        name: Schema.String,
-        options: LanguageOptionsSchema,
-      }),
-    ),
-    dependencyFiles: Schema.Array(Schema.String),
-    dependencyInstalls: Schema.Array(
-      Schema.Struct({ files: Schema.Array(Schema.String), command: Schema.String }),
-    ),
-    copyArtifacts: Schema.Array(
-      Schema.Struct({ files: Schema.Array(Schema.String), lines: Schema.Array(Schema.String) }),
-    ),
-    environment: Schema.Record(Schema.String, Schema.String),
-    nodeModulesVolume: Schema.Boolean,
-    venvVolume: Schema.Boolean,
-    vendorVolume: Schema.Boolean,
-    mcpEnabled: Schema.Boolean,
-    mcpPort: Schema.Number,
-    mcpConfig: Schema.Struct({
-      enabled: Schema.Boolean,
-      port: Schema.Number,
-      token: Schema.optional(SecretValueSchema),
-      allowExec: Schema.Boolean,
-      allowProcessControl: Schema.Boolean,
-      maxReadBytes: Schema.Number,
-      maxWriteBytes: Schema.Number,
-      maxListEntries: Schema.Number,
-    }),
-  }),
-  runtime: Schema.Struct({
-    services: Schema.Array(ServiceSchema),
-    networks: Schema.Array(Schema.Struct({ name: Schema.String, driver: Schema.String })),
-    namedVolumes: Schema.Array(Schema.Struct({ name: Schema.String })),
-    volumes: Schema.Array(
-      Schema.Struct({
-        name: Schema.String,
-        type: Schema.Literals([
-          "local",
-          "s3",
-          "gcs",
-          "azure",
-          "sftp",
-          "smb",
-          "webdav",
-          "dropbox",
-          "gdrive",
-        ]),
-        source: Schema.optional(Schema.String),
-        target: Schema.String,
-        bucket: Schema.optional(Schema.String),
-        prefix: Schema.optional(Schema.String),
-        path: Schema.optional(Schema.String),
-        endpoint: Schema.optional(Schema.String),
-        account: Schema.optional(Schema.String),
-        container: Schema.optional(Schema.String),
-        host: Schema.optional(Schema.String),
-        port: Schema.optional(Schema.Number),
-        export: Schema.optional(Schema.String),
-        share: Schema.optional(Schema.String),
-        url: Schema.optional(Schema.String),
-        vendor: Schema.optional(Schema.String),
-        credentials: Schema.optional(VolumeCredentialsSchema),
-        options: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-        proxy: Schema.optional(Schema.Boolean),
-        readOnly: Schema.optional(Schema.Boolean),
-        allowedPaths: Schema.optional(Schema.Array(Schema.String)),
-      }),
-    ),
-    ports: Schema.Array(PortSchema),
-    environment: Schema.Record(Schema.String, Schema.String),
-    processes: Schema.Array(ProcessSchema),
-    endpoints: Schema.Array(EndpointSpecSchema),
-    providers: Schema.Array(ProviderSchema),
-    envVars: Schema.Array(EnvVarSchema),
-    repos: Schema.Array(RepoSchema),
-    agentHarnesses: Schema.Array(AgentHarnessSchema),
-    piHarnesses: Schema.Array(PiHarnessSchema),
-    codexHarnesses: Schema.Array(CodexHarnessSchema),
-    claudeHarnesses: Schema.Array(ClaudeHarnessSchema),
-    llmProviders: Schema.Array(
-      Schema.Struct({
-        name: Schema.String,
-        npm: Schema.optional(Schema.String),
-        displayName: Schema.optional(Schema.String),
-        options: Schema.Record(
-          Schema.String,
-          Schema.Union([Schema.String, Schema.Number, Schema.Boolean, SecretValueSchema]),
-        ),
-        models: Schema.Record(
-          Schema.String,
-          Schema.Struct({ name: Schema.optional(Schema.String) }),
-        ),
-      }),
-    ),
-  }),
+  build: BuildPlanSchema,
+  runtime: RuntimePlanSchema,
 });

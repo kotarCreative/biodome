@@ -11,7 +11,9 @@ import {
   TaskSchema,
   DeploymentPlanSchema,
   EnvSpecSchema,
+  PlanSchema,
   VolumeSpecSchema,
+  createPlan,
 } from "../../core/plan.js";
 
 describe("validateTargetName", () => {
@@ -276,6 +278,16 @@ describe("RuntimeTargetSchema", () => {
       }),
     ).toThrow();
   });
+
+  it("rejects non-JSON-safe options", () => {
+    expect(() =>
+      Schema.decodeSync(RuntimeTargetSchema)({
+        name: "test",
+        driver: "docker-compose",
+        options: { serialize: () => "invalid" },
+      }),
+    ).toThrow();
+  });
 });
 
 describe("TaskSchema", () => {
@@ -319,5 +331,26 @@ describe("DeploymentPlanSchema", () => {
     });
     expect(result.task).toBeDefined();
     expect(result.task!.name).toBe("review");
+  });
+});
+
+describe("PlanSchema", () => {
+  it("round-trips a complete representative plan", () => {
+    const plan = createPlan("schema-test");
+    plan.build.baseImage = "node:22-slim";
+    plan.runtime.volumes.push({
+      name: "data",
+      type: "s3",
+      target: "/workspace/data",
+      bucket: "example-data",
+    });
+    plan.runtime.envVars.push({ key: "MODE", scope: "runtime", value: "test" });
+    plan.deployment = {
+      target: { name: "local", driver: "docker-compose", options: {} },
+      deploymentId: "schema-test-local",
+    };
+
+    const decoded = Schema.decodeSync(PlanSchema)(JSON.parse(JSON.stringify(plan)));
+    expect(decoded).toEqual(plan);
   });
 });
