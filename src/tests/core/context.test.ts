@@ -1297,6 +1297,7 @@ describe("SandboxContext", () => {
       expect(harness.mcpServers).toEqual({ biodome: { url: "http://localhost:3001" } });
       expect(harness.telemetry.enabled).toBe(true);
       expect(harness.telemetry.path).toBe("/workspace/.biodome-build/logs/opencode-events.jsonl");
+      expect(harness.telemetry.capturePayloads).toBe(false);
 
       const proc = ctx.plan.runtime.processes.find((p) => p.name === "opencode-agent-agent");
       expect(proc).toBeDefined();
@@ -1391,6 +1392,7 @@ describe("SandboxContext", () => {
       expect(harness.type).toBe("pi");
       expect(harness.telemetry.enabled).toBe(true);
       expect(harness.telemetry.path).toBe("/workspace/.biodome-build/logs/pi-coder-events.jsonl");
+      expect(harness.telemetry.capturePayloads).toBe(false);
 
       expect(
         ctx.plan.build.languageSnippets.some((s) => s.includes("@earendil-works/pi-coding-agent")),
@@ -1453,6 +1455,7 @@ describe("SandboxContext", () => {
       expect(harness.telemetry.path).toBe(
         "/workspace/.biodome-build/logs/codex-coder-events.jsonl",
       );
+      expect(harness.telemetry.capturePayloads).toBe(false);
 
       const proc = ctx.plan.runtime.processes.find((p) => p.name === "codex-agent-coder");
       expect(proc).toBeDefined();
@@ -1511,6 +1514,7 @@ describe("SandboxContext", () => {
       expect(harness.telemetry.path).toBe(
         "/workspace/.biodome-build/logs/claude-assistant-events.jsonl",
       );
+      expect(harness.telemetry.capturePayloads).toBe(false);
 
       expect(
         ctx.plan.build.languageSnippets.some((s) => s.includes("@anthropic-ai/claude-code")),

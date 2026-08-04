@@ -1,5 +1,6 @@
 import http from "node:http";
-import fs from "node:fs";
+import fs from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -72,7 +73,7 @@ function parseArgs() {
 }
 
 function readPlan(path: string) {
-  return JSON.parse(fs.readFileSync(path, "utf-8"));
+  return JSON.parse(readFileSync(path, "utf-8"));
 }
 
 function resolvePlanSecret(value: unknown): string | null {
@@ -185,26 +186,44 @@ function assertReadAllowed(volume: VolumeConfig, subPath: string) {
 
 const MCP_EVENTS_LOG =
   process.env.MCP_EVENTS_LOG || "/workspace/.biodome-build/logs/mcp-events.jsonl";
+const MCP_EVENTS_MAX_BYTES = 10 * 1024 * 1024;
+const MCP_EVENTS_MAX_ROTATIONS = 5;
+let mcpLogPending = Promise.resolve();
 
-function logMcpEvent(type: string, data: any) {
+async function appendMcpEvent(event: unknown): Promise<void> {
   try {
     const dir = path.dirname(MCP_EVENTS_LOG);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+    await fs.chmod(dir, 0o700);
+    const line = JSON.stringify(event) + "\n";
+    const stat = await fs.stat(MCP_EVENTS_LOG).catch(() => null);
+    if (stat && stat.size > 0 && stat.size + Buffer.byteLength(line) > MCP_EVENTS_MAX_BYTES) {
+      await fs.rm(`${MCP_EVENTS_LOG}.${MCP_EVENTS_MAX_ROTATIONS}`, { force: true });
+      for (let index = MCP_EVENTS_MAX_ROTATIONS - 1; index >= 1; index--) {
+        await fs
+          .rename(`${MCP_EVENTS_LOG}.${index}`, `${MCP_EVENTS_LOG}.${index + 1}`)
+          .catch(() => undefined);
+      }
+      await fs.rename(MCP_EVENTS_LOG, `${MCP_EVENTS_LOG}.1`);
     }
-    // Strip large binary/content payloads from event data.
-    const sanitized = sanitizeEventData(data);
-    const event = {
-      id: randomUUID(),
-      timestamp: new Date().toISOString(),
-      source: "mcp",
-      type,
-      data: sanitized,
-    };
-    fs.appendFileSync(MCP_EVENTS_LOG, JSON.stringify(event) + "\n");
+    await fs.appendFile(MCP_EVENTS_LOG, line, { mode: 0o600 });
+    await fs.chmod(MCP_EVENTS_LOG, 0o600);
   } catch (err) {
     console.error("[biodome-mcp] failed to write event log:", (err as Error).message);
   }
+}
+
+function logMcpEvent(type: string, data: any): void {
+  // Strip large binary/content payloads from event data.
+  const event = {
+    id: randomUUID(),
+    timestamp: new Date().toISOString(),
+    source: "mcp",
+    type,
+    data: sanitizeEventData(data),
+  };
+  mcpLogPending = mcpLogPending.then(() => appendMcpEvent(event));
+  void mcpLogPending;
 }
 
 function sanitizeEventData(data: any): any {

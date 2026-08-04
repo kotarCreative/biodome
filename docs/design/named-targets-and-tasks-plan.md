@@ -665,9 +665,9 @@ For initial harness commands:
 - Claude: invoke its generated Claude wrapper with `-p <prompt>`.
 - Codex: use a generated non-interactive wrapper script, not an undocumented
   direct `exec-server` protocol call.
-- OpenCode: defer task support until a stable non-interactive generated wrapper is
-  added. `run` must reject OpenCode tasks with a clear unsupported-harness message,
-  not attempt to automate its server protocol.
+- OpenCode: invoke a generated non-interactive wrapper (`opencode run "$<prompt>"`) that
+  resolves `${VAR}` refs in its config from the container env, mirroring the serve start
+  script. `run` supports OpenCode tasks the same way it supports Pi/Claude/Codex tasks.
 
 Add a dedicated `"artifact.collect"` capability to `src/core/capabilities.ts`.
 Docker advertises it; ECS does not in the initial cloud slice.

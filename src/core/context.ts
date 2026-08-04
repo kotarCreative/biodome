@@ -666,6 +666,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
     const telemetry = {
       enabled: validated.telemetry?.enabled ?? true,
       path: validated.telemetry?.path ?? "/workspace/.biodome-build/logs/opencode-events.jsonl",
+      capturePayloads: validated.telemetry?.capturePayloads ?? false,
     };
 
     const harness: AgentHarness = {
@@ -722,6 +723,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       path:
         validated.telemetry?.path ??
         `/workspace/.biodome-build/logs/pi-${validated.name}-events.jsonl`,
+      capturePayloads: validated.telemetry?.capturePayloads ?? false,
     };
 
     const harness: PiHarness = {
@@ -777,6 +779,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       path:
         validated.telemetry?.path ??
         `/workspace/.biodome-build/logs/codex-${validated.name}-events.jsonl`,
+      capturePayloads: validated.telemetry?.capturePayloads ?? false,
     };
 
     const harness: CodexHarness = {
@@ -833,6 +836,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
       path:
         validated.telemetry?.path ??
         `/workspace/.biodome-build/logs/claude-${validated.name}-events.jsonl`,
+      capturePayloads: validated.telemetry?.capturePayloads ?? false,
     };
 
     const harness: ClaudeHarness = {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Effect } from "effect";
@@ -79,6 +79,19 @@ describe("createFileEventStore", () => {
     await expect(
       Effect.runPromise(store.emit("run.started", { command: "exec", cwd: "/project" })),
     ).rejects.toThrow("EventStore is closed");
+  });
+
+  it("rotates complete JSONL records and uses owner-only permissions", async () => {
+    const path = join(dir, "events.jsonl");
+    const store = createFileEventStore({ runId: "run-1", path, maxSize: 1 });
+
+    await Effect.runPromise(store.emit("run.started", { command: "build", cwd: "/project" }));
+    await Effect.runPromise(store.emit("run.completed", { command: "build", durationMs: 10 }));
+
+    expect(JSON.parse(readFileSync(`${path}.1`, "utf-8"))).toMatchObject({ type: "run.started" });
+    expect(JSON.parse(readFileSync(path, "utf-8"))).toMatchObject({ type: "run.completed" });
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 });
 

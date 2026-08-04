@@ -131,6 +131,7 @@ export const dockerComposeDriver: RuntimeDriver = {
     "exec.command",
     "logs.stream",
     "status.read",
+    "process.status",
     "process.signal",
     "volume.mount",
     "artifact.collect",

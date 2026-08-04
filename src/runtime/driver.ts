@@ -63,7 +63,11 @@ export interface RuntimeDriver {
   start(input: RuntimeOperationInput): Effect.Effect<DeploymentState, RuntimeError, EventStore>;
   stop(input: RuntimeOperationInput): Effect.Effect<void, RuntimeError, EventStore>;
   exec(
-    input: RuntimeOperationInput & { command: string[]; timeoutMs?: number },
+    input: RuntimeOperationInput & {
+      command: string[];
+      timeoutMs?: number;
+      artifactPaths?: string[];
+    },
   ): Effect.Effect<CommandResult, RuntimeError, EventStore>;
   collectArtifacts(
     input: RuntimeOperationInput & { paths: string[] },

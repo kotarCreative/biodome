@@ -5,7 +5,15 @@
 
 import { Effect, Context, Schema, Layer } from "effect";
 
-import { mkdirSync, appendFileSync, readFileSync, existsSync } from "node:fs";
+import {
+  mkdirSync,
+  appendFileSync,
+  readFileSync,
+  existsSync,
+  renameSync,
+  chmodSync,
+  rmSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -139,12 +147,14 @@ export interface EventStore {
 export const EventStore = Context.Service<EventStore>("@biodome/EventStore");
 
 const DEFAULT_MAX_LOG_SIZE = 10 * 1024 * 1024; // 10 MB
+const DEFAULT_MAX_LOG_ROTATIONS = 5;
 
 export interface FileEventStoreOptions {
   readonly runId: string;
   readonly path: string;
   readonly clock?: () => Date;
   readonly maxSize?: number;
+  readonly maxRotations?: number;
 }
 
 export function createFileEventStore(options: FileEventStoreOptions): EventStore {
@@ -152,14 +162,16 @@ export function createFileEventStore(options: FileEventStoreOptions): EventStore
   const path = options.path;
   const now = options.clock ?? (() => new Date());
   const maxSize = options.maxSize ?? DEFAULT_MAX_LOG_SIZE;
+  const maxRotations = options.maxRotations ?? DEFAULT_MAX_LOG_ROTATIONS;
   let sequence = 0;
   let closed = false;
 
   const ensureDir = () => {
     const dir = dirname(path);
     if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
+    chmodSync(dir, 0o700);
   };
 
   const emit: EventStore["emit"] = (type, data) =>
@@ -177,21 +189,30 @@ export function createFileEventStore(options: FileEventStoreOptions): EventStore
         data,
       };
       ensureDir();
-      // Avoid unbounded growth: skip write when max size is exceeded.
+      const line = JSON.stringify(event) + "\n";
       if (maxSize > 0) {
         try {
           const stat = existsSync(path) ? readFileSync(path).length : 0;
-          if (stat > maxSize) {
-            yield* Effect.logWarning(
-              `event log ${path} exceeds ${maxSize} bytes, dropping event ${type}`,
-            );
-            return;
+          // Rotate before writing so every JSONL record remains intact.
+          if (stat > 0 && stat + Buffer.byteLength(line) > maxSize) {
+            const oldestPath = `${path}.${maxRotations}`;
+            if (existsSync(oldestPath)) {
+              rmSync(oldestPath);
+            }
+            for (let index = maxRotations - 1; index >= 1; index--) {
+              const rotatedPath = `${path}.${index}`;
+              if (existsSync(rotatedPath)) {
+                renameSync(rotatedPath, `${path}.${index + 1}`);
+              }
+            }
+            renameSync(path, `${path}.1`);
           }
         } catch {
-          // Best-effort size check; write anyway on error.
+          // Best-effort rotation; write anyway on error.
         }
       }
-      appendFileSync(path, JSON.stringify(event) + "\n");
+      appendFileSync(path, line, { mode: 0o600 });
+      chmodSync(path, 0o600);
       yield* Effect.logInfo(`event:${type}`);
     });
 
@@ -226,7 +247,10 @@ export const NoOpEventStoreLive = (runId = "noop"): Layer.Layer<EventStore> =>
     close: () => Effect.void,
   });
 
-export function eventLogPath(rootDir: string, runId: string): string {
+export function eventLogPath(rootDir: string, runId: string, targetName?: string): string {
+  if (targetName) {
+    return join(rootDir, ".biodome-build", "targets", targetName, "logs", `events-${runId}.jsonl`);
+  }
   return join(rootDir, ".biodome-build", "logs", `events-${runId}.jsonl`);
 }
 

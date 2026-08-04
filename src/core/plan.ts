@@ -69,6 +69,7 @@ export interface AgentHarnessMcpServer {
 export interface AgentHarnessTelemetry {
   enabled: boolean;
   path: string;
+  capturePayloads?: boolean;
 }
 
 export interface AgentHarness {
@@ -100,7 +101,7 @@ export interface PiHarness {
   prompts?: string[];
   themes?: string[];
   packages?: string[];
-  telemetry: { enabled: boolean; path: string };
+  telemetry: AgentHarnessTelemetry;
   config: Record<string, unknown>;
 }
 
@@ -111,7 +112,7 @@ export interface CodexHarness {
   mcpServers: Record<string, AgentHarnessMcpServer>;
   apiKey?: SecretValue;
   model?: string;
-  telemetry: { enabled: boolean; path: string };
+  telemetry: AgentHarnessTelemetry;
   config: Record<string, unknown>;
 }
 
@@ -122,7 +123,7 @@ export interface ClaudeHarness {
   model?: string;
   tools?: string[];
   permissions?: string;
-  telemetry: { enabled: boolean; path: string };
+  telemetry: AgentHarnessTelemetry;
   config: Record<string, unknown>;
 }
 
@@ -624,6 +625,7 @@ export const AgentHarnessMcpServerSchema = Schema.Struct({
 export const AgentHarnessTelemetrySchema = Schema.Struct({
   enabled: Schema.Boolean,
   path: Schema.String,
+  capturePayloads: Schema.optional(Schema.Boolean),
 });
 
 export const AgentHarnessSpecSchema = Schema.Struct({
@@ -634,6 +636,7 @@ export const AgentHarnessSpecSchema = Schema.Struct({
     Schema.Struct({
       enabled: Schema.optional(Schema.Boolean),
       path: Schema.optional(Schema.String),
+      capturePayloads: Schema.optional(Schema.Boolean),
     }),
   ),
   config: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
@@ -663,6 +666,7 @@ export const PiHarnessSpecSchema = Schema.Struct({
     Schema.Struct({
       enabled: Schema.optional(Schema.Boolean),
       path: Schema.optional(Schema.String),
+      capturePayloads: Schema.optional(Schema.Boolean),
     }),
   ),
   config: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
@@ -694,6 +698,7 @@ export const CodexHarnessSpecSchema = Schema.Struct({
     Schema.Struct({
       enabled: Schema.optional(Schema.Boolean),
       path: Schema.optional(Schema.String),
+      capturePayloads: Schema.optional(Schema.Boolean),
     }),
   ),
   config: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
@@ -720,6 +725,7 @@ export const ClaudeHarnessSpecSchema = Schema.Struct({
     Schema.Struct({
       enabled: Schema.optional(Schema.Boolean),
       path: Schema.optional(Schema.String),
+      capturePayloads: Schema.optional(Schema.Boolean),
     }),
   ),
   config: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),

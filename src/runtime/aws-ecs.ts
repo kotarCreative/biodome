@@ -26,6 +26,7 @@ import {
   DescribeLogStreamsCommand,
   GetLogEventsCommand,
 } from "@aws-sdk/client-cloudwatch-logs";
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import { NodeRuntime } from "../core/runtime-node.js";
 import {
@@ -60,6 +61,7 @@ export interface AwsClients {
   ecr: ECRClient;
   ecs: ECSClient;
   cloudwatch: CloudWatchLogsClient;
+  s3?: S3Client;
 }
 
 function createDefaultClients(region: string): AwsClients {
@@ -67,6 +69,7 @@ function createDefaultClients(region: string): AwsClients {
     ecr: new ECRClient({ region }),
     ecs: new ECSClient({ region }),
     cloudwatch: new CloudWatchLogsClient({ region }),
+    s3: new S3Client({ region }),
   };
 }
 
@@ -148,6 +151,8 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
       "lifecycle.stop",
       "status.read",
       "logs.stream",
+      "exec.command",
+      "artifact.collect",
     ),
 
     render(input: {
@@ -156,6 +161,14 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
       plan: Plan;
       target: RuntimeTarget;
     }): Effect.Effect<string[], RuntimeError, never> {
+      if (input.plan.runtime.services.length > 0) {
+        return Effect.fail(
+          new RuntimeError({
+            message:
+              "The aws-ecs driver does not support backing service containers yet. Use managed cloud services or a docker-compose target instead.",
+          }),
+        );
+      }
       return Effect.try({
         try: () => {
           mkdirSync(input.outputDir, { recursive: true });
@@ -525,7 +538,11 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
     },
 
     exec(
-      input: RuntimeOperationInput & { command: string[] },
+      input: RuntimeOperationInput & {
+        command: string[];
+        timeoutMs?: number;
+        artifactPaths?: string[];
+      },
     ): Effect.Effect<CommandResult, RuntimeError, EventStore> {
       return Effect.gen(function* () {
         const opts = validateAwsEcsOptions(input.target.options);
@@ -536,6 +553,32 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
         const startTime = Date.now();
 
         const containerEnv = buildContainerEnvironment(input.plan);
+        const bucket = resolveSecret(opts.artifactBucket);
+        const taskRoleArn = opts.taskRoleArn ? resolveSecret(opts.taskRoleArn) : undefined;
+        if (input.artifactPaths && input.artifactPaths.length > 0) {
+          if (!bucket) {
+            return yield* new RuntimeError({
+              message:
+                "The aws-ecs target does not have artifactBucket configured. Configure artifactBucket to run tasks with artifacts.",
+            });
+          }
+          if (!taskRoleArn) {
+            return yield* new RuntimeError({
+              message:
+                "The aws-ecs target needs taskRoleArn configured to upload task artifacts to S3.",
+            });
+          }
+          containerEnv.push({ name: "BIODOME_ARTIFACT_BUCKET", value: bucket });
+          containerEnv.push({
+            name: "BIODOME_ARTIFACT_PREFIX",
+            value: opts.artifactPrefix ? opts.artifactPrefix.replace(/\/+$/, "") : "artifacts",
+          });
+          containerEnv.push({ name: "BIODOME_DEPLOYMENT_ID", value: input.deploymentId });
+          containerEnv.push({
+            name: "BIODOME_ARTIFACT_PATHS",
+            value: JSON.stringify(input.artifactPaths),
+          });
+        }
 
         yield* ensureLogGroup(c.cloudwatch, lgGroup);
 
@@ -545,7 +588,7 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
               new RegisterTaskDefinitionCommand({
                 family: `${family}-exec`,
                 executionRoleArn: resolveSecret(opts.executionRoleArn)!,
-                taskRoleArn: opts.taskRoleArn ? resolveSecret(opts.taskRoleArn) : undefined,
+                taskRoleArn,
                 networkMode: "awsvpc",
                 requiresCompatibilities: ["FARGATE"],
                 cpu: String(opts.cpu ?? 1024),
@@ -614,7 +657,7 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
         let exitCode = 0;
         let lastStatus = "PENDING";
         const pollStart = Date.now();
-        const pollTimeout = 3600000;
+        const pollTimeout = input.timeoutMs ?? 3600000;
 
         while (Date.now() - pollStart < pollTimeout) {
           const desc = yield* Effect.tryPromise({
@@ -651,7 +694,22 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
               )
               .catch(() => {}),
           );
-          return yield* new RuntimeError({ message: "Exec task timed out" });
+          yield* Effect.tryPromise(() =>
+            c.ecs
+              .send(
+                new DeregisterTaskDefinitionCommand({
+                  taskDefinition: taskDefArn,
+                }),
+              )
+              .catch(() => {}),
+          );
+          return {
+            exitCode: 124,
+            stdout: "",
+            stderr: "",
+            durationMs: Date.now() - startTime,
+            timedOut: true,
+          };
         }
 
         yield* Effect.tryPromise(() =>
@@ -678,13 +736,61 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
     },
 
     collectArtifacts(
-      _input: RuntimeOperationInput & { paths: string[] },
+      input: RuntimeOperationInput & { paths: string[] },
     ): Effect.Effect<Artifact[], RuntimeError, EventStore> {
-      return Effect.fail(
-        new RuntimeError({
-          message:
-            "The aws-ecs driver does not support artifact collection yet. Use a Docker Compose target for task execution with artifacts.",
-        }),
+      return Effect.gen(function* () {
+        const opts = validateAwsEcsOptions(input.target.options);
+        if (!opts.artifactBucket) {
+          return yield* new RuntimeError({
+            message:
+              "The aws-ecs target does not have artifactBucket configured. Configure artifactBucket in target options to collect task artifacts.",
+          });
+        }
+        const bucket = resolveSecret(opts.artifactBucket);
+        if (!bucket) {
+          return yield* new RuntimeError({
+            message: "Failed to resolve artifactBucket value from environment",
+          });
+        }
+        const prefix = opts.artifactPrefix ? opts.artifactPrefix.replace(/\/+$/, "") : "artifacts";
+        const c = getClients(opts);
+        const s3 = c.s3 ?? new S3Client({ region: opts.region });
+
+        const artifactsDir = join(input.outputDir, "artifacts");
+        mkdirSync(artifactsDir, { recursive: true });
+
+        const artifacts: Artifact[] = [];
+        for (const requestedPath of input.paths) {
+          const s3Key = `${prefix}/${input.deploymentId}/${requestedPath}`;
+          const localPath = join(artifactsDir, requestedPath);
+          mkdirSync(dirname(localPath), { recursive: true });
+
+          const response = yield* Effect.tryPromise({
+            try: async () => {
+              const res = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: s3Key }));
+              if (!res.Body) throw new Error(`Empty body for S3 object ${s3Key}`);
+              const byteArray = await res.Body.transformToByteArray();
+              writeFileSync(localPath, byteArray);
+              return { sizeBytes: byteArray.length };
+            },
+            catch: (error) =>
+              new RuntimeError({
+                message: `Failed to download artifact "${requestedPath}" from s3://${bucket}/${s3Key}: ${platformErrorMessage(error)}`,
+              }),
+          });
+
+          artifacts.push({
+            path: requestedPath,
+            sizeBytes: response.sizeBytes,
+            localPath,
+          });
+        }
+
+        return artifacts;
+      }).pipe(
+        Effect.provide(NodeRuntime),
+        Effect.scoped,
+        Effect.catch((error) => Effect.fail(wrapError(error))),
       );
     },
 

@@ -1,4 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   generateDockerfile,
   generateSupervisordConf,
@@ -24,6 +28,20 @@ describe("Docker generators", () => {
     expect(compose).toContain("context: ../../..");
     expect(compose).toContain("dockerfile: .biodome-build/targets/local/Dockerfile");
     expect(compose).toContain("- ../../..:/workspace");
+  });
+
+  it("installs the AWS CLI for ECS artifact uploads", () => {
+    const plan = createPlan("my-app");
+    plan.deployment = {
+      target: {
+        name: "remote",
+        driver: "aws-ecs",
+        options: { artifactBucket: "task-artifacts" },
+      },
+      deploymentId: "my-app-remote",
+    };
+
+    expect(generateDockerfile(plan)).toContain("awscli");
   });
 
   it("generates a Dockerfile with supervisord for daemon processes", () => {
@@ -472,10 +490,39 @@ describe("Docker generators", () => {
       expect(plugin).toContain("tool.execute.after");
       expect(plugin).toContain("chat.message");
       expect(plugin).toContain("/workspace/.biodome-build/logs/opencode-events.jsonl");
+      expect(plugin).toContain("const CAPTURE_PAYLOADS = false");
 
       expect(files[startPath]).toContain("#!/bin/sh");
       expect(files[startPath]).toContain("opencode serve");
       expect(files[startPath]).toContain("3002");
+
+      const taskPath = "opencode-homes/agent/task";
+      expect(files[taskPath]).toBeDefined();
+      expect(files[taskPath]).toContain("#!/bin/sh");
+      expect(files[taskPath]).toContain("opencode run");
+      expect(files[taskPath]).toContain("/workspace/.biodome-build/opencode-homes/agent");
+      expect(files[taskPath]).toContain("BIODOME_ARTIFACT_PATHS");
+      expect(files[taskPath]).toContain("aws s3 cp");
+    });
+
+    it("uses the target-scoped home in the OpenCode task wrapper", () => {
+      const plan = createPlan("test");
+      plan.runtime.agentHarnesses.push({
+        name: "agent",
+        type: "opencode",
+        port: 3002,
+        mcpServers: {},
+        telemetry: { enabled: true, path: "/workspace/.biodome-build/logs/opencode-events.jsonl" },
+        config: {},
+      });
+      plan.deployment = {
+        target: { name: "local", driver: "docker-compose", options: {} },
+        deploymentId: "test-local",
+      };
+
+      const task = generateHarnessFiles(plan)["opencode-homes/agent/task"];
+      expect(task).toContain("/workspace/.biodome-build/targets/local/opencode-homes/agent");
+      expect(task).toContain("opencode run");
     });
 
     it("renders LLM providers into the OpenCode config", () => {
@@ -565,12 +612,14 @@ describe("Docker generators", () => {
       const task = files["pi-homes/coder/task"];
       expect(task).toContain("#!/bin/sh");
       expect(task).toContain("PI_CODING_AGENT_DIR=/workspace/.biodome-build/pi-homes/coder");
-      expect(task).toContain('exec pi -p "$@"');
+      expect(task).toContain('pi -p "$@"');
+      expect(task).toContain("aws s3 cp");
 
       const telemetry = files["pi-homes/coder/extensions/biodome-telemetry.ts"];
       expect(telemetry).toContain("export default function (pi)");
       expect(telemetry).toContain("agent_start");
       expect(telemetry).toContain("tool_execution_start");
+      expect(telemetry).toContain("const CAPTURE_PAYLOADS = false");
     });
 
     it("omits telemetry extension when disabled", () => {
@@ -618,6 +667,7 @@ describe("Docker generators", () => {
       const telemetry = files["codex-homes/coder/hooks/telemetry.js"];
       expect(telemetry).toContain("source: 'codex'");
       expect(telemetry).toContain("/workspace/.biodome-build/logs/codex-coder-events.jsonl");
+      expect(telemetry).toContain("const CAPTURE_PAYLOADS = false");
 
       const start = files["codex-homes/coder/start.sh"];
       expect(start).toContain("#!/bin/sh");
@@ -627,7 +677,8 @@ describe("Docker generators", () => {
       const task = files["codex-homes/coder/task"];
       expect(task).toContain("#!/bin/sh");
       expect(task).toContain("HOME=/workspace/.biodome-build/codex-homes/coder");
-      expect(task).toContain('exec codex -p "$@"');
+      expect(task).toContain('codex -p "$@"');
+      expect(task).toContain("aws s3 cp");
     });
   });
 
@@ -661,6 +712,7 @@ describe("Docker generators", () => {
       const telemetry = files["claude-homes/assistant/hooks/telemetry.js"];
       expect(telemetry).toContain("source: 'claude'");
       expect(telemetry).toContain("/workspace/.biodome-build/logs/claude-assistant-events.jsonl");
+      expect(telemetry).toContain("const CAPTURE_PAYLOADS = false");
 
       const wrapper = files["claude-homes/assistant/claude"];
       expect(wrapper).toContain("#!/bin/sh");
@@ -672,7 +724,79 @@ describe("Docker generators", () => {
       expect(task).toContain("#!/bin/sh");
       expect(task).toContain("HOME=/workspace/.biodome-build/claude-homes/assistant");
       expect(task).toContain("CLAUDE_BIODOME_TELEMETRY_PATH=");
-      expect(task).toContain('exec claude -p "$@"');
+      expect(task).toContain('claude -p "$@"');
+      expect(task).toContain("aws s3 cp");
     });
+  });
+
+  it("captures harness telemetry payloads only when explicitly enabled", () => {
+    const plan = createPlan("test");
+    const telemetry = { enabled: true, path: "/workspace/events.jsonl", capturePayloads: true };
+    plan.runtime.agentHarnesses.push({
+      name: "opencode",
+      type: "opencode",
+      port: 3002,
+      mcpServers: {},
+      telemetry,
+      config: {},
+    });
+    plan.runtime.piHarnesses.push({ name: "pi", type: "pi", telemetry, config: {} });
+    plan.runtime.codexHarnesses.push({
+      name: "codex",
+      type: "codex",
+      port: 3003,
+      mcpServers: {},
+      telemetry,
+      config: {},
+    });
+    plan.runtime.claudeHarnesses.push({ name: "claude", type: "claude", telemetry, config: {} });
+
+    expect(
+      generateHarnessFiles(plan)[
+        "opencode-homes/opencode/.config/opencode/plugins/opencode-telemetry.js"
+      ],
+    ).toContain("const CAPTURE_PAYLOADS = true");
+    expect(generatePiHarnessFiles(plan)["pi-homes/pi/extensions/biodome-telemetry.ts"]).toContain(
+      "const CAPTURE_PAYLOADS = true",
+    );
+    expect(generateCodexHarnessFiles(plan)["codex-homes/codex/hooks/telemetry.js"]).toContain(
+      "const CAPTURE_PAYLOADS = true",
+    );
+    expect(generateClaudeHarnessFiles(plan)["claude-homes/claude/hooks/telemetry.js"]).toContain(
+      "const CAPTURE_PAYLOADS = true",
+    );
+  });
+
+  it("writes shared telemetry records asynchronously with owner-only permissions", async () => {
+    const plan = createPlan("test");
+    plan.runtime.agentHarnesses.push({
+      name: "agent",
+      type: "opencode",
+      port: 3002,
+      mcpServers: {},
+      telemetry: { enabled: true, path: "/workspace/events.jsonl" },
+      config: {},
+    });
+    const dir = mkdtempSync(join(tmpdir(), "biodome-telemetry-"));
+    const writerPath = join(dir, "writer.cjs");
+    const logPath = join(dir, "logs", "events.jsonl");
+
+    try {
+      writeFileSync(writerPath, generateHarnessFiles(plan)["telemetry/writer.cjs"]);
+      const writer = createRequire(import.meta.url)(writerPath) as {
+        write: (path: string, event: unknown) => Promise<void>;
+      };
+      await writer.write(logPath, { source: "test", type: "event", data: { value: 1 } });
+
+      expect(JSON.parse(readFileSync(logPath, "utf-8"))).toEqual({
+        source: "test",
+        type: "event",
+        data: { value: 1 },
+      });
+      expect(statSync(join(dir, "logs")).mode & 0o777).toBe(0o700);
+      expect(statSync(logPath).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

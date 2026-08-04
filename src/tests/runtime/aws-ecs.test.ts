@@ -129,17 +129,15 @@ describe("createAwsEcsDriver", () => {
       expect(driver.id).toBe("aws-ecs");
     });
 
-    it("advertises build, start, stop, status, and logs capabilities", () => {
+    it("advertises build, start, stop, status, logs, exec, and artifact capabilities", () => {
       const caps = driver.capabilities;
       expect(caps).toContain("lifecycle.build");
       expect(caps).toContain("lifecycle.start");
       expect(caps).toContain("lifecycle.stop");
       expect(caps).toContain("status.read");
       expect(caps).toContain("logs.stream");
-    });
-
-    it("does not advertise exec.command", () => {
-      expect(driver.capabilities).not.toContain("exec.command");
+      expect(caps).toContain("exec.command");
+      expect(caps).toContain("artifact.collect");
     });
   });
 
@@ -168,6 +166,27 @@ describe("createAwsEcsDriver", () => {
       } finally {
         rmSync(outputDir, { recursive: true, force: true });
       }
+    });
+
+    it("rejects plan rendering when backing services are present", () => {
+      const driver = createAwsEcsDriver(makeClients());
+      const planWithServices: Plan = {
+        ...samplePlan,
+        runtime: {
+          ...samplePlan.runtime,
+          services: [{ name: "postgres", image: "postgres:16" } as any],
+        },
+      };
+      expect(() =>
+        Effect.runSync(
+          driver.render({
+            rootDir: "/tmp/root",
+            outputDir: "/tmp/output",
+            plan: planWithServices,
+            target: sampleTarget,
+          }),
+        ),
+      ).toThrow(/does not support backing service containers/);
     });
   });
 
@@ -413,31 +432,121 @@ describe("createAwsEcsDriver", () => {
 
   describe("exec", () => {
     it("registers task, runs, waits for completion, deregisters", async () => {
-      const ecsSend = vi
-        .fn()
-        .mockResolvedValueOnce({
-          taskDefinition: { taskDefinitionArn: "arn:aws:ecs:...:task-def/exec:1" },
-        })
-        .mockResolvedValueOnce({
-          tasks: [{ taskArn: "arn:aws:ecs:...:task/exec-123" }],
-          failures: [],
-        })
-        .mockResolvedValueOnce({ tasks: [{ lastStatus: "RUNNING" }] })
-        .mockResolvedValueOnce({
-          tasks: [{ lastStatus: "STOPPED", containers: [{ exitCode: 0 }] }],
-        })
-        .mockResolvedValueOnce({});
-      const clients = makeClients({ ecsSend });
-      const driver = createAwsEcsDriver(clients);
+      process.env.TEST_TASK_ROLE_ARN = "arn:aws:iam::123456789012:role/task";
+      try {
+        const ecsSend = vi
+          .fn()
+          .mockResolvedValueOnce({
+            taskDefinition: { taskDefinitionArn: "arn:aws:ecs:...:task-def/exec:1" },
+          })
+          .mockResolvedValueOnce({
+            tasks: [{ taskArn: "arn:aws:ecs:...:task/exec-123" }],
+            failures: [],
+          })
+          .mockResolvedValueOnce({ tasks: [{ lastStatus: "RUNNING" }] })
+          .mockResolvedValueOnce({
+            tasks: [{ lastStatus: "STOPPED", containers: [{ exitCode: 0 }] }],
+          })
+          .mockResolvedValueOnce({});
+        const clients = makeClients({ ecsSend });
+        const driver = createAwsEcsDriver(clients);
 
-      const result = await run(driver.exec({ ...makeInput(), command: ["echo", "hello"] }));
+        const targetWithArtifacts: RuntimeTarget = {
+          ...sampleTarget,
+          options: {
+            ...sampleTarget.options,
+            taskRoleArn: { env: "TEST_TASK_ROLE_ARN" },
+            artifactBucket: "task-artifacts",
+            artifactPrefix: "task-output",
+          },
+        };
+        const result = await run(
+          driver.exec({
+            ...makeInput({ target: targetWithArtifacts }),
+            command: ["echo", "hello"],
+            artifactPaths: ["summary.md"],
+          }),
+        );
 
-      expect(result.exitCode).toBe(0);
-      expect(ecsSend).toHaveBeenCalledTimes(5);
-      const registerCommand = ecsSend.mock.calls[0][0];
-      expect(registerCommand.input.containerDefinitions[0].image).toBe(
-        "123456789012.dkr.ecr.us-east-1.amazonaws.com/test-repo:test-deploy-001",
-      );
+        expect(result.exitCode).toBe(0);
+        expect(ecsSend).toHaveBeenCalledTimes(5);
+        const registerCommand = ecsSend.mock.calls[0][0];
+        expect(registerCommand.input.containerDefinitions[0].image).toBe(
+          "123456789012.dkr.ecr.us-east-1.amazonaws.com/test-repo:test-deploy-001",
+        );
+        expect(registerCommand.input.containerDefinitions[0].environment).toEqual(
+          expect.arrayContaining([
+            { name: "BIODOME_ARTIFACT_BUCKET", value: "task-artifacts" },
+            { name: "BIODOME_ARTIFACT_PREFIX", value: "task-output" },
+            { name: "BIODOME_DEPLOYMENT_ID", value: "test-deploy-001" },
+            { name: "BIODOME_ARTIFACT_PATHS", value: '["summary.md"]' },
+          ]),
+        );
+      } finally {
+        delete process.env.TEST_TASK_ROLE_ARN;
+      }
+    });
+
+    it("returns a timeout result at the requested deadline", async () => {
+      vi.useFakeTimers();
+      try {
+        const ecsSend = vi
+          .fn()
+          .mockResolvedValueOnce({
+            taskDefinition: { taskDefinitionArn: "arn:aws:ecs:...:task-def/exec:1" },
+          })
+          .mockResolvedValueOnce({
+            tasks: [{ taskArn: "arn:aws:ecs:...:task/exec-123" }],
+          })
+          .mockResolvedValueOnce({ tasks: [{ lastStatus: "RUNNING" }] })
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({});
+        const driver = createAwsEcsDriver(makeClients({ ecsSend }));
+        const result = run(driver.exec({ ...makeInput(), command: ["sleep", "10"], timeoutMs: 1 }));
+
+        await vi.runAllTimersAsync();
+
+        await expect(result).resolves.toMatchObject({ exitCode: 124, timedOut: true });
+        expect(ecsSend).toHaveBeenCalledTimes(5);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("rejects artifact tasks without an artifact bucket before cloud calls", async () => {
+      const ecsSend = vi.fn();
+      const driver = createAwsEcsDriver(makeClients({ ecsSend }));
+
+      await expect(
+        run(
+          driver.exec({
+            ...makeInput(),
+            command: ["echo", "hello"],
+            artifactPaths: ["summary.md"],
+          }),
+        ),
+      ).rejects.toThrow(/does not have artifactBucket configured/);
+      expect(ecsSend).not.toHaveBeenCalled();
+    });
+
+    it("rejects artifact tasks without a task role before cloud calls", async () => {
+      const ecsSend = vi.fn();
+      const driver = createAwsEcsDriver(makeClients({ ecsSend }));
+      const targetWithBucket: RuntimeTarget = {
+        ...sampleTarget,
+        options: { ...sampleTarget.options, artifactBucket: "task-artifacts" },
+      };
+
+      await expect(
+        run(
+          driver.exec({
+            ...makeInput({ target: targetWithBucket }),
+            command: ["echo", "hello"],
+            artifactPaths: ["summary.md"],
+          }),
+        ),
+      ).rejects.toThrow(/needs taskRoleArn configured/);
+      expect(ecsSend).not.toHaveBeenCalled();
     });
   });
 
@@ -492,11 +601,57 @@ describe("createAwsEcsDriver", () => {
   });
 
   describe("collectArtifacts", () => {
-    it("returns a failure with a helpful message", async () => {
+    it("returns a failure when artifactBucket is not configured", async () => {
       const driver = createAwsEcsDriver(makeClients());
       await expect(
         run(driver.collectArtifacts({ ...makeInput(), paths: ["/workspace/data"] })),
-      ).rejects.toThrow(/does not support artifact collection/);
+      ).rejects.toThrow(/does not have artifactBucket configured/);
+    });
+
+    it("downloads task artifacts from S3 when artifactBucket is configured", async () => {
+      process.env.TEST_ARTIFACT_BUCKET = "my-test-bucket";
+      try {
+        const s3Send = vi.fn().mockImplementation((_command) => {
+          return Promise.resolve({
+            Body: {
+              transformToByteArray: () => Promise.resolve(new TextEncoder().encode("test content")),
+            },
+          });
+        });
+        const clients = {
+          ...makeClients(),
+          s3: { send: s3Send } as any,
+        };
+        const driver = createAwsEcsDriver(clients);
+        const targetWithS3: RuntimeTarget = {
+          ...sampleTarget,
+          options: {
+            ...sampleTarget.options,
+            artifactBucket: { env: "TEST_ARTIFACT_BUCKET" },
+            artifactPrefix: "my-artifacts",
+          },
+        };
+        const outputDir = join(tmpdir(), `ecs-artifacts-${randomUUID()}`);
+        mkdirSync(outputDir, { recursive: true });
+        try {
+          const result = await run(
+            driver.collectArtifacts({
+              ...makeInput({ target: targetWithS3, outputDir }),
+              paths: ["summary.md"],
+            }),
+          );
+          expect(result.length).toBe(1);
+          expect(result[0].path).toBe("summary.md");
+          expect(result[0].sizeBytes).toBe(12);
+          expect(s3Send).toHaveBeenCalled();
+          const written = readFileSync(join(outputDir, "artifacts", "summary.md"), "utf-8");
+          expect(written).toBe("test content");
+        } finally {
+          rmSync(outputDir, { recursive: true, force: true });
+        }
+      } finally {
+        delete process.env.TEST_ARTIFACT_BUCKET;
+      }
     });
   });
 

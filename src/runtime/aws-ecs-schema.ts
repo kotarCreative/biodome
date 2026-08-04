@@ -13,6 +13,8 @@ export interface AwsEcsOptions {
   cpu?: number;
   memoryMiB?: number;
   ttl?: string;
+  artifactBucket?: { env: string } | string;
+  artifactPrefix?: string;
 }
 
 const EnvRefSchema = Schema.Struct({
@@ -31,6 +33,10 @@ export const AwsEcsOptionsSchema = Schema.Struct({
   cpu: Schema.optional(Schema.Number),
   memoryMiB: Schema.optional(Schema.Number),
   ttl: Schema.optional(Schema.String),
+  artifactBucket: Schema.optional(
+    Schema.Union([EnvRefSchema, Schema.String.check(Schema.isMinLength(1))]),
+  ),
+  artifactPrefix: Schema.optional(Schema.String),
 });
 
 const FARGATE_CPU_MEMORY: Record<number, number[]> = {

@@ -565,7 +565,7 @@ Each repo generates a sync script at `.biodome-build/repos/<name>.sh` and a `sta
 
 ## `addOpencodeHarness(spec)`
 
-Runs a headless OpenCode agent inside the sandbox. The harness installs the OpenCode CLI (`opencode-ai`), the Bun runtime, and starts `opencode serve` as a daemon process. It also generates an isolated OpenCode config that registers `biodome-mcp` as an MCP server, includes any declared LLM providers, and installs a telemetry plugin that records every message, tool call, and event the agent emits.
+Runs a headless OpenCode agent inside the sandbox. The harness installs the OpenCode CLI (`opencode-ai`), the Bun runtime, and starts `opencode serve` as a daemon process. It also generates an isolated OpenCode config that registers `biodome-mcp` as an MCP server, includes any declared LLM providers, and installs a telemetry plugin.
 
 ```javascript
 export default function agent(ctx) {
@@ -589,9 +589,12 @@ export default function agent(ctx) {
 - `telemetry` —
   - `enabled` — whether to install the telemetry plugin. Defaults to `true`.
   - `path` — JSONL file where OpenCode events are written. Defaults to `/workspace/.biodome-build/logs/opencode-events.jsonl`.
+  - `capturePayloads` — include prompts, tool arguments, and tool output. Defaults to `false`; enable only for temporary debugging because these payloads can contain secrets.
 - `config` — arbitrary extra values merged into `opencode.json`.
 
-The MCP server (`biodome-mcp`) writes its own structured events to `/workspace/.biodome-build/logs/mcp-events.jsonl`. Together, the two logs give a holistic view of the agent's activity: OpenCode events show the agent's reasoning and tool calls, while the MCP log shows the exact sandbox actions those tool calls performed.
+The MCP server (`biodome-mcp`) writes its own structured events to `/workspace/.biodome-build/logs/mcp-events.jsonl`. Harness telemetry records event names, tool names, and correlation IDs by default; payload capture is opt-in.
+
+Telemetry directories and files are created with owner-only modes (`0700` and `0600`). Each telemetry log rotates at 10 MB and retains five prior files.
 
 ## `addLlmProvider(spec)`
 
@@ -652,9 +655,10 @@ biodome exec /workspace/.biodome-build/pi-homes/coder/pi -p "Refactor src/utils.
 - `telemetry` —
   - `enabled` — whether to install the telemetry extension. Defaults to `true`.
   - `path` — JSONL file where Pi events are written. Defaults to `/workspace/.biodome-build/logs/pi-<name>-events.jsonl`.
+  - `capturePayloads` — include agent messages and tool arguments. Defaults to `false`; enable only for temporary debugging.
 - `config` — arbitrary extra values merged into `settings.json`.
 
-The telemetry extension captures `agent_start`, `agent_end`, and `tool_execution_*` events so Pi activity can be correlated with other sandbox telemetry.
+The telemetry extension captures metadata for `agent_start`, `agent_end`, and `tool_execution_*` events so Pi activity can be correlated with other sandbox telemetry.
 
 ## `addCodexHarness(spec)`
 
@@ -686,9 +690,10 @@ export default function agent(ctx) {
 - `telemetry` —
   - `enabled` — whether to install telemetry hooks. Defaults to `true`.
   - `path` — JSONL file where Codex events are written. Defaults to `/workspace/.biodome-build/logs/codex-<name>-events.jsonl`.
+  - `capturePayloads` — include hook input. Defaults to `false`; enable only for temporary debugging.
 - `config` — arbitrary extra values merged into `~/.codex/config.toml`.
 
-The generated config defaults `approval_policy` to `"never"` and `sandbox_mode` to `"workspace-write"` so the headless server can act without interactive prompts inside the sandbox. Lifecycle hooks capture `session_start`, `user_prompt_submit`, `pre_tool_use`, and `post_tool_use` events to the telemetry log.
+The generated config defaults `approval_policy` to `"never"` and `sandbox_mode` to `"workspace-write"` so the headless server can act without interactive prompts inside the sandbox. Lifecycle hooks capture metadata for `session_start`, `user_prompt_submit`, `pre_tool_use`, and `post_tool_use` events.
 
 ## `addClaudeHarness(spec)`
 
@@ -724,9 +729,10 @@ biodome exec /workspace/.biodome-build/claude-homes/assistant/claude -p "Refacto
 - `telemetry` —
   - `enabled` — whether to install telemetry hooks. Defaults to `true`.
   - `path` — JSONL file where Claude events are written. Defaults to `/workspace/.biodome-build/logs/claude-<name>-events.jsonl`.
+  - `capturePayloads` — include hook input. Defaults to `false`; enable only for temporary debugging.
 - `config` — arbitrary extra values merged into `~/.claude/settings.json`.
 
-The wrapper sets `HOME` to the isolated Claude home so settings and MCP config are loaded from the generated directory, and exports the API key from the host environment. Lifecycle hooks capture `SessionStart`, `UserPromptSubmit`, `PreToolUse`, and `PostToolUse` events.
+The wrapper sets `HOME` to the isolated Claude home so settings and MCP config are loaded from the generated directory, and exports the API key from the host environment. Lifecycle hooks capture metadata for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, and `PostToolUse` events.
 
 ## Health checks
 

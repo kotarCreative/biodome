@@ -14,6 +14,7 @@ describe("dockerComposeDriver capabilities", () => {
     expect(hasCapability(caps, "exec.command")).toBe(true);
     expect(hasCapability(caps, "logs.stream")).toBe(true);
     expect(hasCapability(caps, "status.read")).toBe(true);
+    expect(hasCapability(caps, "process.status")).toBe(true);
     expect(hasCapability(caps, "process.signal")).toBe(true);
     expect(hasCapability(caps, "volume.mount")).toBe(true);
     expect(hasCapability(caps, "artifact.collect")).toBe(true);

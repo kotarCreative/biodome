@@ -43,9 +43,7 @@ function buildEventStoreLayer(
   if (!enabled) {
     return NoOpEventStoreLive(runId);
   }
-  const path = targetName
-    ? join(targetBuildDir(rootDir, targetName), "logs", `events-${runId}.jsonl`)
-    : eventLogPath(rootDir, runId);
+  const path = eventLogPath(rootDir, runId, targetName);
   return FileEventStoreLive({ runId, path });
 }
 
@@ -443,7 +441,7 @@ program
         `Target "${targetName}" status: ${st.state}${st.message ? ` - ${st.message}` : ""}`,
       );
 
-      if (hasCapability(driver.capabilities, "exec.command")) {
+      if (hasCapability(driver.capabilities, "process.status")) {
         console.log("\nProcess status");
         yield* driver.exec({
           rootDir,

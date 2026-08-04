@@ -117,7 +117,7 @@ describe("harnessTaskCommand", () => {
     expect(cmd[1]).toBe("Review the code");
   });
 
-  it("rejects OpenCode harness with actionable error", () => {
+  it("returns the OpenCode task wrapper for an OpenCode harness", () => {
     const plan = createPlan("test-project");
     plan.runtime.agentHarnesses.push({
       name: "my-agent",
@@ -139,8 +139,9 @@ describe("harnessTaskCommand", () => {
         cleanup: "always",
       },
     };
-    expect(() => harnessTaskCommand(plan, "my-agent", "p")).toThrow(RuntimeError);
-    expect(() => harnessTaskCommand(plan, "my-agent", "p")).toThrow(/not yet supported/);
+    const cmd = harnessTaskCommand(plan, "my-agent", "p");
+    expect(cmd[0]).toBe("/workspace/.biodome-build/targets/local/opencode-homes/my-agent/task");
+    expect(cmd[1]).toBe("p");
   });
 
   it("throws when harness not found", () => {
@@ -257,7 +258,15 @@ describe("executeTask", () => {
     );
   });
 
-  it("fails before runtime calls if OpenCode task is detected", async () => {
+  it("runs an OpenCode task via its generated task wrapper", async () => {
+    const execFn = vi.fn().mockReturnValue(
+      Effect.succeed<CommandResult>({
+        exitCode: 0,
+        stdout: "",
+        stderr: "",
+        durationMs: 10,
+      }),
+    );
     const driver = createFakeDriver({
       capabilities: capabilitiesOf(
         "lifecycle.build",
@@ -266,6 +275,7 @@ describe("executeTask", () => {
         "exec.command",
         "artifact.collect",
       ),
+      exec: execFn,
     });
     const plan = createPlan("test-project");
     plan.runtime.agentHarnesses.push({
@@ -288,7 +298,15 @@ describe("executeTask", () => {
         cleanup: "always",
       },
     };
-    await expect(Effect.runPromise(runTask(driver, plan))).rejects.toThrow(/not yet supported/);
+    const result = (await Effect.runPromise(runTask(driver, plan))) as any;
+    expect(result.exitCode).toBe(0);
+    expect(execFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.arrayContaining([
+          "/workspace/.biodome-build/targets/local/opencode-homes/my-agent/task",
+        ]),
+      }),
+    );
   });
 
   it("succeeds with a driver that has only exec.command for an artifact-free task", async () => {
@@ -319,7 +337,9 @@ describe("executeTask", () => {
 
     await Effect.runPromise(runTask(createFakeDriver({ exec: execFn }), plan));
 
-    expect(execFn).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 30_000 }));
+    expect(execFn).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 30_000, artifactPaths: [] }),
+    );
   });
 
   it("emits exactly one task.failed event when exec times out", async () => {

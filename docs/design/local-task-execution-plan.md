@@ -28,7 +28,7 @@ In scope:
 Out of scope:
 
 - Calling a real LLM in tests or resolving model credentials during plan build.
-- New task-harness families, arbitrary shell commands in task files, or OpenCode task support.
+- New task-harness families, arbitrary shell commands in task files. (OpenCode task support is now implemented via a generated `opencode run` wrapper.)
 - ECS task execution, ECS artifact collection, or a remote artifact store.
 - General event-log retention, rotation, or target-scoped log-file paths. Those belong to `security-performance-ergonomics-plan.md`.
 - Changing the public target/task file model.

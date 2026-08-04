@@ -78,6 +78,13 @@ export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}):
   if (hasDaemonProcesses && !aptPackages.includes("supervisor")) {
     aptPackages.push("supervisor");
   }
+  if (
+    plan.deployment?.target.driver === "aws-ecs" &&
+    plan.deployment.target.options.artifactBucket &&
+    !aptPackages.includes("awscli")
+  ) {
+    aptPackages.push("awscli");
+  }
   aptPackages.sort();
 
   if (aptPackages.length > 0) {
@@ -212,6 +219,9 @@ export function generateRepoScripts(plan: Plan): Record<string, string> {
 
 export function generateHarnessFiles(plan: Plan): Record<string, string> {
   const files: Record<string, string> = {};
+  if (plan.runtime.agentHarnesses.length > 0) {
+    files["telemetry/writer.cjs"] = telemetryWriterModule();
+  }
   for (const harness of plan.runtime.agentHarnesses) {
     if (harness.type === "opencode") {
       const homeDir = `opencode-homes/${harness.name}`;
@@ -220,8 +230,9 @@ export function generateHarnessFiles(plan: Plan): Record<string, string> {
         plan.runtime.llmProviders,
       );
       files[`${homeDir}/.config/opencode/plugins/${harness.name}-telemetry.js`] =
-        opencodeTelemetryPlugin(harness);
+        opencodeTelemetryPlugin(harness, plan);
       files[`${homeDir}/start.sh`] = opencodeStartScript(harness);
+      files[`${homeDir}/task`] = opencodeTaskScript(harness, plan);
     }
   }
   return files;
@@ -229,13 +240,16 @@ export function generateHarnessFiles(plan: Plan): Record<string, string> {
 
 export function generatePiHarnessFiles(plan: Plan): Record<string, string> {
   const files: Record<string, string> = {};
+  if (plan.runtime.piHarnesses.length > 0) {
+    files["telemetry/writer.cjs"] = telemetryWriterModule();
+  }
   for (const harness of plan.runtime.piHarnesses) {
     const homeDir = `pi-homes/${harness.name}`;
     files[`${homeDir}/settings.json`] = piSettings(harness, plan);
     files[`${homeDir}/pi`] = piWrapperScript(harness, plan);
     files[`${homeDir}/task`] = piTaskScript(harness, plan);
     if (harness.telemetry.enabled) {
-      files[`${homeDir}/extensions/biodome-telemetry.ts`] = piTelemetryExtension(harness);
+      files[`${homeDir}/extensions/biodome-telemetry.ts`] = piTelemetryExtension(harness, plan);
     }
   }
   return files;
@@ -243,11 +257,14 @@ export function generatePiHarnessFiles(plan: Plan): Record<string, string> {
 
 export function generateCodexHarnessFiles(plan: Plan): Record<string, string> {
   const files: Record<string, string> = {};
+  if (plan.runtime.codexHarnesses.length > 0) {
+    files["telemetry/writer.cjs"] = telemetryWriterModule();
+  }
   for (const harness of plan.runtime.codexHarnesses) {
     const homeDir = `codex-homes/${harness.name}`;
     files[`${homeDir}/.codex/config.toml`] = codexConfig(harness);
     files[`${homeDir}/.codex/hooks.json`] = codexHooks(harness, plan);
-    files[`${homeDir}/hooks/telemetry.js`] = codexTelemetryScript(harness);
+    files[`${homeDir}/hooks/telemetry.js`] = codexTelemetryScript(harness, plan);
     files[`${homeDir}/start.sh`] = codexStartScript(harness, plan);
     files[`${homeDir}/task`] = codexTaskScript(harness, plan);
   }
@@ -256,11 +273,14 @@ export function generateCodexHarnessFiles(plan: Plan): Record<string, string> {
 
 export function generateClaudeHarnessFiles(plan: Plan): Record<string, string> {
   const files: Record<string, string> = {};
+  if (plan.runtime.claudeHarnesses.length > 0) {
+    files["telemetry/writer.cjs"] = telemetryWriterModule();
+  }
   for (const harness of plan.runtime.claudeHarnesses) {
     const homeDir = `claude-homes/${harness.name}`;
     files[`${homeDir}/.claude/settings.json`] = claudeSettings(harness, plan);
     files[`${homeDir}/.claude.json`] = claudeMcpConfig(plan.build.mcpPort);
-    files[`${homeDir}/hooks/telemetry.js`] = claudeTelemetryScript(harness);
+    files[`${homeDir}/hooks/telemetry.js`] = claudeTelemetryScript(harness, plan);
     files[`${homeDir}/claude`] = claudeWrapperScript(harness, plan);
     files[`${homeDir}/task`] = claudeTaskScript(harness, plan);
   }
@@ -765,25 +785,90 @@ function opencodeStartScript(harness: AgentHarness): string {
   ].join("\n");
 }
 
-function opencodeTelemetryPlugin(harness: AgentHarness): string {
+function opencodeTaskScript(harness: AgentHarness, plan?: Plan): string {
+  const homeDir = `${plan ? generatedRuntimeDir(plan) : "/workspace/.biodome-build"}/opencode-homes/${harness.name}`;
+  const configPath = `${homeDir}/.config/opencode/opencode.json`;
+  return [
+    "#!/bin/sh",
+    `# Auto-generated OpenCode task wrapper for ${harness.name}`,
+    "set -e",
+    "",
+    `# Run non-interactively with a single prompt, like \`opencode serve\`'s sibling wrappers.`,
+    `export HOME=${homeDir}`,
+    "",
+    `# Substitute \${VAR} references in the generated config with runtime env vars`,
+    `# (e.g. the LLM provider apiKey) so auth works outside the serve path.`,
+    "node -e '",
+    'const fs = require("fs");',
+    `const file = ${JSON.stringify(configPath)};`,
+    'let text = fs.readFileSync(file, "utf8");',
+    'text = text.replace(/\\$\\{([A-Za-z_][A-Za-z0-9_]*)\\}/g, (_, name) => process.env[name] || "");',
+    "fs.writeFileSync(file, text);",
+    "'",
+    "",
+    `# OpenCode CLI: single-prompt non-interactive mode (prompt arrives as "$@").`,
+    'opencode run "$@"',
+    ...taskArtifactUploadLines(),
+    "",
+  ].join("\n");
+}
+
+function telemetryWriterModule(): string {
+  return [
+    "// Shared telemetry writer for generated Biodome harnesses.",
+    "const fs = require('node:fs/promises')",
+    "const path = require('node:path')",
+    "",
+    "const MAX_BYTES = 10 * 1024 * 1024",
+    "const MAX_ROTATIONS = 5",
+    "let pending = Promise.resolve()",
+    "",
+    "async function rotate(logPath, nextBytes) {",
+    "  const stat = await fs.stat(logPath).catch(() => null)",
+    "  if (!stat || stat.size === 0 || stat.size + nextBytes <= MAX_BYTES) return",
+    "  await fs.rm(`${logPath}.${MAX_ROTATIONS}`, { force: true })",
+    "  for (let index = MAX_ROTATIONS - 1; index >= 1; index--) {",
+    "    await fs.rename(`${logPath}.${index}`, `${logPath}.${index + 1}`).catch(() => {})",
+    "  }",
+    "  await fs.rename(logPath, `${logPath}.1`)",
+    "}",
+    "",
+    "function write(logPath, event) {",
+    "  const line = JSON.stringify(event) + '\\n'",
+    "  const operation = pending.then(async () => {",
+    "    const dir = path.dirname(logPath)",
+    "    await fs.mkdir(dir, { recursive: true, mode: 0o700 })",
+    "    await fs.chmod(dir, 0o700)",
+    "    await rotate(logPath, Buffer.byteLength(line))",
+    "    const handle = await fs.open(logPath, 'a', 0o600)",
+    "    try { await handle.write(line) } finally { await handle.close() }",
+    "    await fs.chmod(logPath, 0o600)",
+    "  })",
+    "  pending = operation.catch((error) => console.error('[biodome-telemetry] failed to write event:', error.message))",
+    "  return pending",
+    "}",
+    "",
+    "module.exports = { write }",
+    "",
+  ].join("\n");
+}
+
+function telemetryWriterPath(plan: Plan): string {
+  return `${generatedRuntimeDir(plan)}/telemetry/writer.cjs`;
+}
+
+function opencodeTelemetryPlugin(harness: AgentHarness, plan: Plan): string {
   const logPath = harness.telemetry.path;
+  const capturePayloads = harness.telemetry.capturePayloads === true;
   return [
     "// Auto-generated OpenCode telemetry plugin for biodome",
     "import { randomUUID } from 'node:crypto'",
-    "import fs from 'node:fs'",
-    "import path from 'node:path'",
+    "import { createRequire } from 'node:module'",
     "",
     `const LOG_PATH = process.env.OPENCODE_TELEMETRY_PATH || ${JSON.stringify(logPath)}`,
-    "",
-    "function appendEvent(event) {",
-    "  try {",
-    "    const dir = path.dirname(LOG_PATH)",
-    "    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })",
-    "    fs.appendFileSync(LOG_PATH, JSON.stringify(event) + '\\n')",
-    "  } catch (err) {",
-    "    console.error('[biodome-telemetry] failed to write event:', err.message)",
-    "  }",
-    "}",
+    `const CAPTURE_PAYLOADS = ${capturePayloads}`,
+    "const require = createRequire(import.meta.url)",
+    `const { write } = require(${JSON.stringify(telemetryWriterPath(plan))})`,
     "",
     "function baseEvent(type, data) {",
     "  return {",
@@ -798,16 +883,16 @@ function opencodeTelemetryPlugin(harness: AgentHarness): string {
     "export default async () => {",
     "  return {",
     "    event: async ({ event }) => {",
-    "      appendEvent(baseEvent('event', { name: event.name, payload: event.payload }))",
+    "      await write(LOG_PATH, baseEvent('event', CAPTURE_PAYLOADS ? { name: event.name, payload: event.payload } : { name: event.name }))",
     "    },",
     "    'tool.execute.before': async ({ tool, sessionID, callID, args }) => {",
-    "      appendEvent(baseEvent('tool.execute.before', { tool, sessionID, callID, args }))",
+    "      await write(LOG_PATH, baseEvent('tool.execute.before', CAPTURE_PAYLOADS ? { tool, sessionID, callID, args } : { tool, sessionID, callID }))",
     "    },",
     "    'tool.execute.after': async ({ tool, sessionID, callID, args, output, title }) => {",
-    "      appendEvent(baseEvent('tool.execute.after', { tool, sessionID, callID, args, output, title }))",
+    "      await write(LOG_PATH, baseEvent('tool.execute.after', CAPTURE_PAYLOADS ? { tool, sessionID, callID, args, output, title } : { tool, sessionID, callID }))",
     "    },",
     "    'chat.message': async ({ sessionID, message, parts }) => {",
-    "      appendEvent(baseEvent('chat.message', { sessionID, message, parts }))",
+    "      await write(LOG_PATH, baseEvent('chat.message', CAPTURE_PAYLOADS ? { sessionID, message, parts } : { sessionID }))",
     "    },",
     "  }",
     "}",
@@ -863,25 +948,18 @@ function piWrapperScript(harness: PiHarness, plan?: Plan): string {
   ].join("\n");
 }
 
-function piTelemetryExtension(harness: PiHarness): string {
+function piTelemetryExtension(harness: PiHarness, plan: Plan): string {
   const logPath = harness.telemetry.path;
+  const capturePayloads = harness.telemetry.capturePayloads === true;
   return [
     "// Auto-generated Pi telemetry extension for biodome",
     "import { randomUUID } from 'node:crypto'",
-    "import fs from 'node:fs'",
-    "import path from 'node:path'",
+    "import { createRequire } from 'node:module'",
     "",
     `const LOG_PATH = process.env.PI_BIODOME_TELEMETRY_PATH || ${JSON.stringify(logPath)}`,
-    "",
-    "function appendEvent(event) {",
-    "  try {",
-    "    const dir = path.dirname(LOG_PATH)",
-    "    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })",
-    "    fs.appendFileSync(LOG_PATH, JSON.stringify(event) + '\\n')",
-    "  } catch (err) {",
-    "    console.error('[biodome-pi-telemetry] failed to write event:', err.message)",
-    "  }",
-    "}",
+    `const CAPTURE_PAYLOADS = ${capturePayloads}`,
+    "const require = createRequire(import.meta.url)",
+    `const { write } = require(${JSON.stringify(telemetryWriterPath(plan))})`,
     "",
     "function baseEvent(type, data) {",
     "  return {",
@@ -895,19 +973,19 @@ function piTelemetryExtension(harness: PiHarness): string {
     "",
     "export default function (pi) {",
     "  pi.on('agent_start', async (event) => {",
-    "    appendEvent(baseEvent('agent_start', {}))",
+    "    await write(LOG_PATH, baseEvent('agent_start', {}))",
     "  })",
     "",
     "  pi.on('agent_end', async (event) => {",
-    "    appendEvent(baseEvent('agent_end', { messages: event.messages, willRetry: event.willRetry }))",
+    "    await write(LOG_PATH, baseEvent('agent_end', CAPTURE_PAYLOADS ? { messages: event.messages, willRetry: event.willRetry } : { willRetry: event.willRetry }))",
     "  })",
     "",
     "  pi.on('tool_execution_start', async (event) => {",
-    "    appendEvent(baseEvent('tool_execution_start', { toolCallId: event.toolCallId, toolName: event.toolName, args: event.args }))",
+    "    await write(LOG_PATH, baseEvent('tool_execution_start', CAPTURE_PAYLOADS ? { toolCallId: event.toolCallId, toolName: event.toolName, args: event.args } : { toolCallId: event.toolCallId, toolName: event.toolName }))",
     "  })",
     "",
     "  pi.on('tool_execution_end', async (event) => {",
-    "    appendEvent(baseEvent('tool_execution_end', { toolCallId: event.toolCallId, toolName: event.toolName, isError: event.isError }))",
+    "    await write(LOG_PATH, baseEvent('tool_execution_end', { toolCallId: event.toolCallId, toolName: event.toolName, isError: event.isError }))",
     "  })",
     "}",
     "",
@@ -980,32 +1058,22 @@ function codexHooks(harness: CodexHarness, plan?: Plan): string {
   return JSON.stringify({ hooks }, null, 2) + "\n";
 }
 
-function codexTelemetryScript(harness: CodexHarness): string {
+function codexTelemetryScript(harness: CodexHarness, plan: Plan): string {
   const logPath = harness.telemetry.path;
+  const capturePayloads = harness.telemetry.capturePayloads === true;
   return [
     "// Auto-generated Codex telemetry hook script for biodome",
-    "const fs = require('node:fs')",
-    "const path = require('node:path')",
     "const { randomUUID } = require('node:crypto')",
     "",
     `const LOG_PATH = process.env.CODEX_BIODOME_TELEMETRY_PATH || ${JSON.stringify(logPath)}`,
-    "",
-    "function appendEvent(type, data) {",
-    "  try {",
-    "    const dir = path.dirname(LOG_PATH)",
-    "    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })",
-    "    const event = { id: randomUUID(), timestamp: new Date().toISOString(), source: 'codex', type, data }",
-    "    fs.appendFileSync(LOG_PATH, JSON.stringify(event) + '\\n')",
-    "  } catch (err) {",
-    "    console.error('[biodome-codex-telemetry] failed to write event:', err.message)",
-    "  }",
-    "}",
+    `const CAPTURE_PAYLOADS = ${capturePayloads}`,
+    `const { write } = require(${JSON.stringify(telemetryWriterPath(plan))})`,
     "",
     "let input = ''",
-    "process.stdin.on('data', (chunk) => { input += chunk })",
-    "process.stdin.on('end', () => {",
+    "process.stdin.on('data', (chunk) => { if (CAPTURE_PAYLOADS) input += chunk })",
+    "process.stdin.on('end', async () => {",
     "  const data = input ? JSON.parse(input) : {}",
-    "  appendEvent(process.argv[2] || 'unknown', data)",
+    "  await write(LOG_PATH, { id: randomUUID(), timestamp: new Date().toISOString(), source: 'codex', type: process.argv[2] || 'unknown', data })",
     "})",
     "",
   ].join("\n");
@@ -1084,32 +1152,22 @@ function claudeMcpConfig(mcpPort: number): string {
   );
 }
 
-function claudeTelemetryScript(harness: ClaudeHarness): string {
+function claudeTelemetryScript(harness: ClaudeHarness, plan: Plan): string {
   const logPath = harness.telemetry.path;
+  const capturePayloads = harness.telemetry.capturePayloads === true;
   return [
     "// Auto-generated Claude telemetry hook script for biodome",
-    "const fs = require('node:fs')",
-    "const path = require('node:path')",
     "const { randomUUID } = require('node:crypto')",
     "",
     `const LOG_PATH = process.env.CLAUDE_BIODOME_TELEMETRY_PATH || ${JSON.stringify(logPath)}`,
-    "",
-    "function appendEvent(type, data) {",
-    "  try {",
-    "    const dir = path.dirname(LOG_PATH)",
-    "    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })",
-    "    const event = { id: randomUUID(), timestamp: new Date().toISOString(), source: 'claude', type, data }",
-    "    fs.appendFileSync(LOG_PATH, JSON.stringify(event) + '\\n')",
-    "  } catch (err) {",
-    "    console.error('[biodome-claude-telemetry] failed to write event:', err.message)",
-    "  }",
-    "}",
+    `const CAPTURE_PAYLOADS = ${capturePayloads}`,
+    `const { write } = require(${JSON.stringify(telemetryWriterPath(plan))})`,
     "",
     "let input = ''",
-    "process.stdin.on('data', (chunk) => { input += chunk })",
-    "process.stdin.on('end', () => {",
+    "process.stdin.on('data', (chunk) => { if (CAPTURE_PAYLOADS) input += chunk })",
+    "process.stdin.on('end', async () => {",
     "  const data = input ? JSON.parse(input) : {}",
-    "  appendEvent(process.argv[2] || 'unknown', data)",
+    "  await write(LOG_PATH, { id: randomUUID(), timestamp: new Date().toISOString(), source: 'claude', type: process.argv[2] || 'unknown', data })",
     "})",
     "",
   ].join("\n");
@@ -1166,7 +1224,8 @@ function piTaskScript(harness: PiHarness, plan?: Plan): string {
     lines.push(`export ${harness.apiKey.env}="$${harness.apiKey.env}"`);
   }
   lines.push("");
-  lines.push(`exec pi -p "$@"`);
+  lines.push(`pi -p "$@"`);
+  lines.push(...taskArtifactUploadLines());
   lines.push("");
   return lines.join("\n");
 }
@@ -1188,7 +1247,8 @@ function claudeTaskScript(harness: ClaudeHarness, plan?: Plan): string {
     lines.push(`export CLAUDE_MODEL=${harness.model}`);
   }
   lines.push("");
-  lines.push(`exec claude -p "$@"`);
+  lines.push(`claude -p "$@"`);
+  lines.push(...taskArtifactUploadLines());
   lines.push("");
   return lines.join("\n");
 }
@@ -1203,9 +1263,31 @@ function codexTaskScript(harness: CodexHarness, plan?: Plan): string {
     `export HOME=${homeDir}`,
   ];
   lines.push("");
-  lines.push('exec codex -p "$@"');
+  lines.push('codex -p "$@"');
+  lines.push(...taskArtifactUploadLines());
   lines.push("");
   return lines.join("\n");
+}
+
+function taskArtifactUploadLines(): string[] {
+  return [
+    "",
+    "# ECS task runs provide a bucket and declared paths; local runs leave these unset.",
+    'if [ -n "${BIODOME_ARTIFACT_BUCKET:-}" ] && [ -n "${BIODOME_ARTIFACT_PATHS:-}" ]; then',
+    "  printf '%s' \"$BIODOME_ARTIFACT_PATHS\" | node -e '",
+    "const chunks = [];",
+    'process.stdin.on("data", (chunk) => chunks.push(chunk));',
+    'process.stdin.on("end", () => {',
+    '  for (const path of JSON.parse(Buffer.concat(chunks).toString("utf8"))) {',
+    '    console.log(Buffer.from(path).toString("base64"));',
+    "  }",
+    "});",
+    "' | while IFS= read -r encoded; do",
+    '    path="$(printf \'%s\' "$encoded" | base64 -d)"',
+    '    aws s3 cp "/workspace/$path" "s3://${BIODOME_ARTIFACT_BUCKET}/${BIODOME_ARTIFACT_PREFIX}/${BIODOME_DEPLOYMENT_ID}/$path" --only-show-errors',
+    "  done",
+    "fi",
+  ];
 }
 
 function eventToSnakeCase(name: string): string {

@@ -55,5 +55,6 @@ This event stream lets you audit exactly what happened during a run and is desig
 - [Processes and hooks](processes.md)
 - [API reference](api.md)
 - [Examples](examples.md)
+- [Project improvement implementation plans](design/improvements/README.md)
 - [Local named task execution implementation plan](design/local-task-execution-plan.md)
 - [Security, performance, and ergonomics implementation plan](design/security-performance-ergonomics-plan.md)

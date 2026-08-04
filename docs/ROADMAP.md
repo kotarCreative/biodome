@@ -8,9 +8,9 @@
 - [x] End-to-end local task execution workflow
 - [x] Docker timeout enforcement and bounded output
 - [x] Task preflight capability checks
+- [x] ECS task execution and artifact collection
+- [x] Remote artifact storage
 
 ## Upcoming
 
-- [ ] ECS task execution and artifact collection
-- [ ] Remote artifact storage
-- [x] Security and performance ergonomics
+- [ ] Security and performance ergonomics

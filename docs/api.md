@@ -250,6 +250,7 @@ interface AgentHarnessSpec {
   telemetry?: {
     enabled?: boolean;
     path?: string;
+    capturePayloads?: boolean;
   };
   config?: Record<string, unknown>;
 }
@@ -286,6 +287,7 @@ interface PiHarnessSpec {
   telemetry?: {
     enabled?: boolean;
     path?: string;
+    capturePayloads?: boolean;
   };
   config?: Record<string, unknown>;
 }
@@ -303,6 +305,7 @@ interface CodexHarnessSpec {
   telemetry?: {
     enabled?: boolean;
     path?: string;
+    capturePayloads?: boolean;
   };
   config?: Record<string, unknown>;
 }
@@ -320,6 +323,7 @@ interface ClaudeHarnessSpec {
   telemetry?: {
     enabled?: boolean;
     path?: string;
+    capturePayloads?: boolean;
   };
   config?: Record<string, unknown>;
 }

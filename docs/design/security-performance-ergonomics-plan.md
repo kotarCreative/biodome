@@ -528,9 +528,10 @@ for the security or performance behavior it changes and must pass `npm run check
 
 ## Remaining Work
 
-- **Task 5** (secret/telemetry hardening): Harness-level telemetry (OpenCode, Pi,
-  Codex, Claude) still captures full prompts, args, and output by default. Needs
-  metadata-only defaults + an opt-in payload capture setting.
+- **Task 5** (secret/telemetry hardening): Literal-secret validation and MCP
+  response redaction remain incomplete across every credential-bearing public API.
+  Harness telemetry now defaults to metadata-only records with opt-in payload
+  capture, bounded rotation, owner-only permissions, and async writes.
 - **Task 7** (volume pagination): `VolumeAdapter.list()` has no `{limit,
 cursor?}` API. S3, GCS, and Azure adapters all fetch unbounded results before
   returning.

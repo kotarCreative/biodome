@@ -16,6 +16,7 @@ export type Capability =
   | "exec.pty"
   | "logs.stream"
   | "status.read"
+  | "process.status"
   | "process.signal"
   | "snapshot.create"
   | "snapshot.restore"

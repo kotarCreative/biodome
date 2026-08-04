@@ -31,9 +31,7 @@ export function harnessTaskCommand(plan: Plan, harnessName: string, prompt: stri
 
   const agentHarness = plan.runtime.agentHarnesses.find((h) => h.name === harnessName);
   if (agentHarness) {
-    throw new RuntimeError({
-      message: `Harness "${harnessName}" is an OpenCode harness which is not yet supported for task execution. Use a Codex, Claude, or Pi harness.`,
-    });
+    return [`${harnessDir}/opencode-homes/${agentHarness.name}/task`, prompt];
   }
 
   throw new ValidationError({
@@ -124,7 +122,12 @@ export function executeTask(
       writeState(rootDir, targetName, newState);
     }
 
-    const execResult = yield* driver.exec({ ...input, command: cmd, timeoutMs });
+    const execResult = yield* driver.exec({
+      ...input,
+      command: cmd,
+      timeoutMs,
+      artifactPaths: task.artifacts,
+    });
 
     const durationMs = Date.now() - startTime;
 
