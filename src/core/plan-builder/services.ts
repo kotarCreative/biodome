@@ -33,7 +33,11 @@ export class ServiceBuilder {
     serviceConfigs[type]?.(service, validated);
     this.plan.runtime.services.push(service);
     for (const volume of service.volumes) {
-      if (!volume.host.startsWith("/") && !volume.host.startsWith("./") && !volume.host.startsWith("~")) {
+      if (
+        !volume.host.startsWith("/") &&
+        !volume.host.startsWith("./") &&
+        !volume.host.startsWith("~")
+      ) {
         this.plan.runtime.namedVolumes.push({ name: volume.host });
       }
     }

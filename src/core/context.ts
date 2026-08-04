@@ -10,8 +10,6 @@ import {
   Volume,
   Provider,
   SecretValue,
-  RepoSpecSchema,
-  Repo,
   AgentHarnessSpecSchema,
   AgentHarness,
   LlmProviderSpecSchema,
@@ -67,6 +65,7 @@ import { createNodeProjectIO, type ProjectIO } from "./plan-builder/project-io.j
 import { EnvironmentBuilder } from "./plan-builder/environment.js";
 import { ProcessBuilder } from "./plan-builder/processes.js";
 import { ServiceBuilder } from "./plan-builder/services.js";
+import { RepositoryBuilder } from "./plan-builder/repositories.js";
 
 function validatePort(value: unknown, label: string): void {
   if (value === undefined) return;
@@ -97,6 +96,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
   private environment: EnvironmentBuilder;
   private processes: ProcessBuilder;
   private services: ServiceBuilder;
+  private repositories: RepositoryBuilder;
 
   constructor(
     rootDir: string,
@@ -110,6 +110,12 @@ export class SandboxContext implements FeatureContext, BuildContext {
     this.environment = new EnvironmentBuilder(this.plan);
     this.processes = new ProcessBuilder(this.plan, (name) => this.addAptPackage(name));
     this.services = new ServiceBuilder(this.plan);
+    this.repositories = new RepositoryBuilder(
+      this.plan,
+      (name) => this.addAptPackage(name),
+      (spec) => this.addHook(spec),
+      this.layout.container.repositories,
+    );
   }
 
   addProcess(spec: ProcessSpec): void {
@@ -438,47 +444,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
   }
 
   addRepo(spec: RepoSpec): void {
-    const validated = Schema.decodeSync(RepoSpecSchema)(spec);
-
-    if (this.plan.runtime.repos.some((r) => r.name === validated.name)) {
-      throw new ValidationError({ message: `Duplicate repo name: ${validated.name}` });
-    }
-
-    if (validated.credentials) {
-      for (const [key, value] of Object.entries(validated.credentials)) {
-        if (value === undefined) continue;
-        if (typeof value === "string") {
-          throw new ValidationError({
-            message: `Repo ${validated.name}: credentials.${key} must be an environment reference ({ env: "VAR" }), not a literal string`,
-          });
-        }
-      }
-    }
-
-    const path = this.normalizeRepoPath(validated.path, validated.name);
-    const branch = validated.branch || "main";
-
-    const repo: Repo = {
-      name: validated.name,
-      url: validated.url,
-      path,
-      branch,
-      depth: validated.depth,
-      credentials: validated.credentials ? { ...validated.credentials } : undefined,
-    };
-    this.plan.runtime.repos.push(repo);
-
-    // Repos need git and ssh clients to clone/pull.
-    this.addAptPackage("git");
-    this.addAptPackage("openssh-client");
-
-    // Run a sync hook after the container starts so the repo is cloned (or
-    // updated) in the live workspace mount.
-    this.addHook({
-      name: `repo-sync-${validated.name}`,
-      command: ["sh", `${this.layout.container.repositories}/${validated.name}.sh`],
-      startOn: "start.post",
-    });
+    this.repositories.add(spec);
   }
 
   addOpencodeHarness(spec: AgentHarnessSpec): void {
@@ -730,12 +696,6 @@ export class SandboxContext implements FeatureContext, BuildContext {
     }
 
     this.plan.runtime.llmProviders.push(provider);
-  }
-
-  private normalizeRepoPath(path: string | undefined, name: string): string {
-    if (!path) return `/workspace/repos/${name}`;
-    if (path.startsWith("/")) return path;
-    return `/workspace/${path}`;
   }
 
   private validateVolumeSpec(spec: VolumeSpec): void {
