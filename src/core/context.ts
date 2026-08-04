@@ -2,10 +2,8 @@ import { Schema } from "effect";
 import {
   createPlan,
   Plan,
-  Service,
   DependencyInstall,
   CopyArtifact,
-  ServiceOptionsSchema,
   EndpointSpecSchema,
   ProviderSpecSchema,
   VolumeSpecSchema,
@@ -62,13 +60,13 @@ import {
 import { BuildContext } from "./build-context.js";
 import { languageHandlers, getDefaultBaseImage } from "./languages.js";
 import { formatPackage } from "./packages.js";
-import { serviceConfigs, defaultImage } from "./services.js";
 import { toolHandlers } from "./tools.js";
 import { ValidationError } from "./errors.js";
 import { runtimeLayout } from "../runtime/layout.js";
 import { createNodeProjectIO, type ProjectIO } from "./plan-builder/project-io.js";
 import { EnvironmentBuilder } from "./plan-builder/environment.js";
 import { ProcessBuilder } from "./plan-builder/processes.js";
+import { ServiceBuilder } from "./plan-builder/services.js";
 
 function validatePort(value: unknown, label: string): void {
   if (value === undefined) return;
@@ -98,6 +96,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
   private io: ProjectIO;
   private environment: EnvironmentBuilder;
   private processes: ProcessBuilder;
+  private services: ServiceBuilder;
 
   constructor(
     rootDir: string,
@@ -110,6 +109,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
     this.plan = createPlan(project);
     this.environment = new EnvironmentBuilder(this.plan);
     this.processes = new ProcessBuilder(this.plan, (name) => this.addAptPackage(name));
+    this.services = new ServiceBuilder(this.plan);
   }
 
   addProcess(spec: ProcessSpec): void {
@@ -202,47 +202,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
   }
 
   addService(name: string, options: ServiceOptions = {}): void {
-    if (!name || typeof name !== "string") {
-      throw new ValidationError({ message: "Service requires a non-empty string name" });
-    }
-    const validated = Schema.decodeSync(ServiceOptionsSchema)(options);
-    validatePort(validated.port, `Service ${name}: port`);
-    if (validated.environment) {
-      validateEnv(validated.environment as Record<string, unknown>, `Service ${name}: environment`);
-    }
-
-    if (this.plan.runtime.services.some((s) => s.name === name)) {
-      throw new ValidationError({ message: `Duplicate service name: ${name}` });
-    }
-
-    let type = name;
-    if (validated.image) {
-      // Custom image-based service; treat as a generic container.
-      type = "container";
-    }
-
-    const svc: Service = {
-      name,
-      type,
-      image: validated.image || defaultImage(name),
-      containerName: `${this.plan.project}-${name}`,
-      environment: validated.environment || {},
-      ports: validated.port ? [{ host: validated.port, container: validated.port }] : [],
-      volumes: [],
-      networks: ["biodome"],
-    };
-
-    const config = serviceConfigs[type];
-    if (config) {
-      config(svc, validated);
-    }
-
-    this.plan.runtime.services.push(svc);
-    for (const vol of svc.volumes) {
-      if (!vol.host.startsWith("/") && !vol.host.startsWith("./") && !vol.host.startsWith("~")) {
-        this.plan.runtime.namedVolumes.push({ name: vol.host });
-      }
-    }
+    this.services.add(name, options);
   }
 
   addEndpoint(spec: EndpointSpec): void {
