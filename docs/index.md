@@ -59,5 +59,4 @@ This event stream lets you audit exactly what happened during a run and is desig
 - [Examples](examples.md)
 - [Agent task orchestration](orchestration.md)
 - [Project improvement implementation plans](design/improvements/README.md)
-- [Local named task execution implementation plan](design/local-task-execution-plan.md)
 - [Security, performance, and ergonomics implementation plan](design/security-performance-ergonomics-plan.md)

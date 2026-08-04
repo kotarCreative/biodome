@@ -136,6 +136,14 @@ Use `biodome events` or `biodome events --run <run-id>` to inspect them. Declare
 artifacts are collected under the target build directory and recorded with their
 local path and size.
 
+Before changing a target, a run validates the target, task, harness command, and
+required capabilities. A task with artifacts cannot run on a provider that lacks
+artifact collection. The executor applies the task's cleanup policy precisely:
+`always` cleans up after either result, `on-success` cleans up only after a
+successful task, and `never` leaves the target running for inspection or reuse.
+Task prompts, command arguments, credentials, command output, and artifact
+contents are not written to the default CLI summary or lifecycle events.
+
 ## Local smoke test
 
 From this repository, verify the orchestration layer without requiring Docker

@@ -28,11 +28,7 @@ The executor must not:
 
 | Plan                                     | Topic               | Priority | Status   | Main Result                                           |
 | ---------------------------------------- | ------------------- | -------- | -------- | ----------------------------------------------------- |
-| [01](01-package-publishing.md)           | Package publishing  | P0       | complete | Small intentional npm package with valid exports      |
-| [02](02-runtime-layout.md)               | Runtime paths       | P0       | complete | One target-aware host/container layout                |
-| [03](03-dependency-vulnerabilities.md)   | Dependency security | P0       | complete | No high/critical production audit findings            |
 | [04](04-deep-plan-builder.md)            | Plan builder        | P1       | proposed | Deep domain modules behind a narrow context           |
-| [05](05-schema-source-of-truth.md)       | Domain schemas      | P1       | complete | Schema-derived types with invalid states removed      |
 | [06](06-shared-artifact-renderer.md)     | Runtime rendering   | P1       | proposed | One common artifact renderer for all drivers          |
 | [07](07-testable-mcp-application.md)     | MCP architecture    | P1       | proposed | Side-effect-free, dependency-injected MCP application |
 | [08](08-bounded-cloud-volumes.md)        | Cloud volumes       | P1       | proposed | Paginated lists and bounded reads                     |
@@ -49,15 +45,11 @@ The executor must not:
 ## Dependency Graph
 
 ```text
-01 -------------------------------> 15 ----> 16
-02 ----> 06 ----> 17 ----> 14 ----> 15 ----> 16
- |        |
- |        +-----------------------> 15
- +-------> 04
+06 ----> 17 ----> 14 ----> 15 ----> 16
+ |                         ^
+ +------------------------>|
 
-03
-
-05 ----> 04 ----------------------> 15
+04 -------------------------------> 15
 
 07 ----> 08 ----------------------> 15 ----> 16
  |
@@ -77,10 +69,6 @@ The executor must not:
 
 These can be implemented in parallel on separate branches:
 
-- Plan 01: package publishing
-- Plan 02: runtime layout
-- Plan 03: dependency vulnerabilities
-- Plan 05: schema source of truth
 - Plan 07: testable MCP application
 - Plan 09: lazy runtime drivers
 
@@ -88,10 +76,10 @@ These can be implemented in parallel on separate branches:
 
 Start only after the indicated Wave 1 plans merge:
 
-- Plan 04 after Plans 02 and 05
-- Plan 06 after Plan 02
+- Plan 04 after the schema-derived plan types are stable
+- Plan 06 after the target-aware runtime layout is in use
 - Plan 08 after Plan 07
-- Plan 10 after Plans 02 and 09
+- Plan 10 after target-aware runtime layout and Plan 09
 - Plan 13 after Plan 07
 - Plan 17 after Plan 06
 
@@ -104,7 +92,7 @@ Start only after the indicated Wave 1 plans merge:
 ### Wave 4: Cross-cutting proof
 
 - Plan 15 after the relevant contracts have stable implementations
-- Plan 16 after Plans 01, 08, 09, 12, and 13
+- Plan 16 after Plans 08, 09, 12, and 13
 
 ## Pull Request Boundaries
 

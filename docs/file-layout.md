@@ -27,10 +27,11 @@ my-project/
 │   │       ├── supervisord.conf
 │   │       ├── docker-compose.yaml
 │   │       ├── healthchecks/
+│   │       ├── artifacts/
 │   │       ├── state.json
 │   │       └── logs/
-│   └── logs/                # global event logs
-│       └── events-<runId>.jsonl
+│   │           ├── events-<runId>.jsonl
+│   │           └── runs/<runId>.json
 ├── .dockerignore            # generated
 └── .gitignore               # `.biodome-build/` entry added by `biodome build`
 ```
@@ -89,13 +90,18 @@ export default function python(ctx) {
 
 ## Generated files
 
-After running `biodome build` or `biodome up`, the CLI writes:
+After running `biodome build` or `biodome up` for a target, the CLI writes
+target-specific runtime files below `.biodome-build/targets/<target>/`:
 
-- `.biodome-build/Dockerfile` — multi-stage image for the dev container.
-- `.biodome-build/supervisord.conf` — process manager config for daemon processes.
-- `.biodome-build/docker-compose.yaml` — backing services and dev service.
-- `.biodome-build/healthchecks/*.sh` — per-process health check and monitor scripts, plus an aggregate `all.sh`.
-- `.biodome-build/logs/events-<runId>.jsonl` — structured event log for each run.
-- `.dockerignore` — build context exclusions.
+- `Dockerfile` — multi-stage image for the dev container.
+- `supervisord.conf` — process manager config for daemon processes.
+- `docker-compose.yaml` — backing services and dev service when the target uses Docker Compose.
+- `healthchecks/*.sh` — per-process health check and monitor scripts, plus an aggregate `all.sh`.
+- `repos/` and harness-home directories — generated repository and agent-harness helpers.
+- `artifacts/` — files collected after a successful named task.
+- `logs/events-<runId>.jsonl` and `logs/runs/<runId>.json` — structured lifecycle events and durable task-run records.
+- `state.json` — the provider state used to reuse or clean up the target.
 
-Do not edit these files directly. They are regenerated each time.
+The generated `.dockerignore` remains at the project root because Docker reads it
+from the build context. Do not edit generated runtime files directly; they are
+refreshed for the selected target.

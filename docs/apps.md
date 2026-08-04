@@ -50,6 +50,17 @@ The resulting primitive names are `backend:migrate`, `backend:web`, and
 `backend:http`. The repository defaults to the name `backend` and path
 `/workspace/apps/backend`.
 
+`requireService()` can also map environment values exposed by a declared service
+into the application environment. The keys on the left are application variable
+names and the values name keys from that service's environment. Invalid service
+or environment keys fail while the plan is built.
+
+```javascript
+app.requireService("postgres", {
+  environment: { DATABASE_NAME: "POSTGRES_DB" },
+});
+```
+
 Put reusable local helpers in `.biodome/lib/` and import them explicitly.
 `lib/` is never scanned or executed automatically.
 
