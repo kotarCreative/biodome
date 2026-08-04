@@ -19,25 +19,6 @@ export interface McpConfig {
   maxListEntries: number;
 }
 
-export interface BuildPlan {
-  project: string;
-  baseImage: string;
-  aptPackages: string[];
-  runtimeInstalls: string[];
-  languageSnippets: string[];
-  languageRequests: LanguageRequest[];
-  dependencyFiles: string[];
-  dependencyInstalls: DependencyInstall[];
-  copyArtifacts: CopyArtifact[];
-  environment: Record<string, string>;
-  nodeModulesVolume: boolean;
-  venvVolume: boolean;
-  vendorVolume: boolean;
-  mcpEnabled: boolean;
-  mcpPort: number;
-  mcpConfig: McpConfig;
-}
-
 export interface DependencyInstall {
   files: string[];
   command: string;
@@ -125,25 +106,6 @@ export interface ClaudeHarness {
   permissions?: string;
   telemetry: AgentHarnessTelemetry;
   config: Record<string, unknown>;
-}
-
-export interface RuntimePlan {
-  services: Service[];
-  networks: Network[];
-  namedVolumes: NamedVolume[];
-  volumes: Volume[];
-  ports: Port[];
-  environment: Record<string, string>;
-  processes: Process[];
-  endpoints: Endpoint[];
-  providers: Provider[];
-  envVars: EnvVar[];
-  repos: Repo[];
-  agentHarnesses: AgentHarness[];
-  piHarnesses: PiHarness[];
-  codexHarnesses: CodexHarness[];
-  claudeHarnesses: ClaudeHarness[];
-  llmProviders: LlmProvider[];
 }
 
 // --- Target and task types ---
@@ -371,13 +333,6 @@ export const LifecyclePointSchema = Schema.Literals([
   "exec.pre",
   "exec.post",
 ]);
-
-export interface Plan {
-  project: string;
-  build: BuildPlan;
-  runtime: RuntimePlan;
-  deployment?: DeploymentPlan;
-}
 
 export function createPlan(project: string): Plan {
   return {
@@ -901,13 +856,24 @@ export const PortSchema = Schema.Struct({
   container: Schema.Number,
 });
 
+export const ProcessHealthCheckSchema = Schema.Struct({
+  type: Schema.Literals(["http", "tcp", "exec"]),
+  url: Schema.optional(Schema.String),
+  command: Schema.optional(Schema.Array(Schema.String)),
+  port: Schema.optional(Schema.Number),
+  interval: Schema.optional(Schema.String),
+  timeout: Schema.optional(Schema.String),
+  retries: Schema.optional(Schema.Number),
+  startPeriod: Schema.optional(Schema.String),
+});
+
 export const ProcessSchema = Schema.Struct({
   name: Schema.String,
   command: Schema.Array(Schema.String),
   ports: Schema.Array(PortSchema),
   environment: Schema.Record(Schema.String, Schema.String),
   workingDir: Schema.optional(Schema.String),
-  healthCheck: Schema.optional(ProcessHealthCheckSpecSchema),
+  healthCheck: Schema.optional(ProcessHealthCheckSchema),
   mode: Schema.Literals(["daemon", "oneshot"]),
   startOn: LifecyclePointSchema,
   mergeEnv: Schema.optional(Schema.Boolean),
@@ -1106,7 +1072,13 @@ export const LlmProviderSchema = Schema.Struct({
   displayName: Schema.optional(Schema.String),
   options: Schema.Record(
     Schema.String,
-    Schema.Union([Schema.String, Schema.Number, Schema.Boolean, SecretValueSchema]),
+    Schema.Union([
+      Schema.String,
+      Schema.Number,
+      Schema.Boolean,
+      SecretValueSchema,
+      Schema.Undefined,
+    ]),
   ),
   models: Schema.Record(Schema.String, Schema.Struct({ name: Schema.optional(Schema.String) })),
 });
@@ -1136,3 +1108,13 @@ export const PlanSchema = Schema.Struct({
   build: BuildPlanSchema,
   runtime: RuntimePlanSchema,
 });
+
+type Mutable<T> = T extends readonly (infer Item)[]
+  ? Mutable<Item>[]
+  : T extends object
+    ? { -readonly [Key in keyof T]: Mutable<T[Key]> }
+    : T;
+
+export type BuildPlan = Mutable<typeof BuildPlanSchema.Type>;
+export type RuntimePlan = Mutable<typeof RuntimePlanSchema.Type>;
+export type Plan = Mutable<typeof PlanSchema.Type>;
