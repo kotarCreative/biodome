@@ -1,6 +1,6 @@
 # Biodome
 
-Biodome is a development environment manager built around composable primitives. Instead of writing YAML or JSON, you describe your environment with small JavaScript files inside a `.biodome/` directory. Each file contributes capabilities — languages, services, packages, tools, processes, hooks — to a shared plan that the CLI turns into Docker images, containers, and compose files.
+Biodome is an orchestration layer for repository-defined coding-agent tasks. Instead of writing YAML or JSON, you describe your environment with small JavaScript files inside a `.biodome/` directory. Each file contributes languages, services, packages, tools, processes, hooks, and agent harnesses to a shared plan. A named task then selects an agent and its execution requirements; a named target selects the provider that runs it.
 
 ## Why code-based configuration?
 
@@ -13,8 +13,8 @@ Biodome is a development environment manager built around composable primitives.
 
 ```bash
 npx @kotarcreative/biodome init
-npx @kotarcreative/biodome build
-npx @kotarcreative/biodome up
+npx @kotarcreative/biodome build local
+npx @kotarcreative/biodome up local
 ```
 
 `init` auto-detects languages from project files (`package.json`, `bun.lockb`, `requirements.txt`, `composer.json`, `go.mod`, etc.) and generates a starter `.biodome/features/auto-detect.mjs` feature. To skip this and create a minimal scaffold, pass `--bare`.
@@ -32,7 +32,7 @@ Biodome can serve an MCP endpoint that exposes sandbox information, process logs
 
 ```bash
 biodome config validate  # confirm the config is valid
-biodome up               # starts dev container + MCP server
+biodome up local         # starts the local target + MCP server
 ```
 
 ## Event capture
@@ -40,8 +40,8 @@ biodome up               # starts dev container + MCP server
 Every lifecycle command (`build`, `up`, `down`, `exec`, `restart`, `status`, `ps`, `logs`, `config validate`) captures a structured, append-only event log by default. Pass `--no-events` to disable. Events are written to `.biodome-build/logs/events-<runId>.jsonl` and include every plan load, generated file, hook, and runtime operation with timing. Logs are automatically capped at 10 MB — once the file exceeds this limit, new events are dropped with a warning.
 
 ```bash
-biodome build
-biodome --no-events build
+biodome build local
+biodome --no-events build local
 biodome events
 biodome events --run <runId>
 ```
@@ -55,6 +55,7 @@ This event stream lets you audit exactly what happened during a run and is desig
 - [Processes and hooks](processes.md)
 - [API reference](api.md)
 - [Examples](examples.md)
+- [Agent task orchestration](orchestration.md)
 - [Project improvement implementation plans](design/improvements/README.md)
 - [Local named task execution implementation plan](design/local-task-execution-plan.md)
 - [Security, performance, and ergonomics implementation plan](design/security-performance-ergonomics-plan.md)

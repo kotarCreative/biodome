@@ -110,7 +110,7 @@ export interface ClaudeHarness {
 
 // --- Target and task types ---
 
-export type RuntimeDriverId = "docker-compose" | "aws-ecs" | (string & {});
+export type RuntimeDriverId = "docker-compose" | "docker-sandbox" | "aws-ecs" | (string & {});
 
 export interface RuntimeTarget {
   name: string;
@@ -124,6 +124,22 @@ export interface TaskSpec {
   artifacts: string[];
   timeout: string;
   cleanup: "always" | "on-success" | "never";
+  requiredServices?: string[];
+  requiredProcesses?: string[];
+  capabilities?: Array<{
+    capability: string;
+    level?: "required" | "preferred";
+    reason?: string;
+  }>;
+  resources?: { cpu?: number; memoryMiB?: number; diskMiB?: number };
+  network?: { mode: "isolated" | "egress" | "unrestricted"; allow?: string[] };
+  workspace?: {
+    strategy: "bind" | "clone" | "upload" | "snapshot";
+    repository?: string;
+    ref?: string;
+    path?: string;
+  };
+  validationCommands?: string[][];
 }
 
 export interface Task {
@@ -133,6 +149,13 @@ export interface Task {
   artifacts: string[];
   timeout: string;
   cleanup: "always" | "on-success" | "never";
+  requiredServices?: string[];
+  requiredProcesses?: string[];
+  capabilities?: TaskSpec["capabilities"];
+  resources?: TaskSpec["resources"];
+  network?: TaskSpec["network"];
+  workspace?: TaskSpec["workspace"];
+  validationCommands?: string[][];
 }
 
 export interface DeploymentPlan {
@@ -959,6 +982,39 @@ export const TaskSpecSchema = Schema.Struct({
   artifacts: Schema.optional(Schema.Array(Schema.String)),
   timeout: Schema.optional(DurationSchema),
   cleanup: Schema.optional(CleanupSchema),
+  requiredServices: Schema.optional(Schema.Array(Schema.String)),
+  requiredProcesses: Schema.optional(Schema.Array(Schema.String)),
+  capabilities: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        capability: Schema.String,
+        level: Schema.optional(Schema.Literals(["required", "preferred"])),
+        reason: Schema.optional(Schema.String),
+      }),
+    ),
+  ),
+  resources: Schema.optional(
+    Schema.Struct({
+      cpu: Schema.optional(Schema.Number),
+      memoryMiB: Schema.optional(Schema.Number),
+      diskMiB: Schema.optional(Schema.Number),
+    }),
+  ),
+  network: Schema.optional(
+    Schema.Struct({
+      mode: Schema.Literals(["isolated", "egress", "unrestricted"]),
+      allow: Schema.optional(Schema.Array(Schema.String)),
+    }),
+  ),
+  workspace: Schema.optional(
+    Schema.Struct({
+      strategy: Schema.Literals(["bind", "clone", "upload", "snapshot"]),
+      repository: Schema.optional(Schema.String),
+      ref: Schema.optional(Schema.String),
+      path: Schema.optional(Schema.String),
+    }),
+  ),
+  validationCommands: Schema.optional(Schema.Array(Schema.Array(Schema.String))),
 });
 
 export const TaskSchema = Schema.Struct({
@@ -968,6 +1024,13 @@ export const TaskSchema = Schema.Struct({
   artifacts: Schema.Array(Schema.String),
   timeout: Schema.String,
   cleanup: CleanupSchema,
+  requiredServices: Schema.optional(Schema.Array(Schema.String)),
+  requiredProcesses: Schema.optional(Schema.Array(Schema.String)),
+  capabilities: TaskSpecSchema.fields.capabilities,
+  resources: TaskSpecSchema.fields.resources,
+  network: TaskSpecSchema.fields.network,
+  workspace: TaskSpecSchema.fields.workspace,
+  validationCommands: TaskSpecSchema.fields.validationCommands,
 });
 
 export const DeploymentPlanSchema = Schema.Struct({

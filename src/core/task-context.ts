@@ -53,6 +53,13 @@ export class TaskContextImpl implements TaskContext {
       artifacts,
       timeout,
       cleanup,
+      requiredServices: spec.requiredServices,
+      requiredProcesses: spec.requiredProcesses,
+      capabilities: spec.capabilities,
+      resources: spec.resources,
+      network: spec.network,
+      workspace: spec.workspace,
+      validationCommands: spec.validationCommands,
     };
   }
 

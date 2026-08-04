@@ -1,0 +1,7 @@
+{
+  "name": "biodome-orchestration-demo",
+  "private": true,
+  "scripts": {
+    "validate": "node -e \"process.exit(0)\""
+  }
+}

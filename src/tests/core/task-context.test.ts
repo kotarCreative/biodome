@@ -23,6 +23,30 @@ describe("TaskContextImpl", () => {
       expect(task.cleanup).toBe("always");
     });
 
+    it("preserves portable orchestration requirements", () => {
+      const ctx = new TaskContextImpl("review-pr");
+      ctx.addTask({
+        harness: "opencode",
+        prompt: "Review the PR",
+        artifacts: [],
+        timeout: "10m",
+        cleanup: "always",
+        requiredServices: ["postgres"],
+        capabilities: [{ capability: "network.policy", level: "preferred" }],
+        resources: { cpu: 2, memoryMiB: 4096 },
+        network: { mode: "egress", allow: ["api.github.com:443"] },
+        workspace: { strategy: "clone", ref: "main" },
+        validationCommands: [["npm", "test"]],
+      });
+
+      expect(ctx.getTask()).toMatchObject({
+        requiredServices: ["postgres"],
+        resources: { cpu: 2, memoryMiB: 4096 },
+        workspace: { strategy: "clone", ref: "main" },
+        validationCommands: [["npm", "test"]],
+      });
+    });
+
     it("accepts empty artifact list", () => {
       const ctx = new TaskContextImpl("test");
       ctx.addTask({

@@ -1,6 +1,7 @@
 import type { RuntimeDriver } from "./driver.js";
 import { dockerComposeDriver } from "./docker-compose.js";
 import { awsEcsDriver } from "./aws-ecs.js";
+import { dockerSandboxDriver } from "./docker-sandbox.js";
 import { RuntimeError } from "../core/errors.js";
 import { Effect } from "effect";
 
@@ -34,3 +35,4 @@ export function registeredDrivers(): string[] {
 // Register built-in drivers.
 registerDriver(dockerComposeDriver);
 registerDriver(awsEcsDriver);
+registerDriver(dockerSandboxDriver);

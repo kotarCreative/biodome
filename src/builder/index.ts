@@ -459,6 +459,26 @@ export const buildTaskPlanEffect = Effect.fnUntraced(function* (
 
   const taskDecl = taskCtx.getTask();
 
+  const availableServices = new Set(plan.runtime.services.map((service) => service.name));
+  const missingServices = (taskDecl.requiredServices ?? []).filter(
+    (service) => !availableServices.has(service),
+  );
+  if (missingServices.length > 0) {
+    return yield* new ValidationError({
+      message: `Task "${taskName}" requires unknown services: ${missingServices.join(", ")}`,
+    });
+  }
+
+  const availableProcesses = new Set(plan.runtime.processes.map((process) => process.name));
+  const missingProcesses = (taskDecl.requiredProcesses ?? []).filter(
+    (process) => !availableProcesses.has(process),
+  );
+  if (missingProcesses.length > 0) {
+    return yield* new ValidationError({
+      message: `Task "${taskName}" requires unknown processes: ${missingProcesses.join(", ")}`,
+    });
+  }
+
   const allHarnesses = [
     ...plan.runtime.agentHarnesses.map((h) => h.name),
     ...plan.runtime.piHarnesses.map((h) => h.name),

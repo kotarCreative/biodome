@@ -176,6 +176,23 @@ describe("executeTask", () => {
     expect(result.artifacts[0].path).toBe("review.md");
   });
 
+  it("executes validation commands after the agent", async () => {
+    const execFn = vi
+      .fn()
+      .mockReturnValue(
+        Effect.succeed<CommandResult>({ exitCode: 0, stdout: "", stderr: "", durationMs: 1 }),
+      );
+    const plan = planWithTask({ artifacts: [] });
+    plan.deployment!.task!.validationCommands = [
+      ["npm", "test"],
+      ["npm", "run", "lint"],
+    ];
+    await Effect.runPromise(runTask(createFakeDriver({ exec: execFn }), plan));
+    expect(execFn).toHaveBeenCalledTimes(3);
+    expect(execFn.mock.calls[1][0].command).toEqual(["npm", "test"]);
+    expect(execFn.mock.calls[2][0].command).toEqual(["npm", "run", "lint"]);
+  });
+
   it("reuses a running deployment", async () => {
     const statusFn = vi.fn().mockReturnValue(Effect.succeed<StatusResult>({ state: "running" }));
     const driver = createFakeDriver({ status: statusFn });

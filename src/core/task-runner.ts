@@ -7,33 +7,10 @@ import { statePath, readState, writeState, removeState } from "../runtime/state.
 import { EventStore } from "./events.js";
 import { RuntimeError, ValidationError } from "./errors.js";
 import { hasCapability } from "./capabilities.js";
+import { agentTaskCommand } from "../agents/registry.js";
 
 export function harnessTaskCommand(plan: Plan, harnessName: string, prompt: string): string[] {
-  const layout = runtimeLayout("", plan.deployment?.target.name);
-
-  const piHarness = plan.runtime.piHarnesses.find((h) => h.name === harnessName);
-  if (piHarness) {
-    return [`${layout.container.piHomes}/${piHarness.name}/task`, prompt];
-  }
-
-  const claudeHarness = plan.runtime.claudeHarnesses.find((h) => h.name === harnessName);
-  if (claudeHarness) {
-    return [`${layout.container.claudeHomes}/${claudeHarness.name}/task`, prompt];
-  }
-
-  const codexHarness = plan.runtime.codexHarnesses.find((h) => h.name === harnessName);
-  if (codexHarness) {
-    return [`${layout.container.codexHomes}/${codexHarness.name}/task`, prompt];
-  }
-
-  const agentHarness = plan.runtime.agentHarnesses.find((h) => h.name === harnessName);
-  if (agentHarness) {
-    return [`${layout.container.opencodeHomes}/${agentHarness.name}/task`, prompt];
-  }
-
-  throw new ValidationError({
-    message: `Harness "${harnessName}" not found in plan`,
-  });
+  return agentTaskCommand(plan, harnessName, prompt);
 }
 
 export interface TaskResult {
@@ -159,6 +136,29 @@ export function executeTask(
           message: `Task "${task.name}" failed with exit code ${execResult.exitCode}`,
         }),
       );
+    }
+
+    for (const validationCommand of task.validationCommands ?? []) {
+      const validation = yield* driver.exec({
+        ...input,
+        command: validationCommand,
+        timeoutMs,
+      });
+      if (validation.timedOut || validation.exitCode !== 0) {
+        const reason = validation.timedOut
+          ? `validation timed out: ${validationCommand.join(" ")}`
+          : `validation failed with exit code ${validation.exitCode}: ${validationCommand.join(" ")}`;
+        yield* store.emit("task.failed", {
+          target: targetName,
+          driver: driver.id,
+          task: task.name,
+          harness: task.harness,
+          durationMs: Date.now() - startTime,
+          exitCode: validation.exitCode,
+          error: reason,
+        });
+        return yield* Effect.fail(new RuntimeError({ message: reason }));
+      }
     }
 
     let taskArtifacts: TaskResult["artifacts"] = undefined;

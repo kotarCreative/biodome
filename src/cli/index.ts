@@ -14,7 +14,10 @@ import {
 import { formatInfo, formatAgentsMd } from "../core/info.js";
 import { Plan } from "../core/plan.js";
 import { getDriver } from "../runtime/registry.js";
-import { executeTask } from "../core/task-runner.js";
+import { orchestrateTask } from "../orchestration/orchestrator.js";
+import { compileExecutionPlan, providerProfile } from "../orchestration/compiler.js";
+import { validateCompatibility } from "../orchestration/compatibility.js";
+import { formatCompatibilityReport } from "../orchestration/format.js";
 import { targetBuildDir } from "../runtime/output.js";
 import { runtimeLayout } from "../runtime/layout.js";
 import { readState, writeState, removeState } from "../runtime/state.js";
@@ -517,6 +520,32 @@ program
   });
 
 program
+  .command("plan <target> <task>")
+  .description("Compile a portable task plan and validate it against a target")
+  .option("--json", "Print the portable execution plan and compatibility report as JSON")
+  .action((targetName: string, taskName: string, options) => {
+    const cliProgram = Effect.gen(function* () {
+      const plan = yield* buildTaskPlanEffect(process.cwd(), targetName, taskName, {
+        dryRun: true,
+      });
+      const driver = yield* getDriver(plan.deployment!.target.driver);
+      const executionPlan = compileExecutionPlan(plan);
+      const compatibility = validateCompatibility(executionPlan, providerProfile(driver));
+      if (options.json) {
+        console.log(JSON.stringify({ executionPlan, compatibility }, null, 2));
+      } else {
+        console.log(`Task: ${executionPlan.task.name}`);
+        console.log(`Target: ${executionPlan.target.name}`);
+        console.log(formatCompatibilityReport(compatibility));
+      }
+      if (!compatibility.compatible) {
+        return yield* new RuntimeError({ message: "Target does not satisfy task requirements" });
+      }
+    });
+    runSafe(cliProgram);
+  });
+
+program
   .command("run <target> <task>")
   .description("Execute a named task against a target sandbox")
   .action((targetName: string, taskName: string) => {
@@ -527,8 +556,9 @@ program
       const driver = yield* getDriver(plan.deployment!.target.driver);
       yield* driver.ensureAvailable(plan.deployment!.target);
       yield* Effect.logInfo(`Running task "${taskName}" against sandbox "${targetName}"`);
-      const result = yield* executeTask(rootDir, plan, driver);
+      const result = yield* orchestrateTask(rootDir, plan, driver);
       yield* Effect.logInfo(`Task "${taskName}" completed with exit code ${result.exitCode}`);
+      yield* Effect.logInfo(`Run record: ${result.run.runId}`);
       if (result.artifacts && result.artifacts.length > 0) {
         for (const a of result.artifacts) {
           yield* Effect.logInfo(`  Artifact: ${a.path} (${a.sizeBytes} bytes) -> ${a.localPath}`);
