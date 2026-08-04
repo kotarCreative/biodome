@@ -43,9 +43,12 @@ npm run test:run
 npm audit --omit=dev
 ```
 
-Current baseline: typecheck and 231 unit tests pass. `npm audit --omit=dev`
-reports 8 production dependency vulnerabilities, including one high severity
-finding in `fast-uri`.
+Current baseline: `npm audit --omit=dev --audit-level=high` passes. Seven
+moderate production advisories remain: MCP's Hono dependencies are maintained
+by the MCP SDK, and the Google Storage dependency tree's `uuid` advisory has
+no non-breaking upstream remediation. The `fast-uri`, `ip-address`, and
+`undici` overrides must be removed once their owning direct dependencies pin
+patched versions themselves.
 
 ---
 

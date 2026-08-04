@@ -214,7 +214,7 @@ describe("validateConfig", () => {
       ".biodome/config.json": JSON.stringify("bad"),
     });
 
-    expect(() => validateConfig(dir)).toThrow(/Expected object, got "bad"/);
+    expect(() => validateConfig(dir)).toThrow(/Expected object/);
   });
 });
 

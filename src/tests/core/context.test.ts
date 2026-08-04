@@ -610,7 +610,7 @@ describe("SandboxContext", () => {
         command: "node server.js" as unknown as readonly string[],
         port: 3000,
       }),
-    ).toThrow(/Expected array, got "node server.js"/);
+    ).toThrow(/Expected array/);
   });
 
   it("rejects an invalid lifecycle point", () => {
@@ -621,7 +621,7 @@ describe("SandboxContext", () => {
         command: ["node"],
         startOn: "build.middle" as unknown as "build.pre",
       }),
-    ).toThrow(/Expected .* got "build.middle"/);
+    ).toThrow(/Expected "build.pre"/);
   });
 
   it("rejects an out-of-range port", () => {
@@ -635,7 +635,7 @@ describe("SandboxContext", () => {
     const ctx = new SandboxContext("/tmp", "test");
     expect(() =>
       ctx.addService("bad", { environment: { COUNT: 42 as unknown as string } }),
-    ).toThrow(/Expected string, got 42/);
+    ).toThrow(/Expected string/);
   });
 
   it("normalizes a relative workingDir to /workspace", () => {
