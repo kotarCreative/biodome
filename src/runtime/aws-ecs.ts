@@ -1,15 +1,6 @@
-import {
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-  rmSync,
-  copyFileSync,
-  chmodSync,
-  existsSync,
-} from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { Effect } from "effect";
 import { ECRClient, GetAuthorizationTokenCommand } from "@aws-sdk/client-ecr";
 import {
@@ -29,18 +20,6 @@ import {
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import { NodeRuntime } from "../core/runtime-node.js";
-import {
-  generateDockerfile,
-  generateSupervisordConf,
-  generateDockerignore,
-  generateHealthcheckScripts,
-  generateRepoScripts,
-  generateHarnessFiles,
-  generatePiHarnessFiles,
-  generateCodexHarnessFiles,
-  generateClaudeHarnessFiles,
-} from "../docker/generator.js";
-import { generatePlanJson } from "../mcp/generator.js";
 import { validateAwsEcsOptions, type AwsEcsOptions } from "./aws-ecs-schema.js";
 import type {
   RuntimeDriver,
@@ -57,6 +36,7 @@ import { RuntimeError } from "../core/errors.js";
 import { capabilitiesOf } from "../core/capabilities.js";
 import type { EventStore } from "../core/events.js";
 import { runtimeLayout } from "./layout.js";
+import { renderCommonArtifacts, writeArtifacts } from "./artifacts.js";
 
 export interface AwsClients {
   ecr: ECRClient;
@@ -173,78 +153,11 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
       return Effect.try({
         try: () => {
           const layout = runtimeLayout(input.rootDir, input.target.name);
-          mkdirSync(layout.host.root, { recursive: true });
-          const plan = input.plan;
-          const files: string[] = [];
-
-          const dockerfilePath = layout.host.dockerfile;
-          writeFileSync(
-            dockerfilePath,
-            generateDockerfile(plan, {
-              generatedFilesPath: `.biodome-build/targets/${input.target.name}`,
-            }),
+          return Array.from(
+            Effect.runSync(
+              writeArtifacts(input.rootDir, renderCommonArtifacts(input.plan, layout)),
+            ),
           );
-          files.push(dockerfilePath);
-
-          const supervisord = generateSupervisordConf(plan);
-          if (supervisord) {
-            const spPath = layout.host.supervisordConfig;
-            writeFileSync(spPath, supervisord);
-            files.push(spPath);
-          }
-
-          const healthcheckDir = layout.host.healthchecks;
-          rmSync(healthcheckDir, { recursive: true, force: true });
-          mkdirSync(healthcheckDir, { recursive: true });
-          for (const [name, content] of Object.entries(generateHealthcheckScripts(plan))) {
-            const path = join(healthcheckDir, name);
-            writeFileSync(path, content);
-            if (content.startsWith("#!/")) chmodSync(path, 0o755);
-            files.push(path);
-          }
-
-          const repoDir = layout.host.repositories;
-          rmSync(repoDir, { recursive: true, force: true });
-          mkdirSync(repoDir, { recursive: true });
-          for (const [name, content] of Object.entries(generateRepoScripts(plan))) {
-            const path = join(repoDir, name);
-            writeFileSync(path, content);
-            if (content.startsWith("#!/")) chmodSync(path, 0o755);
-            files.push(path);
-          }
-
-          for (const [name, content] of Object.entries(generateHarnessFiles(plan))) {
-            writeBuildFile(join(layout.host.root, name), content);
-            files.push(join(layout.host.root, name));
-          }
-          for (const [name, content] of Object.entries(generatePiHarnessFiles(plan))) {
-            writeBuildFile(join(layout.host.root, name), content);
-            files.push(join(layout.host.root, name));
-          }
-          for (const [name, content] of Object.entries(generateCodexHarnessFiles(plan))) {
-            writeBuildFile(join(layout.host.root, name), content);
-            files.push(join(layout.host.root, name));
-          }
-          for (const [name, content] of Object.entries(generateClaudeHarnessFiles(plan))) {
-            writeBuildFile(join(layout.host.root, name), content);
-            files.push(join(layout.host.root, name));
-          }
-
-          const dockerignorePath = join(input.rootDir, ".dockerignore");
-          if (!existsSync(dockerignorePath)) {
-            writeFileSync(dockerignorePath, generateDockerignore());
-          }
-
-          if (plan.build.mcpEnabled) {
-            writeFileSync(layout.host.mcpPlan, generatePlanJson(plan));
-            const __dirname = dirname(fileURLToPath(import.meta.url));
-            const mcpServerSource = join(__dirname, "..", "mcp", "server.js");
-            if (existsSync(mcpServerSource)) {
-              copyFileSync(mcpServerSource, layout.host.mcpServer);
-            }
-          }
-
-          return files;
         },
         catch: (error) =>
           new RuntimeError({
@@ -924,14 +837,6 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
 export const awsEcsDriver = createAwsEcsDriver();
 
 // --- Helpers ---
-
-function writeBuildFile(filePath: string, content: string): void {
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, content);
-  if (content.startsWith("#!/")) {
-    chmodSync(filePath, 0o755);
-  }
-}
 
 function buildContainerEnvironment(plan: Plan): Array<{ name: string; value: string }> {
   const env: Array<{ name: string; value: string }> = [];

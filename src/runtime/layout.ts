@@ -2,6 +2,8 @@ import { join } from "node:path";
 
 export interface RuntimeLayout {
   host: {
+    projectRoot: string;
+    targetName?: string;
     root: string;
     dockerfile: string;
     composeFile: string;
@@ -18,7 +20,7 @@ export interface RuntimeLayout {
     logs: string;
     state: string;
   };
-  container: Omit<RuntimeLayout["host"], "composeFile" | "state">;
+  container: Omit<RuntimeLayout["host"], "projectRoot" | "targetName" | "composeFile" | "state">;
 }
 
 export function runtimeLayout(rootDir: string, targetName?: string): RuntimeLayout {
@@ -30,6 +32,8 @@ export function runtimeLayout(rootDir: string, targetName?: string): RuntimeLayo
 
   return {
     host: {
+      projectRoot: rootDir,
+      targetName,
       root: hostRoot,
       dockerfile: join(hostRoot, "Dockerfile"),
       composeFile: join(hostRoot, "docker-compose.yaml"),

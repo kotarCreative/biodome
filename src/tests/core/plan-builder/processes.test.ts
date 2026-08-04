@@ -1,0 +1,93 @@
+import { describe, expect, it } from "vitest";
+import { ProcessBuilder } from "../../../core/plan-builder/processes.js";
+import { createPlan } from "../../../core/plan.js";
+
+function makeBuilder() {
+  const plan = createPlan("test");
+  const aptPackages: string[] = [];
+  return {
+    plan,
+    aptPackages,
+    builder: new ProcessBuilder(plan, (name) => aptPackages.push(name)),
+  };
+}
+
+describe("ProcessBuilder", () => {
+  it("adds daemon processes with normalized ports and working directories", () => {
+    const { builder, plan } = makeBuilder();
+    builder.addProcess({
+      name: "api",
+      command: ["node", "server.js"],
+      port: 3000,
+      ports: { debug: 9229 },
+      workingDir: "apps/api",
+    });
+
+    expect(plan.runtime.processes).toEqual([
+      expect.objectContaining({
+        name: "api",
+        mode: "daemon",
+        startOn: "start.post",
+        workingDir: "/workspace/apps/api",
+        ports: [
+          { host: 3000, container: 3000 },
+          { name: "debug", host: 9229, container: 9229 },
+        ],
+      }),
+    ]);
+  });
+
+  it("adds hooks as oneshot processes", () => {
+    const { builder, plan } = makeBuilder();
+    builder.addHook({ name: "migrate", command: ["npm", "run", "migrate"], startOn: "start.post" });
+
+    expect(plan.runtime.processes[0]).toMatchObject({ mode: "oneshot", startOn: "start.post" });
+  });
+
+  it("rejects invalid ports and duplicate process names", () => {
+    const { builder } = makeBuilder();
+    expect(() => builder.addProcess({ name: "api", command: ["node"], port: 70000 })).toThrow(
+      /integer between 1 and 65535/,
+    );
+    builder.addProcess({ name: "api", command: ["node"] });
+    expect(() =>
+      builder.addHook({ name: "api", command: ["npm", "run", "build"], startOn: "build.pre" }),
+    ).toThrow(/Duplicate process or hook name/);
+  });
+
+  it("adds health-check dependencies and defaults HTTP URLs to the process port", () => {
+    const { builder, plan, aptPackages } = makeBuilder();
+    builder.addProcess({ name: "web", command: ["node"], port: 3000, healthCheck: {} });
+    builder.addProcess({
+      name: "tcp",
+      command: ["node"],
+      healthCheck: { type: "tcp", port: 4000 },
+    });
+
+    expect(plan.runtime.processes[0].healthCheck).toMatchObject({
+      type: "http",
+      url: "http://localhost:3000",
+      port: 3000,
+    });
+    expect(aptPackages).toEqual(["curl", "netcat-openbsd"]);
+  });
+
+  it("merges process environment unless excluded or explicitly declared", () => {
+    const { builder, plan } = makeBuilder();
+    plan.runtime.envVars.push({ key: "DECLARED", scope: "runtime", value: "one" });
+    plan.runtime.environment.DECLARED = "one";
+    builder.addProcess({
+      name: "web",
+      command: ["node"],
+      environment: { DECLARED: "two", PROCESS: "three" },
+    });
+    builder.addProcess({
+      name: "private",
+      command: ["node"],
+      environment: { PRIVATE: "four" },
+      mergeEnv: false,
+    });
+
+    expect(plan.runtime.environment).toEqual({ DECLARED: "one", PROCESS: "three" });
+  });
+});

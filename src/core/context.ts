@@ -2,19 +2,12 @@ import { Schema } from "effect";
 import {
   createPlan,
   Plan,
-  Process,
-  ProcessHealthCheck,
-  Port,
-  LifecyclePoint,
   Service,
   DependencyInstall,
   CopyArtifact,
-  ProcessSpecSchema,
-  HookSpecSchema,
   ServiceOptionsSchema,
   EndpointSpecSchema,
   ProviderSpecSchema,
-  ProcessHealthCheckSpecSchema,
   VolumeSpecSchema,
   Volume,
   Provider,
@@ -75,6 +68,7 @@ import { ValidationError } from "./errors.js";
 import { runtimeLayout } from "../runtime/layout.js";
 import { createNodeProjectIO, type ProjectIO } from "./plan-builder/project-io.js";
 import { EnvironmentBuilder } from "./plan-builder/environment.js";
+import { ProcessBuilder } from "./plan-builder/processes.js";
 
 function validatePort(value: unknown, label: string): void {
   if (value === undefined) return;
@@ -103,6 +97,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
   private dryRun: boolean;
   private io: ProjectIO;
   private environment: EnvironmentBuilder;
+  private processes: ProcessBuilder;
 
   constructor(
     rootDir: string,
@@ -114,55 +109,15 @@ export class SandboxContext implements FeatureContext, BuildContext {
     this.io = io;
     this.plan = createPlan(project);
     this.environment = new EnvironmentBuilder(this.plan);
+    this.processes = new ProcessBuilder(this.plan, (name) => this.addAptPackage(name));
   }
 
   addProcess(spec: ProcessSpec): void {
-    const validated = Schema.decodeSync(ProcessSpecSchema)(spec);
-    if (validated.port !== undefined)
-      validatePort(validated.port, `Process ${validated.name}: port`);
-    if (validated.ports) {
-      for (const [portName, port] of Object.entries(validated.ports)) {
-        validatePort(port, `Process ${validated.name}: ports.${portName}`);
-      }
-    }
-    if (validated.environment) {
-      validateEnv(
-        validated.environment as Record<string, unknown>,
-        `Process ${validated.name}: environment`,
-      );
-    }
-
-    this.assertUniqueProcessName(validated.name);
-    const proc = this.normalizeProcess(validated, "daemon", "start.post");
-    this.plan.runtime.processes.push(proc);
-    this.mergeProcessEnv(proc);
+    this.processes.addProcess(spec);
   }
 
   addHook(spec: HookSpec): void {
-    const validated = Schema.decodeSync(HookSpecSchema)(spec);
-    if (validated.port !== undefined) validatePort(validated.port, `Hook ${validated.name}: port`);
-    if (validated.ports) {
-      for (const [portName, port] of Object.entries(validated.ports)) {
-        validatePort(port, `Hook ${validated.name}: ports.${portName}`);
-      }
-    }
-    if (validated.environment) {
-      validateEnv(
-        validated.environment as Record<string, unknown>,
-        `Hook ${validated.name}: environment`,
-      );
-    }
-
-    this.assertUniqueProcessName(validated.name);
-    const proc = this.normalizeProcess(validated, "oneshot", validated.startOn as LifecyclePoint);
-    this.plan.runtime.processes.push(proc);
-    this.mergeProcessEnv(proc);
-  }
-
-  private assertUniqueProcessName(name: string): void {
-    if (this.plan.runtime.processes.some((p) => p.name === name)) {
-      throw new ValidationError({ message: `Duplicate process or hook name: ${name}` });
-    }
+    this.processes.addHook(spec);
   }
 
   addLanguage(name: string, options: LanguageOptions = {}): void {
@@ -1199,94 +1154,6 @@ export class SandboxContext implements FeatureContext, BuildContext {
 
   addCopyArtifact(artifact: CopyArtifact): void {
     this.plan.build.copyArtifacts.push(artifact);
-  }
-
-  private normalizeProcess(
-    spec: ProcessSpec,
-    defaultMode: "daemon" | "oneshot",
-    defaultStartOn: LifecyclePoint,
-  ): Process {
-    const mode = spec.mode || defaultMode;
-    const startOn = spec.startOn || defaultStartOn;
-
-    const ports: Port[] = [];
-    if (spec.port) {
-      ports.push({ host: spec.port, container: spec.port });
-    }
-    if (spec.ports) {
-      for (const [portName, p] of Object.entries(spec.ports)) {
-        ports.push({ name: portName, host: p, container: p });
-      }
-    }
-
-    const healthCheck = spec.healthCheck
-      ? this.normalizeHealthCheck(spec.healthCheck, spec.port)
-      : undefined;
-
-    return {
-      name: spec.name,
-      command: [...spec.command],
-      ports,
-      environment: spec.environment ? { ...spec.environment } : {},
-      workingDir: this.normalizeWorkingDir(spec.workingDir),
-      healthCheck,
-      mode,
-      startOn,
-      mergeEnv: spec.mergeEnv,
-    };
-  }
-
-  private normalizeWorkingDir(workingDir: string | undefined): string | undefined {
-    if (!workingDir) return undefined;
-    if (workingDir.startsWith("/")) return workingDir;
-    return `/workspace/${workingDir}`;
-  }
-
-  private normalizeHealthCheck(
-    spec: typeof ProcessHealthCheckSpecSchema.Type,
-    defaultPort?: number,
-  ): ProcessHealthCheck {
-    const type = spec.type || "http";
-    let url = spec.url;
-    let port = spec.port;
-    const command = spec.command ? [...spec.command] : undefined;
-
-    if (type === "http" && !url) {
-      port = port || defaultPort;
-      if (port) {
-        url = `http://localhost:${port}`;
-      }
-    }
-
-    if (type === "http") {
-      this.addAptPackage("curl");
-    }
-
-    if (type === "tcp") {
-      this.addAptPackage("netcat-openbsd");
-    }
-
-    return {
-      type,
-      url,
-      port,
-      command,
-      interval: spec.interval,
-      timeout: spec.timeout,
-      retries: spec.retries,
-      startPeriod: spec.startPeriod,
-    };
-  }
-
-  private mergeProcessEnv(proc: Process): void {
-    if (proc.mergeEnv === false) return;
-    for (const [key, value] of Object.entries(proc.environment)) {
-      // Variables declared via addEnv take precedence over process-level env.
-      // This prevents a process's local environment from silently overwriting
-      // a value the user explicitly declared with addEnv.
-      if (this.plan.runtime.envVars.some((e) => e.key === key)) continue;
-      this.plan.runtime.environment[key] = value;
-    }
   }
 
   addRuntimeInstall(snippet: string): void {

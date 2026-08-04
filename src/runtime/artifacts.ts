@@ -1,0 +1,135 @@
+import { chmodSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { Effect } from "effect";
+import { RuntimeError } from "../core/errors.js";
+import type { Plan } from "../core/plan.js";
+import {
+  generateClaudeHarnessFiles,
+  generateCodexHarnessFiles,
+  generateDockerfile,
+  generateDockerignore,
+  generateHarnessFiles,
+  generateHealthcheckScripts,
+  generatePiHarnessFiles,
+  generateRepoScripts,
+  generateSupervisordConf,
+} from "../docker/generator.js";
+import { generatePlanJson } from "../mcp/generator.js";
+import type { RuntimeLayout } from "./layout.js";
+
+export interface GeneratedFile {
+  readonly relativePath: string;
+  readonly content?: string;
+  readonly sourcePath?: string;
+  readonly mode?: number;
+}
+
+function textFile(
+  projectRoot: string,
+  path: string,
+  content: string,
+  mode?: number,
+): GeneratedFile {
+  return { relativePath: relative(projectRoot, path), content, mode };
+}
+
+function generatedFiles(
+  projectRoot: string,
+  directory: string,
+  files: Record<string, string>,
+): GeneratedFile[] {
+  return Object.entries(files).map(([name, content]) =>
+    textFile(
+      projectRoot,
+      join(directory, name),
+      content,
+      content.startsWith("#!/") ? 0o755 : undefined,
+    ),
+  );
+}
+
+export function renderCommonArtifacts(plan: Plan, layout: RuntimeLayout): readonly GeneratedFile[] {
+  const files: GeneratedFile[] = [
+    textFile(
+      layout.host.projectRoot,
+      layout.host.dockerfile,
+      generateDockerfile(plan, {
+        generatedFilesPath: `.biodome-build/targets/${layout.host.targetName ?? ""}`,
+      }),
+    ),
+    textFile(
+      layout.host.projectRoot,
+      join(layout.host.projectRoot, ".dockerignore"),
+      generateDockerignore(),
+    ),
+    ...generatedFiles(
+      layout.host.projectRoot,
+      layout.host.healthchecks,
+      generateHealthcheckScripts(plan),
+    ),
+    ...generatedFiles(layout.host.projectRoot, layout.host.repositories, generateRepoScripts(plan)),
+    ...generatedFiles(layout.host.projectRoot, layout.host.root, generateHarnessFiles(plan)),
+    ...generatedFiles(layout.host.projectRoot, layout.host.root, generatePiHarnessFiles(plan)),
+    ...generatedFiles(layout.host.projectRoot, layout.host.root, generateCodexHarnessFiles(plan)),
+    ...generatedFiles(layout.host.projectRoot, layout.host.root, generateClaudeHarnessFiles(plan)),
+  ];
+
+  const supervisord = generateSupervisordConf(plan);
+  if (supervisord)
+    files.push(textFile(layout.host.projectRoot, layout.host.supervisordConfig, supervisord));
+
+  if (plan.build.mcpEnabled) {
+    files.push(textFile(layout.host.projectRoot, layout.host.mcpPlan, generatePlanJson(plan)));
+    files.push({
+      relativePath: relative(layout.host.projectRoot, layout.host.mcpServer),
+      sourcePath: join(dirname(fileURLToPath(import.meta.url)), "..", "mcp", "server.js"),
+    });
+  }
+
+  return files.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+}
+
+function validateGeneratedFile(file: GeneratedFile): void {
+  if (!file.relativePath || isAbsolute(file.relativePath)) {
+    throw new Error(`Artifact path must be a non-absolute relative path: ${file.relativePath}`);
+  }
+  if (file.relativePath.split(/[\\/]/).some((segment) => segment === "..")) {
+    throw new Error(`Artifact path must not contain traversal: ${file.relativePath}`);
+  }
+  if ((file.content === undefined) === (file.sourcePath === undefined)) {
+    throw new Error(`Artifact ${file.relativePath} must have exactly one of content or sourcePath`);
+  }
+}
+
+export function writeArtifacts(
+  outputDir: string,
+  files: readonly GeneratedFile[],
+): Effect.Effect<readonly string[], RuntimeError> {
+  return Effect.try({
+    try: () => {
+      const outputRoot = resolve(outputDir);
+      return [...files]
+        .sort((left, right) => left.relativePath.localeCompare(right.relativePath))
+        .map((file) => {
+          validateGeneratedFile(file);
+          const outputPath = resolve(outputRoot, file.relativePath);
+          if (outputPath !== outputRoot && !outputPath.startsWith(`${outputRoot}/`)) {
+            throw new Error(`Artifact path escapes output directory: ${file.relativePath}`);
+          }
+          mkdirSync(dirname(outputPath), { recursive: true });
+          if (file.content !== undefined) {
+            writeFileSync(outputPath, file.content);
+          } else if (file.sourcePath !== undefined) {
+            copyFileSync(file.sourcePath, outputPath);
+          }
+          if (file.mode !== undefined) chmodSync(outputPath, file.mode);
+          return outputPath;
+        });
+    },
+    catch: (error) =>
+      new RuntimeError({
+        message: `Failed to write runtime artifacts: ${error instanceof Error ? error.message : String(error)}`,
+      }),
+  });
+}

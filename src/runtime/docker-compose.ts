@@ -1,32 +1,11 @@
-import {
-  writeFileSync,
-  mkdirSync,
-  rmSync,
-  copyFileSync,
-  chmodSync,
-  existsSync,
-  statSync,
-} from "node:fs";
+import { mkdirSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname, relative } from "node:path";
-import { fileURLToPath } from "node:url";
 import { Effect, Stream } from "effect";
 import type { PlatformError } from "effect/PlatformError";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import { NodeRuntime } from "../core/runtime-node.js";
-import {
-  generateDockerfile,
-  generateSupervisordConf,
-  generateCompose,
-  generateDockerignore,
-  generateHealthcheckScripts,
-  generateRepoScripts,
-  generateHarnessFiles,
-  generatePiHarnessFiles,
-  generateCodexHarnessFiles,
-  generateClaudeHarnessFiles,
-} from "../docker/generator.js";
-import { generatePlanJson } from "../mcp/generator.js";
+import { generateCompose } from "../docker/generator.js";
 import { parseServiceStatusOutput } from "../docker/runner.js";
 import type {
   RuntimeDriver,
@@ -42,6 +21,7 @@ import { RuntimeError } from "../core/errors.js";
 import { capabilitiesOf } from "../core/capabilities.js";
 import type { EventStore } from "../core/events.js";
 import { runtimeLayout } from "./layout.js";
+import { renderCommonArtifacts, writeArtifacts } from "./artifacts.js";
 
 const COMPOSE_FILE = "docker-compose.yaml";
 const COMMAND_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
@@ -147,106 +127,21 @@ export const dockerComposeDriver: RuntimeDriver = {
     return Effect.try({
       try: () => {
         const layout = runtimeLayout(input.rootDir, input.target.name);
-        mkdirSync(layout.host.root, { recursive: true });
-
         const plan = input.plan;
-        const files: string[] = [];
-
-        // Dockerfile
-        const dockerfilePath = layout.host.dockerfile;
-        writeFileSync(
-          dockerfilePath,
-          generateDockerfile(plan, {
-            generatedFilesPath: `.biodome-build/targets/${input.target.name}`,
-          }),
-        );
-        files.push(dockerfilePath);
-
-        // supervisord.conf
-        const supervisord = generateSupervisordConf(plan);
-        if (supervisord) {
-          const spPath = layout.host.supervisordConfig;
-          writeFileSync(spPath, supervisord);
-          files.push(spPath);
-        }
-
-        // docker-compose.yaml
-        const composePath = layout.host.composeFile;
         const buildContext = relative(input.outputDir, input.rootDir) || ".";
-        const dockerfile = relative(input.rootDir, dockerfilePath);
-        writeFileSync(
-          composePath,
-          generateCompose(plan, {
-            buildContext,
-            dockerfile,
-            workspace: buildContext,
-          }),
-        );
-        files.push(composePath);
-
-        // Healthcheck scripts
-        const healthcheckDir = layout.host.healthchecks;
-        rmSync(healthcheckDir, { recursive: true, force: true });
-        mkdirSync(healthcheckDir, { recursive: true });
-        const healthchecks = generateHealthcheckScripts(plan);
-        for (const [name, content] of Object.entries(healthchecks)) {
-          const path = join(healthcheckDir, name);
-          writeFileSync(path, content);
-          if (content.startsWith("#!/")) chmodSync(path, 0o755);
-          files.push(path);
-        }
-
-        // Repo scripts
-        const repoDir = layout.host.repositories;
-        rmSync(repoDir, { recursive: true, force: true });
-        mkdirSync(repoDir, { recursive: true });
-        const repos = generateRepoScripts(plan);
-        for (const [name, content] of Object.entries(repos)) {
-          const path = join(repoDir, name);
-          writeFileSync(path, content);
-          if (content.startsWith("#!/")) chmodSync(path, 0o755);
-          files.push(path);
-        }
-
-        // Harness files
-        for (const [name, content] of Object.entries(generateHarnessFiles(plan))) {
-          const path = join(layout.host.root, name);
-          writeBuildFile(path, content);
-          files.push(path);
-        }
-        for (const [name, content] of Object.entries(generatePiHarnessFiles(plan))) {
-          const path = join(layout.host.root, name);
-          writeBuildFile(path, content);
-          files.push(path);
-        }
-        for (const [name, content] of Object.entries(generateCodexHarnessFiles(plan))) {
-          const path = join(layout.host.root, name);
-          writeBuildFile(path, content);
-          files.push(path);
-        }
-        for (const [name, content] of Object.entries(generateClaudeHarnessFiles(plan))) {
-          const path = join(layout.host.root, name);
-          writeBuildFile(path, content);
-          files.push(path);
-        }
-
-        // .dockerignore (project root)
-        const dockerignorePath = join(input.rootDir, ".dockerignore");
-        if (!existsSync(dockerignorePath)) {
-          writeFileSync(dockerignorePath, generateDockerignore());
-        }
-
-        // MCP plan and server
-        if (plan.build.mcpEnabled) {
-          writeFileSync(layout.host.mcpPlan, generatePlanJson(plan));
-          const __dirname = dirname(fileURLToPath(import.meta.url));
-          const mcpServerSource = join(__dirname, "..", "mcp", "server.js");
-          if (existsSync(mcpServerSource)) {
-            copyFileSync(mcpServerSource, layout.host.mcpServer);
-          }
-        }
-
-        return files;
+        const dockerfile = relative(input.rootDir, layout.host.dockerfile);
+        const files = [
+          ...renderCommonArtifacts(plan, layout),
+          {
+            relativePath: relative(input.rootDir, layout.host.composeFile),
+            content: generateCompose(plan, {
+              buildContext,
+              dockerfile,
+              workspace: buildContext,
+            }),
+          },
+        ];
+        return Array.from(Effect.runSync(writeArtifacts(input.rootDir, files)));
       },
       catch: (error) =>
         new RuntimeError({
@@ -455,11 +350,3 @@ export const dockerComposeDriver: RuntimeDriver = {
     );
   },
 };
-
-function writeBuildFile(filePath: string, content: string): void {
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, content);
-  if (content.startsWith("#!/")) {
-    chmodSync(filePath, 0o755);
-  }
-}
