@@ -5,6 +5,10 @@ import {
   VolumeConfig,
   resolveCredentials,
   VolumeAccessError,
+  decodeCursor,
+  encodeCursor,
+  readBounded,
+  rejectOversized,
 } from "./adapter.js";
 
 export function createAzureAdapter(config: VolumeConfig): VolumeAdapter {
@@ -33,44 +37,48 @@ export function createAzureAdapter(config: VolumeConfig): VolumeAdapter {
   }
 
   return {
-    async list(path: string): Promise<FileInfo[]> {
+    async list(path, options) {
       const full = fullPath(path);
       const result: FileInfo[] = [];
-
-      for await (const item of containerClient.listBlobsByHierarchy("/", { prefix: full })) {
-        if (item.kind === "prefix") {
-          const stripped = stripPrefix(item.name);
-          result.push({
-            name: stripped.split("/").pop() || stripped,
-            path: stripped,
-            isDirectory: true,
-          });
-        } else {
-          const stripped = stripPrefix(item.name);
-          if (stripped === path.replace(/^\/+/, "")) continue;
-          result.push({
-            name: stripped.split("/").pop() || stripped,
-            path: stripped,
-            size: item.properties.contentLength,
-            lastModified: item.properties.lastModified,
-            isDirectory: false,
-          });
-        }
+      const pages = containerClient
+        .listBlobsByHierarchy("/", { prefix: full })
+        .byPage({ continuationToken: decodeCursor(options.cursor), maxPageSize: options.limit });
+      const page = await pages.next();
+      if (page.done || !page.value) return { files: result };
+      for (const item of page.value.segment.blobItems ?? []) {
+        const stripped = stripPrefix(item.name);
+        if (stripped === path.replace(/^\/+/, "")) continue;
+        result.push({
+          name: stripped.split("/").pop() || stripped,
+          path: stripped,
+          size: item.properties.contentLength,
+          lastModified: item.properties.lastModified,
+          isDirectory: false,
+        });
       }
-
-      return result;
+      for (const item of page.value.segment.blobPrefixes ?? []) {
+        const stripped = stripPrefix(item.name);
+        result.push({
+          name: stripped.split("/").pop() || stripped,
+          path: stripped,
+          isDirectory: true,
+        });
+      }
+      return {
+        files: result,
+        nextCursor: page.value.continuationToken
+          ? encodeCursor(page.value.continuationToken)
+          : undefined,
+      };
     },
 
-    async read(path: string): Promise<Buffer> {
+    async read(path, options) {
       const blobClient = containerClient.getBlobClient(fullPath(path));
+      const properties = await blobClient.getProperties();
+      rejectOversized(properties.contentLength, options.maxBytes, path);
       const download = await blobClient.download();
-      const chunks: Buffer[] = [];
-      if (download.readableStreamBody) {
-        for await (const chunk of download.readableStreamBody as AsyncIterable<Buffer>) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        }
-      }
-      return Buffer.concat(chunks);
+      rejectOversized(download.contentLength, options.maxBytes, path);
+      return readBounded(download.readableStreamBody, options.maxBytes, path);
     },
 
     async write(path: string, content: Buffer): Promise<void> {

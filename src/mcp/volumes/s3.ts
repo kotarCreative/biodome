@@ -10,7 +10,10 @@ import {
   FileInfo,
   VolumeConfig,
   resolveCredentials,
-  VolumeAccessError,
+  decodeCursor,
+  encodeCursor,
+  readBounded,
+  rejectOversized,
 } from "./adapter.js";
 
 export function createS3Adapter(config: VolumeConfig): VolumeAdapter {
@@ -40,63 +43,72 @@ export function createS3Adapter(config: VolumeConfig): VolumeAdapter {
   }
 
   return {
-    async list(path: string): Promise<FileInfo[]> {
+    async list(path, options) {
       const full = fullPath(path);
-      const delimiter = "/";
       const files: FileInfo[] = [];
-      let continuationToken: string | undefined;
-
-      do {
-        const command = new ListObjectsV2Command({
+      const response = await client.send(
+        new ListObjectsV2Command({
           Bucket: config.bucket,
           Prefix: full,
-          Delimiter: delimiter,
-          ContinuationToken: continuationToken,
-        });
-        const response = await client.send(command);
+          Delimiter: "/",
+          MaxKeys: options.limit,
+          ContinuationToken: decodeCursor(options.cursor),
+        }),
+      );
 
-        if (response.CommonPrefixes) {
-          for (const cp of response.CommonPrefixes) {
-            if (!cp.Prefix) continue;
-            const stripped = stripPrefix(cp.Prefix);
-            files.push({
-              name: stripped.split("/").pop() || stripped,
-              path: stripped,
-              isDirectory: true,
-            });
-          }
+      if (response.CommonPrefixes) {
+        for (const cp of response.CommonPrefixes) {
+          if (!cp.Prefix) continue;
+          const stripped = stripPrefix(cp.Prefix);
+          files.push({
+            name: stripped.split("/").pop() || stripped,
+            path: stripped,
+            isDirectory: true,
+          });
         }
+      }
 
-        if (response.Contents) {
-          for (const obj of response.Contents) {
-            if (!obj.Key) continue;
-            const stripped = stripPrefix(obj.Key);
-            if (stripped === path.replace(/^\/+/, "")) continue;
-            files.push({
-              name: stripped.split("/").pop() || stripped,
-              path: stripped,
-              size: obj.Size,
-              lastModified: obj.LastModified,
-              isDirectory: false,
-            });
-          }
+      if (response.Contents) {
+        for (const obj of response.Contents) {
+          if (!obj.Key) continue;
+          const stripped = stripPrefix(obj.Key);
+          if (stripped === path.replace(/^\/+/, "")) continue;
+          files.push({
+            name: stripped.split("/").pop() || stripped,
+            path: stripped,
+            size: obj.Size,
+            lastModified: obj.LastModified,
+            isDirectory: false,
+          });
         }
+      }
 
-        continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
-      } while (continuationToken);
-
-      return files;
+      return {
+        files,
+        nextCursor:
+          response.IsTruncated && response.NextContinuationToken
+            ? encodeCursor(response.NextContinuationToken)
+            : undefined,
+      };
     },
 
-    async read(path: string): Promise<Buffer> {
-      const command = new GetObjectCommand({
-        Bucket: config.bucket,
-        Key: fullPath(path),
-      });
-      const response = await client.send(command);
-      const bytes = await response.Body?.transformToByteArray();
-      if (!bytes) throw new VolumeAccessError(`Empty body for ${path}`);
-      return Buffer.from(bytes);
+    async read(path, options) {
+      const head = await client.send(
+        new HeadObjectCommand({ Bucket: config.bucket, Key: fullPath(path) }),
+      );
+      rejectOversized(head.ContentLength, options.maxBytes, path);
+      const response = await client.send(
+        new GetObjectCommand({
+          Bucket: config.bucket,
+          Key: fullPath(path),
+        }),
+      );
+      rejectOversized(response.ContentLength, options.maxBytes, path);
+      return readBounded(
+        response.Body as AsyncIterable<unknown> | undefined,
+        options.maxBytes,
+        path,
+      );
     },
 
     async write(path: string, content: Buffer): Promise<void> {

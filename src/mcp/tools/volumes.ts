@@ -6,15 +6,34 @@ export interface VolumeAdapterFactory {
   create(config: VolumeConfig): Promise<VolumeAdapter>;
   close?(): Promise<void>;
 }
+export interface VolumeTools {
+  readonly tools: readonly ToolDefinition[];
+  close(): Promise<void>;
+}
 const parse = (value: string) => {
   const match = /^([^/:]+):\/?(.*)$/.exec(value);
   return match ? { volume: match[1], subPath: match[2] } : null;
 };
+function listLimit(value: unknown, maximum: number): number {
+  if (value === undefined) return maximum;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1)
+    throw new McpError(ErrorCode.InvalidParams, "limit must be a positive integer");
+  return Math.min(value, maximum);
+}
+
+function decodeBase64(value: string): Buffer {
+  if (
+    value.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)
+  )
+    throw new McpError(ErrorCode.InvalidParams, "content must be valid base64");
+  return Buffer.from(value, "base64");
+}
 export function createVolumeTools(
   volumes: readonly VolumeConfig[],
   factory: VolumeAdapterFactory,
   limits: { readonly read: number; readonly write: number; readonly list: number },
-): readonly ToolDefinition[] {
+): VolumeTools {
   const proxy = volumes.filter((volume) => volume.proxy);
   const adapters = new Map<string, Promise<VolumeAdapter>>();
   const get = (volume: VolumeConfig) => {
@@ -36,7 +55,7 @@ export function createVolumeTools(
       throw new VolumeAccessError(`Path ${parsed.subPath} is not allowed on volume ${volume.name}`);
     return { parsed, volume };
   };
-  return [
+  const tools: readonly ToolDefinition[] = [
     {
       name: "list_volumes",
       description:
@@ -60,21 +79,28 @@ export function createVolumeTools(
     {
       name: "list_files",
       description:
-        "List files in a proxy volume path. Paths are formatted as 'volume-name:prefix/'.",
-      inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+        "List one page of files in a proxy volume path. Paths are formatted as 'volume-name:prefix/'.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          limit: { type: "number" },
+          cursor: { type: "string" },
+        },
+        required: ["path"],
+      },
       handler: async (args) => {
         const path = typeof args.path === "string" ? args.path : "";
         const { parsed, volume } = find(path, "volume-name:prefix/");
-        const files = await (await get(volume)).list(parsed.subPath);
-        return text(
-          files
-            .slice(0, limits.list)
-            .map(
-              (file) =>
-                `${file.isDirectory ? "d" : "-"} ${file.path}${file.size === undefined ? "" : ` (${file.size} bytes)`}`,
-            )
-            .join("\n"),
-        );
+        if (args.cursor !== undefined && typeof args.cursor !== "string")
+          throw new McpError(ErrorCode.InvalidParams, "cursor must be a string");
+        const page = await (
+          await get(volume)
+        ).list(parsed.subPath, {
+          limit: listLimit(args.limit, limits.list),
+          cursor: args.cursor,
+        });
+        return text(JSON.stringify(page, null, 2));
       },
     },
     {
@@ -87,11 +113,7 @@ export function createVolumeTools(
           typeof args.path === "string" ? args.path : "",
           "volume-name:path/to/file",
         );
-        const value = await (await get(volume)).read(parsed.subPath);
-        if (limits.read > 0 && value.length > limits.read)
-          throw new VolumeAccessError(
-            `File size (${value.length} bytes) exceeds read limit of ${limits.read} bytes`,
-          );
+        const value = await (await get(volume)).read(parsed.subPath, { maxBytes: limits.read });
         return text(value.toString("base64"));
       },
     },
@@ -109,9 +131,9 @@ export function createVolumeTools(
         const content = typeof args.content === "string" ? args.content : "";
         const { parsed, volume } = find(path, "volume-name:path/to/file");
         if (volume.readOnly) throw new VolumeAccessError(`Volume ${volume.name} is read-only`);
-        if (limits.write > 0 && content.length > limits.write)
+        const value = decodeBase64(content);
+        if (value.length > limits.write)
           throw new VolumeAccessError(`Write size exceeds limit of ${limits.write} bytes`);
-        const value = Buffer.from(content, "base64");
         await (await get(volume)).write(parsed.subPath, value);
         return text(`Wrote ${value.length} bytes to ${path}`);
       },
@@ -133,4 +155,12 @@ export function createVolumeTools(
       },
     },
   ];
+  return {
+    tools,
+    async close() {
+      const created = await Promise.all(adapters.values());
+      await Promise.all(created.map((adapter) => adapter.close?.()));
+      await factory.close?.();
+    },
+  };
 }

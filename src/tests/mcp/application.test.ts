@@ -9,6 +9,8 @@ function plan(
     readonly allowExec?: boolean;
     readonly allowProcessControl?: boolean;
     readonly token?: string;
+    readonly allowedPaths?: readonly string[];
+    readonly readOnly?: boolean;
   } = {},
 ) {
   return decodeMcpPlan({
@@ -28,7 +30,8 @@ function plan(
         target: "/files",
         source: "/tmp/files",
         proxy: true,
-        allowedPaths: ["**"],
+        allowedPaths: options.allowedPaths ? [...options.allowedPaths] : ["**"],
+        readOnly: options.readOnly,
       },
     ],
     mcp: {
@@ -88,7 +91,7 @@ function dependencies(adapter: VolumeAdapter): McpApplicationDependencies & {
 }
 
 const adapter: VolumeAdapter = {
-  list: async () => [{ name: "one", path: "one.txt", size: 3, isDirectory: false }],
+  list: async () => ({ files: [{ name: "one", path: "one.txt", size: 3, isDirectory: false }] }),
   read: async () => Buffer.from("abc"),
   write: async () => {},
   stat: async () => ({ name: "one", path: "one.txt", size: 3, isDirectory: false }),
@@ -181,10 +184,49 @@ describe("MCP application", () => {
     expect(resultText(await app.invoke("read_file", { path: "files:one.txt" }))).toBe("YWJj");
     await app.invoke("write_file", { path: "files:new.txt", content: "eA==" });
     await app.invoke("stat_file", { path: "files:one.txt" });
-    expect(volume.list).toHaveBeenCalledWith("reports");
-    expect(volume.read).toHaveBeenCalledWith("one.txt");
+    expect(volume.list).toHaveBeenCalledWith("reports", { limit: 100, cursor: undefined });
+    expect(volume.read).toHaveBeenCalledWith("one.txt", { maxBytes: 1024 });
     expect(volume.write).toHaveBeenCalledWith("new.txt", Buffer.from("x"));
     expect(volume.stat).toHaveBeenCalledWith("one.txt");
+    await app.close();
+  });
+
+  it("clamps list limits, keeps access checks before I/O, and closes a reused adapter once", async () => {
+    const close = vi.fn(async () => {});
+    const volume = { ...adapter, list: vi.fn(adapter.list), close };
+    const create = vi.fn(async () => volume);
+    const deps = dependencies(volume);
+    const app = await createMcpApplication(plan({ allowedPaths: ["reports/**"] }), {
+      ...deps,
+      volumeAdapters: { create },
+    });
+    await app.invoke("list_files", { path: "files:reports", limit: 999 });
+    await app.invoke("read_file", { path: "files:reports/one.txt" });
+    expect(create).toHaveBeenCalledOnce();
+    expect(volume.list).toHaveBeenCalledWith("reports", { limit: 100, cursor: undefined });
+    await expect(app.invoke("list_files", { path: "files:private" })).rejects.toMatchObject({
+      code: -32602,
+    });
+    expect(volume.list).toHaveBeenCalledOnce();
+    await app.close();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("validates base64 and applies write limits to decoded bytes before provider I/O", async () => {
+    const write = vi.fn(adapter.write);
+    const app = await createMcpApplication(plan(), dependencies({ ...adapter, write }));
+    await expect(
+      app.invoke("write_file", { path: "files:new.txt", content: "!!!" }),
+    ).rejects.toMatchObject({
+      code: -32602,
+    });
+    await expect(
+      app.invoke("write_file", {
+        path: "files:new.txt",
+        content: Buffer.alloc(1025).toString("base64"),
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+    expect(write).not.toHaveBeenCalled();
     await app.close();
   });
 

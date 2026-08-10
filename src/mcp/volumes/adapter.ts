@@ -6,6 +6,20 @@ export interface FileInfo {
   isDirectory: boolean;
 }
 
+export interface ListOptions {
+  readonly limit: number;
+  readonly cursor?: string;
+}
+
+export interface FilePage {
+  readonly files: readonly FileInfo[];
+  readonly nextCursor?: string;
+}
+
+export interface ReadOptions {
+  readonly maxBytes: number;
+}
+
 export interface VolumeCredentials {
   [key: string]: string | { env: string } | undefined;
 }
@@ -33,10 +47,60 @@ export interface VolumeConfig {
 }
 
 export interface VolumeAdapter {
-  list(path: string): Promise<FileInfo[]>;
-  read(path: string): Promise<Buffer>;
+  list(path: string, options: ListOptions): Promise<FilePage>;
+  read(path: string, options: ReadOptions): Promise<Buffer>;
   write(path: string, content: Buffer): Promise<void>;
   stat(path: string): Promise<FileInfo>;
+  close?(): Promise<void>;
+}
+
+const cursorPrefix = "biodome:v1:";
+
+export function encodeCursor(token: string): string {
+  return cursorPrefix + Buffer.from(token, "utf8").toString("base64url");
+}
+
+export function decodeCursor(cursor: string | undefined): string | undefined {
+  if (cursor === undefined) return undefined;
+  if (!cursor.startsWith(cursorPrefix)) throw new VolumeAccessError("Invalid list cursor");
+  const encoded = cursor.slice(cursorPrefix.length);
+  if (!encoded || !/^[A-Za-z0-9_-]+$/.test(encoded))
+    throw new VolumeAccessError("Invalid list cursor");
+  const token = Buffer.from(encoded, "base64url").toString("utf8");
+  if (!token || encodeCursor(token) !== cursor) throw new VolumeAccessError("Invalid list cursor");
+  return token;
+}
+
+export async function readBounded(
+  body: AsyncIterable<unknown> | undefined,
+  maxBytes: number,
+  path: string,
+): Promise<Buffer> {
+  if (!body) throw new VolumeAccessError(`Empty body for ${path}`);
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    for await (const chunk of body) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+      total += bytes.length;
+      if (total > maxBytes) {
+        (body as { destroy?: (error?: Error) => void }).destroy?.();
+        throw new VolumeAccessError(`File size exceeds read limit of ${maxBytes} bytes`);
+      }
+      chunks.push(bytes);
+    }
+  } catch (error) {
+    if (error instanceof VolumeAccessError) throw error;
+    throw error;
+  }
+  return Buffer.concat(chunks, total);
+}
+
+export function rejectOversized(size: number | undefined, maxBytes: number, path: string): void {
+  if (size !== undefined && size > maxBytes)
+    throw new VolumeAccessError(
+      `File ${path} size (${size} bytes) exceeds read limit of ${maxBytes} bytes`,
+    );
 }
 
 export function resolveCredential(value: string | { env: string } | undefined): string | undefined {

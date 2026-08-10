@@ -1,5 +1,14 @@
 import { Storage } from "@google-cloud/storage";
-import { VolumeAdapter, FileInfo, VolumeConfig, resolveCredentials } from "./adapter.js";
+import {
+  VolumeAdapter,
+  FileInfo,
+  VolumeConfig,
+  resolveCredentials,
+  decodeCursor,
+  encodeCursor,
+  readBounded,
+  rejectOversized,
+} from "./adapter.js";
 
 export function createGcsAdapter(config: VolumeConfig): VolumeAdapter {
   const credentials = resolveCredentials(config.credentials);
@@ -19,11 +28,14 @@ export function createGcsAdapter(config: VolumeConfig): VolumeAdapter {
   }
 
   return {
-    async list(path: string): Promise<FileInfo[]> {
+    async list(path, options) {
       const full = fullPath(path);
-      const [files] = await bucket.getFiles({
+      const [files, nextQuery] = await bucket.getFiles({
         prefix: full,
         delimiter: "/",
+        autoPaginate: false,
+        maxResults: options.limit,
+        pageToken: decodeCursor(options.cursor),
       });
 
       const result: FileInfo[] = [];
@@ -50,7 +62,7 @@ export function createGcsAdapter(config: VolumeConfig): VolumeAdapter {
           continue;
         }
 
-        const [metadata] = await file.getMetadata();
+        const metadata = file.metadata;
         result.push({
           name: stripped.split("/").pop() || stripped,
           path: stripped,
@@ -60,12 +72,18 @@ export function createGcsAdapter(config: VolumeConfig): VolumeAdapter {
         });
       }
 
-      return result;
+      return {
+        files: result,
+        nextCursor:
+          typeof nextQuery.pageToken === "string" ? encodeCursor(nextQuery.pageToken) : undefined,
+      };
     },
 
-    async read(path: string): Promise<Buffer> {
-      const [buffer] = await bucket.file(fullPath(path)).download();
-      return buffer;
+    async read(path, options) {
+      const file = bucket.file(fullPath(path));
+      const [metadata] = await file.getMetadata();
+      rejectOversized(metadata.size ? Number(metadata.size) : undefined, options.maxBytes, path);
+      return readBounded(file.createReadStream(), options.maxBytes, path);
     },
 
     async write(path: string, content: Buffer): Promise<void> {

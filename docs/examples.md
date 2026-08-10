@@ -364,3 +364,15 @@ export default function volumes(ctx) {
   });
 }
 ```
+
+For a proxy volume, traverse a large prefix one page at a time through MCP:
+
+```json
+{ "path": "s3-assets:dev/reports/", "limit": 50 }
+```
+
+The `list_files` response is JSON. Pass its opaque `nextCursor` with the same path to retrieve the next page:
+
+```json
+{ "path": "s3-assets:dev/reports/", "limit": 50, "cursor": "biodome:v1:..." }
+```

@@ -170,10 +170,12 @@ Provider-specific wrappers around `addVolume` with friendlier field names. All w
 When proxy volumes are enabled, the MCP server exposes these tools for agent access:
 
 - `list_volumes` — list proxy volumes and their access rules.
-- `list_files` — list files under a volume-qualified path (`s3-data:reports/`).
-- `read_file` — read a file as base64 (`s3-data:reports/file.pdf`).
+- `list_files` — list one bounded page under a volume-qualified path (`s3-data:reports/`). Accepts an optional `limit` (clamped to the configured `maxListEntries`) and opaque `cursor`; returns JSON with `files` and, when more results exist, `nextCursor`.
+- `read_file` — read a file as base64 (`s3-data:reports/file.pdf`). Reads larger than configured `maxReadBytes` are rejected without returning partial content.
 - `write_file` — write a file from base64 content.
 - `stat_file` — get file metadata.
+
+`write_file` validates base64 content before decoding and enforces `maxWriteBytes` against decoded bytes.
 
 ### MCP provider tools (code mode)
 

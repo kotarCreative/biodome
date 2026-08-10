@@ -1,6 +1,12 @@
 import { promises as fs } from "node:fs";
 import { resolve, join, sep } from "node:path";
-import { VolumeAdapter, FileInfo, VolumeConfig, VolumeAccessError } from "./adapter.js";
+import {
+  VolumeAdapter,
+  FileInfo,
+  VolumeConfig,
+  VolumeAccessError,
+  rejectOversized,
+} from "./adapter.js";
 
 const PROJECT_ROOT = "/workspace";
 
@@ -42,23 +48,24 @@ async function resolveExistingPath(config: VolumeConfig, userPath: string): Prom
 
 export function createLocalAdapter(config: VolumeConfig): VolumeAdapter {
   return {
-    async list(path: string): Promise<FileInfo[]> {
+    async list(path, options) {
       const dirPath = await resolveExistingPath(config, path || ".");
       const entries = await fs.readdir(dirPath, { withFileTypes: true });
-      const result: FileInfo[] = [];
-      for (const entry of entries) {
+      const files: FileInfo[] = [];
+      for (const entry of entries.slice(0, options.limit)) {
         const entryPath = join(path || "", entry.name).replace(/\\/g, "/");
-        result.push({
+        files.push({
           name: entry.name,
           path: entryPath,
           isDirectory: entry.isDirectory(),
         });
       }
-      return result;
+      return { files };
     },
 
-    async read(path: string): Promise<Buffer> {
+    async read(path, options) {
       const fullPath = await resolveExistingPath(config, path);
+      rejectOversized((await fs.stat(fullPath)).size, options.maxBytes, path);
       return fs.readFile(fullPath);
     },
 

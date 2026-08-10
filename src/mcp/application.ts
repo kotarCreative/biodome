@@ -122,6 +122,11 @@ export async function createMcpApplication(
   const maxWriteBytes = plan.mcp.maxWriteBytes ?? 2097152;
   const maxListEntries = plan.mcp.maxListEntries ?? 100;
   const skipped = buildUpstreams(plan, environment).skipped;
+  const volumeTools = createVolumeTools(plan.volumes.map(asVolume), dependencies.volumeAdapters, {
+    read: maxReadBytes,
+    write: maxWriteBytes,
+    list: maxListEntries,
+  });
   const tools = [
     ...createInfoProviderTools(plan, dependencies.providers, maxListEntries, skipped),
     ...createProcessLogTools(
@@ -131,11 +136,7 @@ export async function createMcpApplication(
       plan.mcp.allowExec === true,
       plan.mcp.allowProcessControl === true,
     ),
-    ...createVolumeTools(plan.volumes.map(asVolume), dependencies.volumeAdapters, {
-      read: maxReadBytes,
-      write: maxWriteBytes,
-      list: maxListEntries,
-    }),
+    ...volumeTools.tools,
   ];
   const toolMap = new Map(tools.map((tool) => [tool.name, tool]));
   const invoke = async (name: string, arguments_: ToolArguments = {}) => {
@@ -192,7 +193,7 @@ export async function createMcpApplication(
     },
     close: async () => {
       await dependencies.providers.close();
-      await dependencies.volumeAdapters.close?.();
+      await volumeTools.close();
       await dependencies.events.close?.();
       await server.close();
     },
