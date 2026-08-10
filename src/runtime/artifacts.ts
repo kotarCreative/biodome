@@ -27,8 +27,17 @@ export interface GeneratedFile {
 }
 
 export const MCP_RUNTIME_FILES = [
+  "application.js",
+  "auth.js",
+  "event-sink.js",
+  "plan.js",
   "provider-tools.js",
   "server.js",
+  "startup.js",
+  "tools/info-provider.js",
+  "tools/process-logs.js",
+  "tools/types.js",
+  "tools/volumes.js",
   "upstream.js",
   "volumes/adapter.js",
   "volumes/azure.js",

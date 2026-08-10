@@ -7,7 +7,14 @@ const PROVIDER_TOOL_NAMES = new Set([
 
 // Filters the full MCP tool list so that provider-specific tools are only
 // advertised when at least one provider is declared in the plan.
-export function filterProviderTools(tools: any[], providers: any[]): any[] {
+export interface NamedTool {
+  readonly name: string;
+}
+
+export function filterProviderTools<T extends NamedTool>(
+  tools: readonly T[],
+  providers: readonly unknown[],
+): T[] {
   const hasProviders = providers.length > 0;
   return tools.filter((tool) => {
     if (PROVIDER_TOOL_NAMES.has(tool.name)) return hasProviders;
