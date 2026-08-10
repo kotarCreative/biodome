@@ -1,13 +1,5 @@
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -25,14 +17,10 @@ describe("published package", () => {
     const rootDir = process.cwd();
     mkdirSync(packageDir);
     const packed = JSON.parse(
-      execFileSync(
-        "npm",
-        ["pack", "--ignore-scripts", "--json", "--pack-destination", packageDir],
-        {
-          cwd: rootDir,
-          encoding: "utf8",
-        },
-      ),
+      execFileSync("npm", ["pack", "--json", "--pack-destination", packageDir], {
+        cwd: rootDir,
+        encoding: "utf8",
+      }),
     ) as
       | Array<{ filename: string; files: Array<{ path: string }> }>
       | Record<string, { filename: string; files: Array<{ path: string }> }>;
@@ -48,19 +36,15 @@ describe("published package", () => {
 
     mkdirSync(projectDir);
     writeFileSync(join(projectDir, "package.json"), '{"type":"module"}\n');
-    mkdirSync(installedDir, { recursive: true });
-    execFileSync("tar", [
-      "-xzf",
-      join(packageDir, filename),
-      "--strip-components=1",
-      "-C",
-      installedDir,
-    ]);
+    execFileSync(
+      "npm",
+      ["install", "--ignore-scripts", "--package-lock=false", join(packageDir, filename)],
+      { cwd: projectDir, stdio: "pipe" },
+    );
 
     const installedPackage = JSON.parse(
       readFileSync(join(installedDir, "package.json"), "utf8"),
     ) as {
-      dependencies: Record<string, string>;
       exports: {
         ".": { import: string; types: string };
         "./app": { import: string; types: string };
@@ -69,12 +53,6 @@ describe("published package", () => {
       types: string;
       bin: { biodome: string };
     };
-    for (const dependency of Object.keys(installedPackage.dependencies)) {
-      const link = join(projectDir, "node_modules", dependency);
-      mkdirSync(join(link, ".."), { recursive: true });
-      symlinkSync(join(rootDir, "node_modules", dependency), link);
-    }
-
     for (const path of [
       installedPackage.exports["."].import,
       installedPackage.exports["."].types,

@@ -1,49 +1,49 @@
-import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
-import { capabilitiesOf } from "../../core/capabilities.js";
-import { createPlan } from "../../core/plan.js";
+import { describe } from "vitest";
 import { createAwsEcsDriver } from "../../runtime/aws-ecs.js";
 import { dockerComposeDriver } from "../../runtime/docker-compose.js";
+import { dockerSandboxDriver } from "../../runtime/docker-sandbox.js";
 import {
-  type ExecutableDriver,
-  type RuntimeDriver,
-  supportsExec,
-  validateRuntimeDriver,
-} from "../../runtime/driver.js";
+  runtimeDriverMetadataContract,
+  runtimeDriverMetadataRejectsInvalidSurfaces,
+} from "../contracts/lib/driver.js";
 
 describe("runtime driver contracts", () => {
-  it("refines executable drivers only when declaration and method are both present", () => {
-    const driver: RuntimeDriver & ExecutableDriver = {
-      id: "exec",
-      capabilities: capabilitiesOf("exec.command"),
-      exec: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "", durationMs: 0 }),
-    };
-    const methodOnly = Object.assign(
-      { id: "method-only", capabilities: capabilitiesOf() } satisfies RuntimeDriver,
-      { exec: driver.exec },
-    );
-
-    expect(supportsExec(driver)).toBe(true);
-    if (supportsExec(driver)) {
-      const plan = createPlan("contract-test");
-      expect(
-        Effect.runSync(
-          driver.exec({
-            rootDir: "/project",
-            outputDir: "/project/output",
-            plan,
-            target: { name: "local", driver: "exec", options: {} },
-            deploymentId: "deployment",
-            command: ["true"],
-          }),
-        ).exitCode,
-      ).toBe(0);
-    }
-    expect(supportsExec(methodOnly)).toBe(false);
-  });
-
-  it("accepts the concrete Compose and ECS operation surfaces", () => {
-    expect(() => validateRuntimeDriver(dockerComposeDriver)).not.toThrow();
-    expect(() => validateRuntimeDriver(createAwsEcsDriver())).not.toThrow();
-  });
+  runtimeDriverMetadataRejectsInvalidSurfaces();
 });
+
+runtimeDriverMetadataContract("docker-compose", dockerComposeDriver, [
+  "lifecycle.build",
+  "lifecycle.start",
+  "lifecycle.stop",
+  "lifecycle.restart",
+  "exec.command",
+  "logs.stream",
+  "status.read",
+  "process.status",
+  "process.signal",
+  "volume.mount",
+  "artifact.collect",
+]);
+
+runtimeDriverMetadataContract("docker-sandbox", dockerSandboxDriver, [
+  "lifecycle.build",
+  "lifecycle.start",
+  "lifecycle.stop",
+  "exec.command",
+  "exec.pty",
+  "process.signal",
+  "logs.stream",
+  "status.read",
+  "volume.mount",
+  "artifact.collect",
+]);
+
+runtimeDriverMetadataContract("aws-ecs", createAwsEcsDriver(), [
+  "lifecycle.build",
+  "lifecycle.start",
+  "lifecycle.stop",
+  "status.read",
+  "logs.stream",
+  "exec.command",
+  "artifact.collect",
+]);
