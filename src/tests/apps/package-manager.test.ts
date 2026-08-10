@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -17,6 +17,15 @@ function root(): string {
   return value;
 }
 afterEach(() => dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+
+function writeInstalledManifest(dir: string, biodome: unknown): void {
+  const pkg = join(dir, "node_modules", "@test", "recipe");
+  mkdirSync(pkg, { recursive: true });
+  writeFileSync(
+    join(pkg, "package.json"),
+    JSON.stringify({ name: "@test/recipe", version: "1.2.3", biodome }),
+  );
+}
 
 describe("app package manager", () => {
   it.each([
@@ -63,34 +72,96 @@ describe("app package manager", () => {
     expect(() => validateAppPackageSpec(spec)).toThrow("Invalid npm app package spec");
   });
 
-  it("uses npm argument arrays in .biodome and validates installed metadata", async () => {
+  it("preflights script-free before saving a compatible package in .biodome", async () => {
     const project = root();
     const calls: Array<{ args: string[]; cwd: string }> = [];
     const runner: NpmRunner = {
       run(args, cwd) {
         calls.push({ args, cwd });
+        writeInstalledManifest(cwd, { type: "app-recipe", apiVersion: 1 });
       },
     };
-    const pkg = join(project, ".biodome", "node_modules", "@test", "recipe");
-    mkdirSync(pkg, { recursive: true });
-    writeFileSync(
-      join(pkg, "package.json"),
-      JSON.stringify({
-        name: "@test/recipe",
-        version: "1.2.3",
-        biodome: { type: "app-recipe", apiVersion: 1 },
-      }),
-    );
     await expect(
       Effect.runPromise(addAppPackageEffect(project, "@test/recipe", runner)),
     ).resolves.toEqual({
       name: "@test/recipe",
       version: "1.2.3",
     });
+    const preflight = calls[0];
+    if (!preflight) throw new Error("expected a preflight npm call");
     expect(calls).toEqual([
+      {
+        args: ["install", "--ignore-scripts", "--no-save", "@test/recipe"],
+        cwd: preflight.cwd,
+      },
       { args: ["install", "--save", "@test/recipe"], cwd: join(project, ".biodome") },
     ]);
-    expect(calls[0].args.join(" ")).not.toContain(";");
+    expect(existsSync(preflight.cwd)).toBe(false);
+    expect(preflight.args).toContain("--ignore-scripts");
+    expect(preflight.args).not.toContain("--save");
+  });
+
+  it("does not create project package state for incompatible preflight metadata", async () => {
+    const project = root();
+    const runner: NpmRunner = {
+      run(_args, cwd) {
+        writeInstalledManifest(cwd, { type: "not-a-recipe", apiVersion: 1 });
+      },
+    };
+
+    await expect(
+      Effect.runPromise(addAppPackageEffect(project, "@test/recipe", runner)),
+    ).rejects.toThrow("not a compatible Biodome app recipe");
+
+    expect(existsSync(join(project, ".biodome"))).toBe(false);
+    expect(existsSync(join(project, ".gitignore"))).toBe(false);
+  });
+
+  it("preserves existing project files when preflight metadata is incompatible", async () => {
+    const project = root();
+    const biodome = join(project, ".biodome");
+    mkdirSync(biodome, { recursive: true });
+    writeFileSync(join(biodome, "package.json"), '{\n  "before": true\n}\n');
+    writeFileSync(join(biodome, "package-lock.json"), "lock-before\n");
+    writeFileSync(join(project, ".gitignore"), "custom\n");
+    const before = [
+      readFileSync(join(biodome, "package.json")),
+      readFileSync(join(biodome, "package-lock.json")),
+      readFileSync(join(project, ".gitignore")),
+    ];
+    const runner: NpmRunner = {
+      run(_args, cwd) {
+        writeInstalledManifest(cwd, {});
+      },
+    };
+
+    await expect(
+      Effect.runPromise(addAppPackageEffect(project, "@test/recipe", runner)),
+    ).rejects.toThrow("not a compatible Biodome app recipe");
+
+    expect(readFileSync(join(biodome, "package.json"))).toEqual(before[0]);
+    expect(readFileSync(join(biodome, "package-lock.json"))).toEqual(before[1]);
+    expect(readFileSync(join(project, ".gitignore"))).toEqual(before[2]);
+    expect(existsSync(join(biodome, "node_modules"))).toBe(false);
+  });
+
+  it("removes temporary preflight state when npm fails", async () => {
+    const project = root();
+    let preflightDir = "";
+    const runner: NpmRunner = {
+      run(_args, cwd) {
+        preflightDir = cwd;
+        throw new Error("npm unavailable");
+      },
+    };
+
+    await expect(Effect.runPromise(addAppPackageEffect(project, "recipe", runner))).rejects.toThrow(
+      "npm unavailable",
+    );
+
+    expect(existsSync(preflightDir)).toBe(false);
+    expect(existsSync(join(project, ".biodome"))).toBe(false);
+    expect(existsSync(join(project, ".gitignore"))).toBe(false);
   });
 
   it("removes only the validated package name", async () => {

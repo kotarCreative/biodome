@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { capabilitiesOf } from "../../core/capabilities.js";
 import type { ExecutionPlan } from "../../orchestration/execution-plan.js";
 import { validateCompatibility } from "../../orchestration/compatibility.js";
+import { dockerSandboxDriver } from "../../runtime/docker-sandbox.js";
 
 function plan(requirements: ExecutionPlan["task"]["capabilities"]): ExecutionPlan {
   return {
@@ -47,6 +48,16 @@ describe("validateCompatibility", () => {
         reason: "allowlist API access",
       },
     ]);
+  });
+
+  it("rejects required network policy for Docker Sandbox before provider side effects", () => {
+    const report = validateCompatibility(
+      plan([{ capability: "network.policy", level: "required", reason: "isolated task" }]),
+      dockerSandboxDriver,
+    );
+
+    expect(report.compatible).toBe(false);
+    expect(report.missing[0]).toMatchObject({ subject: "network.policy" });
   });
 
   it("reports missing preferred capabilities as warnings", () => {

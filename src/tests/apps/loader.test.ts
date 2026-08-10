@@ -123,4 +123,41 @@ describe("implicit app loader", () => {
       ]),
     );
   });
+
+  it("accepts shared recipe-option objects and arrays", async () => {
+    const root = project({
+      ".biodome/config.json": JSON.stringify({ project: { name: "apps" } }),
+      ".biodome/apps/shared.mjs": `
+        const object = { enabled: true };
+        const array = ["value"];
+        export default {
+          _tag: "AppRecipe", id: "@test/shared", apiVersion: 1,
+          options: { primary: object, fallback: object, first: array, second: array },
+          expand() {},
+        };
+      `,
+    });
+
+    await expect(buildPlan(root)).resolves.toBeDefined();
+  });
+
+  it.each([
+    ["a direct object cycle", "const options = {}; options.self = options;"],
+    [
+      "an indirect object-array cycle",
+      "const options = {}; const array = [options]; options.array = array;",
+    ],
+  ])("rejects %s in recipe options", async (_name, setup) => {
+    const root = project({
+      ".biodome/config.json": JSON.stringify({ project: { name: "apps" } }),
+      ".biodome/apps/cyclic.mjs": `
+        ${setup}
+        export default {
+          _tag: "AppRecipe", id: "@test/cyclic", apiVersion: 1, options, expand() {},
+        };
+      `,
+    });
+
+    await expect(buildPlan(root)).rejects.toThrow("App recipe options must not contain cycles");
+  });
 });

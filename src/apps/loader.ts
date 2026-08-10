@@ -85,19 +85,23 @@ function validateRecipeOptions(value: unknown, seen = new WeakSet<object>()): vo
     throw new ValidationError({ message: "App recipe options must not contain cycles" });
   }
   seen.add(value);
-  if (Array.isArray(value)) {
-    for (const item of value) validateRecipeOptions(item, seen);
-    return;
-  }
-  if (Object.getPrototypeOf(value) !== Object.prototype) {
-    throw new ValidationError({
-      message: "App recipe options must contain only plain objects, arrays, and app references",
-    });
-  }
-  for (const key of Object.keys(value)) {
-    if (DANGEROUS_KEYS.has(key))
-      throw new ValidationError({ message: `App recipe options contain unsafe key "${key}"` });
-    validateRecipeOptions((value as Record<string, unknown>)[key], seen);
+  try {
+    if (Array.isArray(value)) {
+      for (const item of value) validateRecipeOptions(item, seen);
+      return;
+    }
+    if (Object.getPrototypeOf(value) !== Object.prototype) {
+      throw new ValidationError({
+        message: "App recipe options must contain only plain objects, arrays, and app references",
+      });
+    }
+    for (const key of Object.keys(value)) {
+      if (DANGEROUS_KEYS.has(key))
+        throw new ValidationError({ message: `App recipe options contain unsafe key "${key}"` });
+      validateRecipeOptions((value as Record<string, unknown>)[key], seen);
+    }
+  } finally {
+    seen.delete(value);
   }
 }
 

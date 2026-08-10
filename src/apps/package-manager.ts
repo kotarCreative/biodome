@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { Effect } from "effect";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ValidationError } from "../core/errors.js";
 import { APP_RECIPE_API_VERSION } from "./types.js";
@@ -128,6 +129,14 @@ export function addAppPackageEffect(
   return Effect.try({
     try: () => {
       validateAppPackageSpec(spec);
+      const preflightDir = mkdtempSync(join(tmpdir(), "biodome-app-package-"));
+      try {
+        ensureManifest(preflightDir);
+        runner.run(["install", "--ignore-scripts", "--no-save", spec], preflightDir);
+        validateInstalledMetadata(preflightDir, spec);
+      } finally {
+        rmSync(preflightDir, { recursive: true, force: true });
+      }
       const dir = biodomeDir(rootDir);
       ensureManifest(dir);
       ensureIgnored(rootDir);

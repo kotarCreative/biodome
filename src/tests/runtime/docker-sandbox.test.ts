@@ -5,6 +5,7 @@ import {
   parseSbxListOutput,
   translateWorkspaceCommand,
   inferSbxAgent,
+  dockerSandboxDriver,
 } from "../../runtime/docker-sandbox.js";
 import { createPlan } from "../../core/plan.js";
 
@@ -124,5 +125,12 @@ describe("inferSbxAgent", () => {
       },
     };
     expect(inferSbxAgent(plan)).toBe("codex");
+  });
+});
+
+describe("Docker Sandbox capabilities", () => {
+  it("advertises process signaling but not unenforced network policy", () => {
+    expect(dockerSandboxDriver.capabilities.has("process.signal")).toBe(true);
+    expect(dockerSandboxDriver.capabilities.has("network.policy")).toBe(false);
   });
 });
