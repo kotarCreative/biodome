@@ -23,4 +23,14 @@ describe("CLI program parsing", () => {
     await program.parseAsync(["node", "biodome", "--no-events", "up", "demo", "--build"]);
     expect(up).toHaveBeenCalledWith("/project", "demo", { build: true });
   });
+
+  it("passes parsed event query options to the events workflow", async () => {
+    const events = vi.fn(() => Effect.succeed([]));
+    const run = vi.fn(async (effect) => {
+      await Effect.runPromise(effect);
+    });
+    const program = createProgram({ rootDir: () => "/project", run, workflows: { events } });
+    await program.parseAsync(["node", "biodome", "events", "--run", "run-1", "--limit", "50"]);
+    expect(events).toHaveBeenCalledWith("/project", { runId: "run-1", limit: 50 });
+  });
 });

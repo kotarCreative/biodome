@@ -186,6 +186,12 @@ When providers are declared, the MCP server exposes a progressive-discovery inte
 - `provider_describe` — get the full input schema and description for one provider tool (e.g. `linear.create_issue`).
 - `provider_execute` — call a tool by its qualified name with arguments. Credentials are attached by the server and never reach the agent.
 
+Provider discovery uses bounded parallel requests. Configure `mcp.providerConnectTimeoutMs`,
+`mcp.providerRequestTimeoutMs`, and `mcp.providerCatalogConcurrency` to set connection
+deadlines, list/describe/call deadlines, and the maximum simultaneous catalog requests.
+Defaults are 10 seconds, 30 seconds, and 4. A timed-out provider is reported without
+credentials, healthy providers continue, and `provider_execute` is never retried.
+
 ### `fileExists(path)`
 
 Check if a file exists relative to the project root.

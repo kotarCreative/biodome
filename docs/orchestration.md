@@ -132,7 +132,7 @@ through `planned`, `preparing`, `ready`, `executing`, optional `collecting`, a
 terminal result, optional `cleaning-up`, and `complete`.
 
 Structured event logs remain separate and are stored alongside the target logs.
-Use `biodome events` or `biodome events --run <run-id>` to inspect them. Declared
+Use `biodome events`, `biodome events --run <run-id>`, or `biodome events --limit <n>` to inspect them. Queries are bounded to 100 events by default (1,000 maximum), and malformed JSONL lines are diagnosed without hiding valid events. Declared
 artifacts are collected under the target build directory and recorded with their
 local path and size.
 

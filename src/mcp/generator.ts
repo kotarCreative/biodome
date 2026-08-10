@@ -116,6 +116,9 @@ export function generatePlanJson(plan: Plan): string {
       maxReadBytes: plan.build.mcpConfig.maxReadBytes,
       maxWriteBytes: plan.build.mcpConfig.maxWriteBytes,
       maxListEntries: plan.build.mcpConfig.maxListEntries,
+      providerConnectTimeoutMs: plan.build.mcpConfig.providerConnectTimeoutMs,
+      providerRequestTimeoutMs: plan.build.mcpConfig.providerRequestTimeoutMs,
+      providerCatalogConcurrency: plan.build.mcpConfig.providerCatalogConcurrency,
     },
   };
   return JSON.stringify(data, null, 2);

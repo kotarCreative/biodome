@@ -93,6 +93,9 @@ export const McpPlanSchema = Schema.Struct({
     maxReadBytes: Schema.optional(Schema.Number),
     maxWriteBytes: Schema.optional(Schema.Number),
     maxListEntries: Schema.optional(Schema.Number),
+    providerConnectTimeoutMs: Schema.optional(Schema.Number),
+    providerRequestTimeoutMs: Schema.optional(Schema.Number),
+    providerCatalogConcurrency: Schema.optional(Schema.Number),
   }),
 });
 

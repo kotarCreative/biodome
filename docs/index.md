@@ -38,16 +38,17 @@ biodome up local         # starts the local target + MCP server
 
 ## Event capture
 
-Every lifecycle command (`build`, `up`, `down`, `exec`, `restart`, `status`, `ps`, `logs`, `config validate`) captures a structured, append-only event log by default. Pass `--no-events` to disable. Events are written to `.biodome-build/logs/events-<runId>.jsonl` and include every plan load, generated file, hook, and runtime operation with timing. Logs are automatically capped at 10 MB — once the file exceeds this limit, new events are dropped with a warning.
+Every lifecycle command (`build`, `up`, `down`, `exec`, `restart`, `status`, `ps`, `logs`, `config validate`) captures a structured, append-only event log by default. Pass `--no-events` to disable. Events are written to `.biodome-build/logs/events-<runId>.jsonl` and include every plan load, generated file, hook, and runtime operation with timing. Files rotate before exceeding 10 MB, and each log directory retains its newest 100 event files.
 
 ```bash
 biodome build local
 biodome --no-events build local
 biodome events
 biodome events --run <runId>
+biodome events --limit 50
 ```
 
-This event stream lets you audit exactly what happened during a run and is designed to eventually support replaying a run step by step.
+Queries return at most 100 events by default and accept up to 1,000 with `--limit`. Run-filtered queries address only the matching run files. If a historical JSONL line is malformed, the command reports its filename and line number while returning valid events from other lines.
 
 ## Documentation
 

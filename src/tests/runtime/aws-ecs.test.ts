@@ -89,6 +89,9 @@ const samplePlan: Plan = {
       maxReadBytes: 0,
       maxWriteBytes: 0,
       maxListEntries: 0,
+      providerConnectTimeoutMs: 0,
+      providerRequestTimeoutMs: 0,
+      providerCatalogConcurrency: 0,
     },
   },
   runtime: {

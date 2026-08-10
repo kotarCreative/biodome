@@ -202,6 +202,11 @@ export async function createMcpApplication(
 
 export function createDefaultDependencies(
   providers: readonly UpstreamProvider[] = [],
+  providerOptions: {
+    readonly connectTimeoutMs?: number;
+    readonly requestTimeoutMs?: number;
+    readonly catalogConcurrency?: number;
+  } = {},
 ): McpApplicationDependencies {
   const runner: ProcessRunner = {
     async exec(command, options) {
@@ -232,7 +237,7 @@ export function createDefaultDependencies(
         }
       },
     },
-    providers: new UpstreamRegistry([...providers]),
+    providers: new UpstreamRegistry([...providers], undefined, providerOptions),
     processRunner: runner,
     probeService: async (host, port) =>
       new Promise((resolve) => {

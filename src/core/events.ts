@@ -10,6 +10,8 @@ import {
   appendFileSync,
   readFileSync,
   existsSync,
+  statSync,
+  readdirSync,
   renameSync,
   chmodSync,
   rmSync,
@@ -149,6 +151,25 @@ export const EventStore = Context.Service<EventStore>("@biodome/EventStore");
 
 const DEFAULT_MAX_LOG_SIZE = 10 * 1024 * 1024; // 10 MB
 const DEFAULT_MAX_LOG_ROTATIONS = 5;
+const DEFAULT_MAX_LOG_FILES = 100;
+export const DEFAULT_EVENT_QUERY_LIMIT = 100;
+export const MAX_EVENT_QUERY_LIMIT = 1_000;
+
+export interface EventQuery {
+  readonly runId?: string;
+  readonly limit: number;
+}
+
+export interface EventDiagnostic {
+  readonly path: string;
+  readonly line: number;
+  readonly message: string;
+}
+
+export interface EventReadResult {
+  readonly events: readonly SandboxEvent[];
+  readonly diagnostics: readonly EventDiagnostic[];
+}
 
 export interface FileEventStoreOptions {
   readonly runId: string;
@@ -156,6 +177,7 @@ export interface FileEventStoreOptions {
   readonly clock?: () => Date;
   readonly maxSize?: number;
   readonly maxRotations?: number;
+  readonly maxFiles?: number;
 }
 
 export function createFileEventStore(options: FileEventStoreOptions): EventStore {
@@ -164,8 +186,11 @@ export function createFileEventStore(options: FileEventStoreOptions): EventStore
   const now = options.clock ?? (() => new Date());
   const maxSize = options.maxSize ?? DEFAULT_MAX_LOG_SIZE;
   const maxRotations = options.maxRotations ?? DEFAULT_MAX_LOG_ROTATIONS;
+  const maxFiles = options.maxFiles ?? DEFAULT_MAX_LOG_FILES;
   let sequence = 0;
   let closed = false;
+  let bytes = existsSync(path) ? statSync(path).size : 0;
+  let writes = Promise.resolve();
 
   const ensureDir = () => {
     const dir = dirname(path);
@@ -175,47 +200,67 @@ export function createFileEventStore(options: FileEventStoreOptions): EventStore
     chmodSync(dir, 0o700);
   };
 
-  const emit: EventStore["emit"] = (type, data) =>
-    Effect.gen(function* () {
-      if (closed) {
-        throw new Error("EventStore is closed");
-      }
-      sequence += 1;
-      const event: SandboxEvent = {
-        id: randomUUID(),
-        runId,
-        sequence,
-        timestamp: now().toISOString(),
-        type,
-        data,
-      };
-      ensureDir();
-      const line = JSON.stringify(event) + "\n";
-      if (maxSize > 0) {
-        try {
-          const stat = existsSync(path) ? readFileSync(path).length : 0;
-          // Rotate before writing so every JSONL record remains intact.
-          if (stat > 0 && stat + Buffer.byteLength(line) > maxSize) {
-            const oldestPath = `${path}.${maxRotations}`;
-            if (existsSync(oldestPath)) {
-              rmSync(oldestPath);
-            }
-            for (let index = maxRotations - 1; index >= 1; index--) {
-              const rotatedPath = `${path}.${index}`;
-              if (existsSync(rotatedPath)) {
-                renameSync(rotatedPath, `${path}.${index + 1}`);
-              }
-            }
-            renameSync(path, `${path}.1`);
+  const prune = () => {
+    if (maxFiles <= 0) return;
+    const files = readdirSync(dirname(path))
+      .filter((file) => /^events-.+\.jsonl(?:\.\d+)?$/.test(file))
+      .map((file) => ({
+        path: join(dirname(path), file),
+        modified: statSync(join(dirname(path), file)).mtimeMs,
+      }))
+      .sort((a, b) => a.modified - b.modified);
+    for (const file of files.slice(0, Math.max(0, files.length - maxFiles))) rmSync(file.path);
+  };
+
+  const write = (type: EventType, data: EventData[EventType]) => {
+    if (closed) {
+      throw new Error("EventStore is closed");
+    }
+    sequence += 1;
+    const event: SandboxEvent = {
+      id: randomUUID(),
+      runId,
+      sequence,
+      timestamp: now().toISOString(),
+      type,
+      data,
+    };
+    ensureDir();
+    const line = JSON.stringify(event) + "\n";
+    const lineBytes = Buffer.byteLength(line);
+    if (maxSize > 0) {
+      try {
+        // Rotate before writing so every JSONL record remains intact.
+        if (bytes > 0 && bytes + lineBytes > maxSize) {
+          const oldestPath = `${path}.${maxRotations}`;
+          if (existsSync(oldestPath)) {
+            rmSync(oldestPath);
           }
-        } catch {
-          // Best-effort rotation; write anyway on error.
+          for (let index = maxRotations - 1; index >= 1; index--) {
+            const rotatedPath = `${path}.${index}`;
+            if (existsSync(rotatedPath)) {
+              renameSync(rotatedPath, `${path}.${index + 1}`);
+            }
+          }
+          renameSync(path, `${path}.1`);
+          bytes = 0;
         }
+      } catch {
+        // Best-effort rotation; write anyway on error.
       }
-      appendFileSync(path, line, { mode: 0o600 });
-      chmodSync(path, 0o600);
-      yield* Effect.logInfo(`event:${type}`);
-    });
+    }
+    appendFileSync(path, line, { mode: 0o600 });
+    chmodSync(path, 0o600);
+    bytes += lineBytes;
+    prune();
+  };
+
+  const emit: EventStore["emit"] = <T extends EventType>(type: T, data: EventData[T]) =>
+    Effect.promise(() => {
+      const writeNext = writes.then(() => write(type, data));
+      writes = writeNext.catch(() => undefined);
+      return writeNext;
+    }).pipe(Effect.tap(() => Effect.logInfo(`event:${type}`)));
 
   const events: EventStore["events"] = () =>
     Effect.sync(() => {
@@ -267,15 +312,27 @@ export function filterEventsByRunId(
   return events.filter((e) => e.runId === runId);
 }
 
+export function readEventFile(path: string): EventReadResult {
+  if (!existsSync(path)) return { events: [], diagnostics: [] };
+  const events: SandboxEvent[] = [];
+  const diagnostics: EventDiagnostic[] = [];
+  for (const [index, line] of readFileSync(path, "utf-8").split("\n").entries()) {
+    if (line.trim().length === 0) continue;
+    try {
+      events.push(Schema.decodeSync(SandboxEventSchema)(JSON.parse(line)));
+    } catch (error) {
+      diagnostics.push({
+        path,
+        line: index + 1,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return { events, diagnostics };
+}
+
 export function readEventsFromPath(path: string): Effect.Effect<readonly SandboxEvent[]> {
   return Effect.sync(() => {
-    if (!existsSync(path)) {
-      return [];
-    }
-    const text = readFileSync(path, "utf-8");
-    return text
-      .split("\n")
-      .filter((line) => line.trim().length > 0)
-      .map((line) => Schema.decodeSync(SandboxEventSchema)(JSON.parse(line)));
+    return readEventFile(path).events;
   });
 }

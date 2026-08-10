@@ -7,6 +7,7 @@ import {
   EventStore,
   FileEventStoreLive,
   NoOpEventStoreLive,
+  MAX_EVENT_QUERY_LIMIT,
   eventLogPath,
 } from "../core/events.js";
 import type { SandboxError } from "../core/errors.js";
@@ -23,7 +24,7 @@ import {
   upWorkflow,
 } from "./workflows/target.js";
 import { configValidateWorkflow, targetValidateWorkflow } from "./workflows/config.js";
-import { eventsWorkflow } from "./workflows/events.js";
+import { eventQuery, eventsWorkflow } from "./workflows/events.js";
 import {
   appAddWorkflow,
   appInspectWorkflow,
@@ -89,6 +90,7 @@ export interface ProgramDependencies {
   readonly workflows?: {
     readonly build?: typeof buildWorkflow;
     readonly up?: typeof upWorkflow;
+    readonly events?: typeof eventsWorkflow;
   };
 }
 
@@ -299,8 +301,12 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
     .command("events")
     .description("Show captured structured events for the current project")
     .option("--run <runId>", "Filter to a specific run")
+    .option("--limit <n>", `Maximum events to show (1-${MAX_EVENT_QUERY_LIMIT})`, Number)
     .action((options) =>
-      executePlain(eventsWorkflow(rootDir(), options.run), (lines) => lines.forEach(console.log)),
+      executePlain(
+        (workflows.events ?? eventsWorkflow)(rootDir(), eventQuery(options.run, options.limit)),
+        (lines) => lines.forEach(console.log),
+      ),
     );
   const config = program.command("config").description("Manage sandbox configuration");
   config

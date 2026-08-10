@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Effect } from "effect";
@@ -60,6 +60,25 @@ describe("createFileEventStore", () => {
     expect(events[1].sequence).toBe(2);
   });
 
+  it("serializes concurrent emits into valid, increasing JSONL records", async () => {
+    const path = join(dir, "events.jsonl");
+    const store = createFileEventStore({ runId: "run-1", path });
+
+    await Promise.all(
+      Array.from({ length: 20 }, (_, index) =>
+        Effect.runPromise(
+          store.emit("run.completed", { command: String(index), durationMs: index }),
+        ),
+      ),
+    );
+
+    const events = await Effect.runPromise(readEventsFromPath(path));
+    expect(events).toHaveLength(20);
+    expect(events.map((event) => event.sequence)).toEqual(
+      Array.from({ length: 20 }, (_, index) => index + 1),
+    );
+  });
+
   it("returns events via the store API", async () => {
     const path = join(dir, "events.jsonl");
     const store = createFileEventStore({ runId: "run-1", path });
@@ -92,6 +111,19 @@ describe("createFileEventStore", () => {
     expect(JSON.parse(readFileSync(path, "utf-8"))).toMatchObject({ type: "run.completed" });
     expect(statSync(dir).mode & 0o777).toBe(0o700);
     expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it("retains only the newest eligible event files", async () => {
+    const path = join(dir, "events-run-3.jsonl");
+    writeFileSync(join(dir, "events-run-1.jsonl"), "{}\n");
+    writeFileSync(join(dir, "events-run-2.jsonl"), "{}\n");
+    const store = createFileEventStore({ runId: "run-3", path, maxFiles: 2 });
+
+    await Effect.runPromise(store.emit("run.started", { command: "build", cwd: "/project" }));
+
+    expect(existsSync(join(dir, "events-run-1.jsonl"))).toBe(false);
+    expect(existsSync(join(dir, "events-run-2.jsonl"))).toBe(true);
+    expect(existsSync(path)).toBe(true);
   });
 });
 
@@ -134,6 +166,17 @@ describe("readEventsFromPath", () => {
     const events = await Effect.runPromise(readEventsFromPath(path));
     expect(events[0].type).toBe("config.validated");
     expect(events[0].data).toEqual({ project: "app", valid: true });
+  });
+
+  it("keeps valid records when another line is malformed", async () => {
+    const path = join(dir, "events.jsonl");
+    writeFileSync(
+      path,
+      '{"id":"id-1","runId":"run-1","sequence":1,"timestamp":"2026-01-01T00:00:00.000Z","type":"run.started","data":{}}\nnot json\n',
+    );
+
+    const events = await Effect.runPromise(readEventsFromPath(path));
+    expect(events).toHaveLength(1);
   });
 });
 

@@ -38,9 +38,9 @@ npx @kotarcreative/biodome down local
 - `biodome ps <target>` — show the target status.
 - `biodome status <target>` — report target health and running managed processes.
 - `biodome restart <target> [process]` — restart a managed process or all daemons.
-- `biodome events [--run <runId>]` — show captured structured events from previous runs.
+- `biodome events [--run <runId>] [--limit <n>]` — show a bounded set of captured structured events from previous runs.
 
-Every lifecycle command captures a structured event stream to `.biodome-build/logs/events-<runId>.jsonl` by default. Pass `--no-events` to disable. This makes every plan load, hook, and runtime operation observable and reproducible.
+Every lifecycle command captures a structured event stream to `.biodome-build/logs/events-<runId>.jsonl` by default. Pass `--no-events` to disable. Event files rotate before exceeding 10 MB and retain the newest 100 files per log directory. `biodome events` returns up to 100 recent valid events by default (at most 1,000); malformed JSONL lines are reported with their filename and line number while other events remain available.
 
 ## Documentation
 

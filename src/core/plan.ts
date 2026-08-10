@@ -18,6 +18,9 @@ export interface McpConfig {
   maxReadBytes: number;
   maxWriteBytes: number;
   maxListEntries: number;
+  providerConnectTimeoutMs: number;
+  providerRequestTimeoutMs: number;
+  providerCatalogConcurrency: number;
 }
 
 export interface DependencyInstall {
@@ -387,6 +390,9 @@ export function createPlan(project: string): Plan {
         maxReadBytes: 1048576,
         maxWriteBytes: 2097152,
         maxListEntries: 100,
+        providerConnectTimeoutMs: 10000,
+        providerRequestTimeoutMs: 30000,
+        providerCatalogConcurrency: 4,
       },
     },
     runtime: {
@@ -869,6 +875,9 @@ export const McpConfigSchema = Schema.Struct({
   maxReadBytes: Schema.optional(Schema.Number),
   maxWriteBytes: Schema.optional(Schema.Number),
   maxListEntries: Schema.optional(Schema.Number),
+  providerConnectTimeoutMs: Schema.optional(Schema.Number),
+  providerRequestTimeoutMs: Schema.optional(Schema.Number),
+  providerCatalogConcurrency: Schema.optional(Schema.Number),
 });
 
 export const ConfigSchema = Schema.Struct({
@@ -1068,6 +1077,9 @@ export const NormalizedMcpConfigSchema = Schema.Struct({
   maxReadBytes: Schema.Number,
   maxWriteBytes: Schema.Number,
   maxListEntries: Schema.Number,
+  providerConnectTimeoutMs: Schema.Number,
+  providerRequestTimeoutMs: Schema.Number,
+  providerCatalogConcurrency: Schema.Number,
 });
 
 export const BuildPlanSchema = Schema.Struct({

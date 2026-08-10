@@ -1108,6 +1108,9 @@ export class SandboxContext implements FeatureContext, BuildContext {
       maxReadBytes?: number;
       maxWriteBytes?: number;
       maxListEntries?: number;
+      providerConnectTimeoutMs?: number;
+      providerRequestTimeoutMs?: number;
+      providerCatalogConcurrency?: number;
     },
   ): void {
     this.plan.build.mcpEnabled = true;
@@ -1138,6 +1141,15 @@ export class SandboxContext implements FeatureContext, BuildContext {
       }
       if (config.maxListEntries !== undefined) {
         this.plan.build.mcpConfig.maxListEntries = config.maxListEntries;
+      }
+      if (config.providerConnectTimeoutMs !== undefined) {
+        this.plan.build.mcpConfig.providerConnectTimeoutMs = config.providerConnectTimeoutMs;
+      }
+      if (config.providerRequestTimeoutMs !== undefined) {
+        this.plan.build.mcpConfig.providerRequestTimeoutMs = config.providerRequestTimeoutMs;
+      }
+      if (config.providerCatalogConcurrency !== undefined) {
+        this.plan.build.mcpConfig.providerCatalogConcurrency = config.providerCatalogConcurrency;
       }
     }
 

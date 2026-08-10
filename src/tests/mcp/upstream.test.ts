@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { UpstreamRegistry, parseQualified } from "../../mcp/upstream.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
@@ -18,6 +18,35 @@ function stubClient(tools: { name: string; description?: string }[]): Client {
     request: async () => {},
     notification: () => {},
   } as unknown as Client;
+}
+
+function provider(
+  name: string,
+  token = "tok",
+): {
+  name: string;
+  type: string;
+  mcpUrl: string;
+  authHeader: string;
+  authScheme: string;
+  token: string;
+} {
+  return {
+    name,
+    type: "test",
+    mcpUrl: `http://${name}`,
+    authHeader: "Authorization",
+    authScheme: "Bearer ",
+    token,
+  };
+}
+
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
 
 describe("parseQualified", () => {
@@ -174,5 +203,113 @@ describe("UpstreamRegistry", () => {
     await registry.listCatalog();
     await registry.close();
     expect(closed).toBe(true);
+  });
+
+  it("shares one initial refresh and never returns a partial catalog", async () => {
+    const pending = deferred<{ tools: { name: string; inputSchema: {} }[] }>();
+    const listTools = vi.fn(async () => pending.promise);
+    const registry = new UpstreamRegistry(
+      [provider("one")],
+      async () => ({ listTools, close: async () => {} }) as unknown as Client,
+    );
+
+    const first = registry.listCatalog();
+    const second = registry.listCatalog();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(listTools).toHaveBeenCalledTimes(1);
+    let settled = false;
+    void second.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    pending.resolve({ tools: [{ name: "late", inputSchema: {} }] });
+    await expect(first).resolves.toEqual(await second);
+  });
+
+  it("uses bounded concurrency and deterministic catalog ordering", async () => {
+    let active = 0;
+    let maximum = 0;
+    const registry = new UpstreamRegistry(
+      [provider("z"), provider("a"), provider("m")],
+      async (current) =>
+        ({
+          listTools: async () => {
+            active += 1;
+            maximum = Math.max(maximum, active);
+            await new Promise((resolve) => setTimeout(resolve, current.name === "z" ? 15 : 5));
+            active -= 1;
+            return { tools: [{ name: current.name === "a" ? "zeta" : "alpha", inputSchema: {} }] };
+          },
+          close: async () => {},
+        }) as unknown as Client,
+      { catalogConcurrency: 2 },
+    );
+
+    await expect(registry.listCatalog()).resolves.toMatchObject([
+      { qualified: "a.zeta" },
+      { qualified: "m.alpha" },
+      { qualified: "z.alpha" },
+    ]);
+    expect(maximum).toBe(2);
+  });
+
+  it("keeps healthy catalogs when another provider times out and redacts credentials", async () => {
+    vi.useFakeTimers();
+    try {
+      const registry = new UpstreamRegistry(
+        [provider("slow", "test-token"), provider("good")],
+        async (current) =>
+          current.name === "slow"
+            ? ({
+                listTools: async () => new Promise(() => {}),
+                close: async () => {},
+              } as unknown as Client)
+            : stubClient([{ name: "available" }]),
+        { requestTimeoutMs: 10, catalogConcurrency: 2 },
+      );
+      const catalog = registry.listCatalog();
+      await vi.advanceTimersByTimeAsync(10);
+      await expect(catalog).resolves.toMatchObject([{ qualified: "good.available" }]);
+      expect(registry.getErrors()).toEqual([
+        { provider: "slow", error: 'Provider "slow" request timed out' },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("removes failed connection promises so later requests can reconnect", async () => {
+    let connections = 0;
+    const registry = new UpstreamRegistry([provider("one")], async () => {
+      connections += 1;
+      if (connections === 1) throw new Error("Authorization: Bearer test-token");
+      return stubClient([{ name: "ready" }]);
+    });
+
+    await registry.listCatalog();
+    await expect(registry.describe("one.ready")).resolves.toMatchObject({ qualified: "one.ready" });
+    expect(connections).toBe(2);
+    expect(registry.getErrors()[0].error).not.toContain("test-token");
+    expect(registry.getErrors()[0].error).not.toContain("Bearer");
+  });
+
+  it("does not retry provider execution after a timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const callTool = vi.fn(async () => new Promise(() => {}));
+      const registry = new UpstreamRegistry(
+        [provider("one")],
+        async () => ({ callTool, close: async () => {} }) as unknown as Client,
+        { requestTimeoutMs: 10 },
+      );
+      const call = registry.call("one.action", {});
+      const rejected = expect(call).rejects.toThrow('Provider "one" request timed out');
+      await vi.advanceTimersByTimeAsync(10);
+      await rejected;
+      expect(callTool).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

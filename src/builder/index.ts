@@ -34,6 +34,9 @@ export interface McpConfig {
   maxReadBytes?: number;
   maxWriteBytes?: number;
   maxListEntries?: number;
+  providerConnectTimeoutMs?: number;
+  providerRequestTimeoutMs?: number;
+  providerCatalogConcurrency?: number;
 }
 
 export interface Config {
@@ -65,6 +68,9 @@ export const buildPlanEffect = Effect.fnUntraced(function* (
       maxReadBytes: config.mcp.maxReadBytes,
       maxWriteBytes: config.mcp.maxWriteBytes,
       maxListEntries: config.mcp.maxListEntries,
+      providerConnectTimeoutMs: config.mcp.providerConnectTimeoutMs,
+      providerRequestTimeoutMs: config.mcp.providerRequestTimeoutMs,
+      providerCatalogConcurrency: config.mcp.providerCatalogConcurrency,
     });
   }
 
