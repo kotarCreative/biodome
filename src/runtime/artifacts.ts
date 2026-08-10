@@ -1,5 +1,5 @@
-import { chmodSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect } from "effect";
 import { RuntimeError } from "../core/errors.js";
@@ -23,15 +23,28 @@ export interface GeneratedFile {
   readonly content?: string;
   readonly sourcePath?: string;
   readonly mode?: number;
+  readonly writeMode?: "overwrite" | "if-absent";
 }
+
+export const MCP_RUNTIME_FILES = [
+  "provider-tools.js",
+  "server.js",
+  "upstream.js",
+  "volumes/adapter.js",
+  "volumes/azure.js",
+  "volumes/gcs.js",
+  "volumes/local.js",
+  "volumes/s3.js",
+] as const;
 
 function textFile(
   projectRoot: string,
   path: string,
   content: string,
   mode?: number,
+  writeMode?: GeneratedFile["writeMode"],
 ): GeneratedFile {
-  return { relativePath: relative(projectRoot, path), content, mode };
+  return { relativePath: relative(projectRoot, path), content, mode, writeMode };
 }
 
 function generatedFiles(
@@ -62,6 +75,8 @@ export function renderCommonArtifacts(plan: Plan, layout: RuntimeLayout): readon
       layout.host.projectRoot,
       join(layout.host.projectRoot, ".dockerignore"),
       generateDockerignore(),
+      undefined,
+      "if-absent",
     ),
     ...generatedFiles(
       layout.host.projectRoot,
@@ -81,13 +96,36 @@ export function renderCommonArtifacts(plan: Plan, layout: RuntimeLayout): readon
 
   if (plan.build.mcpEnabled) {
     files.push(textFile(layout.host.projectRoot, layout.host.mcpPlan, generatePlanJson(plan)));
-    files.push({
-      relativePath: relative(layout.host.projectRoot, layout.host.mcpServer),
-      sourcePath: join(dirname(fileURLToPath(import.meta.url)), "..", "mcp", "server.js"),
-    });
+    const mcpSourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "mcp");
+    for (const runtimeFile of MCP_RUNTIME_FILES) {
+      files.push({
+        relativePath: relative(layout.host.projectRoot, join(layout.host.mcp, runtimeFile)),
+        sourcePath: join(mcpSourceRoot, runtimeFile),
+      });
+    }
   }
 
   return files.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+}
+
+interface PathApi {
+  readonly relative: typeof relative;
+  readonly isAbsolute: typeof isAbsolute;
+  readonly sep: string;
+}
+
+export function isPathWithin(
+  outputRoot: string,
+  outputPath: string,
+  pathApi: PathApi = { relative, isAbsolute, sep },
+): boolean {
+  const pathFromRoot = pathApi.relative(outputRoot, outputPath);
+  return (
+    pathFromRoot === "" ||
+    (!pathApi.isAbsolute(pathFromRoot) &&
+      pathFromRoot !== ".." &&
+      !pathFromRoot.startsWith(`..${pathApi.sep}`))
+  );
 }
 
 function validateGeneratedFile(file: GeneratedFile): void {
@@ -114,9 +152,10 @@ export function writeArtifacts(
         .map((file) => {
           validateGeneratedFile(file);
           const outputPath = resolve(outputRoot, file.relativePath);
-          if (outputPath !== outputRoot && !outputPath.startsWith(`${outputRoot}/`)) {
+          if (!isPathWithin(outputRoot, outputPath)) {
             throw new Error(`Artifact path escapes output directory: ${file.relativePath}`);
           }
+          if (file.writeMode === "if-absent" && existsSync(outputPath)) return undefined;
           mkdirSync(dirname(outputPath), { recursive: true });
           if (file.content !== undefined) {
             writeFileSync(outputPath, file.content);
@@ -125,7 +164,8 @@ export function writeArtifacts(
           }
           if (file.mode !== undefined) chmodSync(outputPath, file.mode);
           return outputPath;
-        });
+        })
+        .filter((path): path is string => path !== undefined);
     },
     catch: (error) =>
       new RuntimeError({

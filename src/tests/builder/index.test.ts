@@ -433,7 +433,7 @@ describe("buildTargetPlan", () => {
     const plan = await buildTargetPlan(dir, "local");
     const root = "/workspace/.biodome-build/targets/local";
     expect(plan.runtime.processes.flatMap((process) => process.command)).toEqual(
-      expect.arrayContaining([`${root}/mcp-server.js`, `${root}/opencode-homes/open/start.sh`]),
+      expect.arrayContaining([`${root}/mcp/server.js`, `${root}/opencode-homes/open/start.sh`]),
     );
     expect(plan.runtime.agentHarnesses[0].telemetry.path).toBe(
       `${root}/logs/opencode-events.jsonl`,

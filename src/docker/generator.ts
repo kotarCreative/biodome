@@ -101,7 +101,7 @@ export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}):
   if (plan.build.mcpEnabled) {
     lines.push("# Install the MCP SDK for the biodome-mcp server.");
     lines.push("# Installed under /node_modules so the ESM server at");
-    lines.push("# /workspace/.biodome-build/mcp-server.js can resolve it. /node_modules is on");
+    lines.push("# /workspace/.biodome-build/mcp/server.js can resolve it. /node_modules is on");
     lines.push("# the module resolution path and is not shadowed by the /workspace mount.");
     lines.push("RUN npm install --prefix / @modelcontextprotocol/sdk");
     lines.push("");

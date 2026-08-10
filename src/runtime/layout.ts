@@ -10,6 +10,7 @@ export interface RuntimeLayout {
     supervisordConfig: string;
     healthchecks: string;
     repositories: string;
+    mcp: string;
     mcpPlan: string;
     mcpServer: string;
     opencodeHomes: string;
@@ -40,8 +41,9 @@ export function runtimeLayout(rootDir: string, targetName?: string): RuntimeLayo
       supervisordConfig: join(hostRoot, "supervisord.conf"),
       healthchecks: join(hostRoot, "healthchecks"),
       repositories: join(hostRoot, "repos"),
+      mcp: join(hostRoot, "mcp"),
       mcpPlan: join(hostRoot, "plan.json"),
-      mcpServer: join(hostRoot, "mcp-server.js"),
+      mcpServer: join(hostRoot, "mcp", "server.js"),
       opencodeHomes: join(hostRoot, "opencode-homes"),
       piHomes: join(hostRoot, "pi-homes"),
       codexHomes: join(hostRoot, "codex-homes"),
@@ -56,8 +58,9 @@ export function runtimeLayout(rootDir: string, targetName?: string): RuntimeLayo
       supervisordConfig: join(containerRoot, "supervisord.conf"),
       healthchecks: join(containerRoot, "healthchecks"),
       repositories: join(containerRoot, "repos"),
+      mcp: join(containerRoot, "mcp"),
       mcpPlan: join(containerRoot, "plan.json"),
-      mcpServer: join(containerRoot, "mcp-server.js"),
+      mcpServer: join(containerRoot, "mcp", "server.js"),
       opencodeHomes: join(containerRoot, "opencode-homes"),
       piHomes: join(containerRoot, "pi-homes"),
       codexHomes: join(containerRoot, "codex-homes"),

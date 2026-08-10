@@ -677,7 +677,7 @@ describe("SandboxContext", () => {
     const mcp = procs[0];
     expect(mcp.name).toBe("biodome-mcp");
     expect(mcp.command[0]).toBe("node");
-    expect(mcp.command).toContain("/workspace/.biodome-build/mcp-server.js");
+    expect(mcp.command).toContain("/workspace/.biodome-build/mcp/server.js");
     expect(mcp.command).toContain("--port");
     expect(mcp.command).toContain("3005");
     expect(mcp.ports).toHaveLength(1);

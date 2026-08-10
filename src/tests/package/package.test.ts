@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { MCP_RUNTIME_FILES } from "../../runtime/artifacts.js";
 
 const tempDir = mkdtempSync(join(tmpdir(), "biodome-package-"));
 
@@ -40,6 +41,9 @@ describe("published package", () => {
     expect(files.length).toBeLessThan(200);
     expect(files.map((file) => file.path)).not.toEqual(
       expect.arrayContaining([expect.stringMatching(/^(\.opencode|src|docs\/design|test)/)]),
+    );
+    expect(files.map((file) => file.path)).toEqual(
+      expect.arrayContaining(MCP_RUNTIME_FILES.map((file) => `dist/mcp/${file}`)),
     );
 
     mkdirSync(projectDir);
