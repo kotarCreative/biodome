@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
-import { executeTask, harnessTaskCommand } from "../../core/task-runner.js";
+import { executeTask, harnessTaskCommand, type TaskResult } from "../../core/task-runner.js";
 import { Plan, createPlan } from "../../core/plan.js";
 import type {
   RuntimeDriver,
@@ -35,6 +35,7 @@ function createFakeDriver(overrides?: Partial<RuntimeDriver>): RuntimeDriver {
       "lifecycle.build",
       "lifecycle.start",
       "lifecycle.stop",
+      "status.read",
       "exec.command",
       "artifact.collect",
     ),
@@ -61,8 +62,6 @@ function createFakeDriver(overrides?: Partial<RuntimeDriver>): RuntimeDriver {
         { path: "review.md", sizeBytes: 42, localPath: "/tmp/artifacts/review.md" },
       ]),
     status: () => Effect.succeed<StatusResult>({ state: "running" }),
-    logs: () => Effect.void,
-    restart: () => Effect.void,
     ...overrides,
   };
 }
@@ -161,7 +160,10 @@ describe("executeTask", () => {
     rmSync(rootDir, { recursive: true, force: true });
   });
 
-  function runTask(driver: RuntimeDriver, plan: Plan): Effect.Effect<unknown, RuntimeError, never> {
+  function runTask(
+    driver: RuntimeDriver,
+    plan: Plan,
+  ): Effect.Effect<TaskResult, RuntimeError, never> {
     return executeTask(rootDir, plan, driver).pipe(
       Effect.provideService(EventStore, fakeEventStore()),
     );
@@ -170,7 +172,7 @@ describe("executeTask", () => {
   it("runs a task to completion and collects artifacts", async () => {
     const driver = createFakeDriver();
     const plan = planWithTask();
-    const result = (await Effect.runPromise(runTask(driver, plan))) as any;
+    const result = await Effect.runPromise(runTask(driver, plan));
     expect(result.exitCode).toBe(0);
     expect(result.artifacts).toBeDefined();
     expect(result.artifacts[0].path).toBe("review.md");
@@ -266,6 +268,7 @@ describe("executeTask", () => {
         "lifecycle.build",
         "lifecycle.start",
         "lifecycle.stop",
+        "status.read",
         "exec.command",
       ),
     });
@@ -289,6 +292,7 @@ describe("executeTask", () => {
         "lifecycle.build",
         "lifecycle.start",
         "lifecycle.stop",
+        "status.read",
         "exec.command",
         "artifact.collect",
       ),
@@ -315,7 +319,7 @@ describe("executeTask", () => {
         cleanup: "always",
       },
     };
-    const result = (await Effect.runPromise(runTask(driver, plan))) as any;
+    const result = await Effect.runPromise(runTask(driver, plan));
     expect(result.exitCode).toBe(0);
     expect(execFn).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -326,17 +330,18 @@ describe("executeTask", () => {
     );
   });
 
-  it("succeeds with a driver that has only exec.command for an artifact-free task", async () => {
+  it("succeeds with required task operations and no artifact support for an artifact-free task", async () => {
     const driver = createFakeDriver({
       capabilities: capabilitiesOf(
         "lifecycle.build",
         "lifecycle.start",
         "lifecycle.stop",
+        "status.read",
         "exec.command",
       ),
     });
     const plan = planWithTask({ artifacts: [] });
-    const result = (await Effect.runPromise(runTask(driver, plan))) as any;
+    const result = await Effect.runPromise(runTask(driver, plan));
     expect(result.exitCode).toBe(0);
     expect(result.artifacts).toBeUndefined();
   });

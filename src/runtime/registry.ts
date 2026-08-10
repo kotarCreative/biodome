@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { RuntimeError } from "../core/errors.js";
-import type { RuntimeDriver } from "./driver.js";
+import { validateRuntimeDriver, type RuntimeDriver } from "./driver.js";
 
 export type DriverLoader = () => Promise<RuntimeDriver>;
 
@@ -48,6 +48,7 @@ export function createDriverRegistry(): RuntimeDriverRegistry {
                   message: `Runtime driver "${id}" loaded a driver with ID "${driver.id}"`,
                 });
               }
+              validateRuntimeDriver(driver);
               record.driver = driver;
               return driver;
             });

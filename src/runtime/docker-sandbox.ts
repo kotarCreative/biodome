@@ -17,9 +17,19 @@ import type {
   BuildResult,
   CommandResult,
   DeploymentState,
+  AvailableDriver,
+  ArtifactDriver,
+  BuildableDriver,
+  ExecutableDriver,
+  LogDriver,
+  RenderableDriver,
+  RestartDriver,
   RuntimeDriver,
   RuntimeOperationInput,
+  StatusDriver,
   StatusResult,
+  StartableDriver,
+  StoppableDriver,
 } from "./driver.js";
 
 const COMMAND_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
@@ -234,7 +244,17 @@ export function translateWorkspaceCommand(
  * Docker Sandboxes runtime. The driver deliberately treats templates and kits
  * as prebuilt inputs: `sbx` does not build a sandbox template from a Dockerfile.
  */
-export const dockerSandboxDriver: RuntimeDriver = {
+export const dockerSandboxDriver: RuntimeDriver &
+  AvailableDriver &
+  RenderableDriver &
+  BuildableDriver &
+  StartableDriver &
+  StoppableDriver &
+  ExecutableDriver &
+  ArtifactDriver &
+  StatusDriver &
+  LogDriver &
+  RestartDriver = {
   id: "docker-sandbox",
 
   capabilities: capabilitiesOf(

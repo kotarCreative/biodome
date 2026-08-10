@@ -6,7 +6,15 @@ import { runtimeLayout } from "../runtime/layout.js";
 import { statePath, readState, writeState, removeState } from "../runtime/state.js";
 import { EventStore } from "./events.js";
 import { RuntimeError, ValidationError } from "./errors.js";
-import { hasCapability } from "./capabilities.js";
+import {
+  supportsArtifacts,
+  supportsBuild,
+  supportsExec,
+  supportsRender,
+  supportsStart,
+  supportsStatus,
+  supportsStop,
+} from "../runtime/driver.js";
 import { agentTaskCommand } from "../agents/registry.js";
 
 export function harnessTaskCommand(plan: Plan, harnessName: string, prompt: string): string[] {
@@ -49,7 +57,7 @@ export function executeTask(
       },
     });
 
-    if (!hasCapability(driver.capabilities, "exec.command")) {
+    if (!supportsExec(driver)) {
       return yield* Effect.fail(
         new RuntimeError({
           message: `Driver "${driver.id}" does not support command execution`,
@@ -57,11 +65,31 @@ export function executeTask(
       );
     }
 
-    if (task.artifacts.length > 0 && !hasCapability(driver.capabilities, "artifact.collect")) {
+    if (task.artifacts.length > 0 && !supportsArtifacts(driver)) {
       return yield* Effect.fail(
         new RuntimeError({
           message: `Driver "${driver.id}" does not support artifact collection`,
         }),
+      );
+    }
+
+    if (!supportsRender(driver) || !supportsBuild(driver) || !supportsStart(driver)) {
+      return yield* Effect.fail(
+        new RuntimeError({
+          message: `Driver "${driver.id}" does not support lifecycle.build and lifecycle.start`,
+        }),
+      );
+    }
+    if (!supportsStop(driver) || !supportsStatus(driver)) {
+      return yield* Effect.fail(
+        new RuntimeError({
+          message: `Driver "${driver.id}" does not support lifecycle.stop and status.read`,
+        }),
+      );
+    }
+    if (task.artifacts.length > 0 && !supportsArtifacts(driver)) {
+      return yield* Effect.fail(
+        new RuntimeError({ message: `Driver "${driver.id}" does not support artifact collection` }),
       );
     }
 
@@ -163,6 +191,13 @@ export function executeTask(
 
     let taskArtifacts: TaskResult["artifacts"] = undefined;
     if (task.artifacts.length > 0) {
+      if (!supportsArtifacts(driver)) {
+        return yield* Effect.fail(
+          new RuntimeError({
+            message: `Driver "${driver.id}" does not support artifact collection`,
+          }),
+        );
+      }
       const collected = yield* driver.collectArtifacts({ ...input, paths: task.artifacts });
       taskArtifacts = collected.map((a) => ({
         path: a.path,
@@ -186,7 +221,7 @@ export function executeTask(
 
   const cleanupEffect = Effect.gen(function* () {
     const input = { rootDir, outputDir, plan, target, deploymentId };
-    yield* driver.stop(input);
+    if (supportsStop(driver)) yield* driver.stop(input);
     removeState(rootDir, targetName);
   });
 

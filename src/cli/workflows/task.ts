@@ -6,6 +6,7 @@ import { compileExecutionPlan, providerProfile } from "../../orchestration/compi
 import { validateCompatibility } from "../../orchestration/compatibility.js";
 import { formatCompatibilityReport } from "../../orchestration/format.js";
 import { getDriver } from "../../runtime/registry.js";
+import { supportsAvailability } from "../../runtime/driver.js";
 
 export function taskPlanWorkflow(rootDir: string, targetName: string, taskName: string) {
   return Effect.gen(function* () {
@@ -30,6 +31,11 @@ export function runTaskWorkflow(rootDir: string, targetName: string, taskName: s
     const plan = yield* buildTaskPlanEffect(rootDir, targetName, taskName);
     const deployment = plan.deployment!;
     const driver = yield* getDriver(deployment.target.driver);
+    if (!supportsAvailability(driver)) {
+      return yield* new RuntimeError({
+        message: `Driver "${driver.id}" does not support availability checks`,
+      });
+    }
     yield* driver.ensureAvailable(deployment.target);
     yield* Effect.logInfo(`Running task "${taskName}" against sandbox "${targetName}"`);
     return yield* orchestrateTask(rootDir, plan, driver);

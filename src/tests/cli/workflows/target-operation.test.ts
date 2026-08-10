@@ -8,7 +8,14 @@ import type { RuntimeDriver } from "../../../runtime/driver.js";
 import { createTargetOperation } from "../../../cli/target-operation.js";
 import { buildWorkflow, execWorkflow, upWorkflow } from "../../../cli/workflows/target.js";
 
-function driver(capabilities = capabilitiesOf()): RuntimeDriver {
+function driver(
+  capabilities = capabilitiesOf(
+    "lifecycle.build",
+    "lifecycle.start",
+    "lifecycle.stop",
+    "status.read",
+  ),
+): RuntimeDriver {
   return {
     id: "fake",
     capabilities,
@@ -24,10 +31,7 @@ function driver(capabilities = capabilitiesOf()): RuntimeDriver {
       }),
     stop: () => Effect.void,
     exec: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "", durationMs: 0 }),
-    collectArtifacts: () => Effect.succeed([]),
     status: () => Effect.succeed({ state: "unknown" }),
-    logs: () => Effect.void,
-    restart: () => Effect.void,
   };
 }
 

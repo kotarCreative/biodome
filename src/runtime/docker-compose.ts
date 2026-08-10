@@ -8,15 +8,25 @@ import { NodeRuntime } from "../core/runtime-node.js";
 import { generateCompose } from "../docker/generator.js";
 import { parseServiceStatusOutput } from "../docker/runner.js";
 import type {
+  AvailableDriver,
+  ArtifactDriver,
+  BuildableDriver,
+  ExecutableDriver,
+  LogDriver,
+  RenderableDriver,
+  RestartDriver,
   RuntimeDriver,
   RuntimeOperationInput,
   BuildResult,
   DeploymentState,
   CommandResult,
   Artifact,
+  StatusDriver,
   StatusResult,
+  StartableDriver,
+  StoppableDriver,
 } from "./driver.js";
-import type { RuntimeTarget } from "../core/plan.js";
+import type { Plan, RuntimeTarget } from "../core/plan.js";
 import { RuntimeError } from "../core/errors.js";
 import { capabilitiesOf } from "../core/capabilities.js";
 import type { EventStore } from "../core/events.js";
@@ -101,7 +111,17 @@ function runDockerCmd(args: string[], cwd?: string): Effect.Effect<void, Runtime
   );
 }
 
-export const dockerComposeDriver: RuntimeDriver = {
+export const dockerComposeDriver: RuntimeDriver &
+  AvailableDriver &
+  RenderableDriver &
+  BuildableDriver &
+  StartableDriver &
+  StoppableDriver &
+  ExecutableDriver &
+  ArtifactDriver &
+  StatusDriver &
+  LogDriver &
+  RestartDriver = {
   id: "docker-compose",
 
   capabilities: capabilitiesOf(
@@ -121,7 +141,7 @@ export const dockerComposeDriver: RuntimeDriver = {
   render(input: {
     rootDir: string;
     outputDir: string;
-    plan: any;
+    plan: Plan;
     target: RuntimeTarget;
   }): Effect.Effect<string[], RuntimeError, never> {
     return Effect.try({

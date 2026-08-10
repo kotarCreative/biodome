@@ -46,7 +46,14 @@ function taskPlan(): Plan {
 function driver(): RuntimeDriver {
   return {
     id: "fake",
-    capabilities: capabilitiesOf("exec.command", "artifact.collect"),
+    capabilities: capabilitiesOf(
+      "lifecycle.build",
+      "lifecycle.start",
+      "lifecycle.stop",
+      "status.read",
+      "exec.command",
+      "artifact.collect",
+    ),
     render: () => Effect.succeed([]),
     ensureAvailable: () => Effect.void,
     build: () => Effect.succeed({}),
@@ -64,8 +71,6 @@ function driver(): RuntimeDriver {
         input.paths.map((path) => ({ path, sizeBytes: 12, localPath: `/tmp/${path}` })),
       ),
     status: () => Effect.succeed({ state: "running" }),
-    logs: () => Effect.void,
-    restart: () => Effect.void,
   };
 }
 

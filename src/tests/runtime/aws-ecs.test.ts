@@ -654,38 +654,4 @@ describe("createAwsEcsDriver", () => {
       }
     });
   });
-
-  describe("restart", () => {
-    it("stops then starts", async () => {
-      const ecsSend = vi
-        .fn()
-        .mockResolvedValueOnce({ tasks: [{ lastStatus: "RUNNING" }] })
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({ tasks: [{ lastStatus: "STOPPED" }] })
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({
-          taskDefinition: { taskDefinitionArn: "arn:aws:ecs:...:task-def/test-deploy:1" },
-        })
-        .mockResolvedValueOnce({ tasks: [{ taskArn: "arn:aws:ecs:...:task/abc" }], failures: [] });
-      const clients = makeClients({ ecsSend });
-      const outputDir = join(tmpdir(), `ecs-restart-${randomUUID()}`);
-      mkdirSync(outputDir, { recursive: true });
-      try {
-        writeFileSync(
-          join(outputDir, "state.json"),
-          JSON.stringify({
-            resourceIds: {
-              taskArn: "arn:aws:ecs:...:task/abc",
-              taskDefinitionArn: "arn:aws:ecs:...:task-def/test-deploy:1",
-            },
-          }),
-        );
-        const driver = createAwsEcsDriver(clients);
-        await run(driver.restart({ ...makeInput({ outputDir }), processName: "dev" }));
-        expect(ecsSend).toHaveBeenCalledTimes(6);
-      } finally {
-        rmSync(outputDir, { recursive: true, force: true });
-      }
-    });
-  });
 });

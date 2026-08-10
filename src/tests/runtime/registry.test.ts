@@ -9,17 +9,6 @@ function createDriver(id: string): RuntimeDriver {
   return {
     id,
     capabilities: capabilitiesOf(),
-    render: () => Effect.succeed([]),
-    ensureAvailable: () => Effect.void,
-    build: () => Effect.succeed({}),
-    start: () =>
-      Effect.succeed({ driver: id, deploymentId: "test", resourceIds: {}, createdAt: "" }),
-    stop: () => Effect.void,
-    exec: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "", durationMs: 0 }),
-    collectArtifacts: () => Effect.succeed([]),
-    status: () => Effect.succeed({ state: "unknown" }),
-    logs: () => Effect.void,
-    restart: () => Effect.void,
   };
 }
 
@@ -94,6 +83,32 @@ describe("runtime driver registry", () => {
     await expect(Effect.runPromise(registry.getDriver("expected"))).rejects.toMatchObject({
       _tag: "RuntimeError",
       message: 'Runtime driver "expected" loaded a driver with ID "actual"',
+    });
+  });
+
+  it("rejects a driver that declares an operation without implementing it", async () => {
+    const registry = createDriverRegistry();
+    registry.registerDriver("invalid", async () => ({
+      id: "invalid",
+      capabilities: capabilitiesOf("exec.command"),
+    }));
+
+    await expect(Effect.runPromise(registry.getDriver("invalid"))).rejects.toMatchObject({
+      _tag: "RuntimeError",
+      message: expect.stringContaining("declares exec.command but does not implement exec()"),
+    });
+  });
+
+  it("rejects a driver that implements an operation without declaring it", async () => {
+    const registry = createDriverRegistry();
+    const driver = Object.assign(createDriver("invalid"), {
+      exec: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "", durationMs: 0 }),
+    });
+    registry.registerDriver("invalid", async () => driver);
+
+    await expect(Effect.runPromise(registry.getDriver("invalid"))).rejects.toMatchObject({
+      _tag: "RuntimeError",
+      message: expect.stringContaining("implements exec() without declaring exec.command"),
     });
   });
 

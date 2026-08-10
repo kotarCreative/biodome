@@ -22,13 +22,22 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import { NodeRuntime } from "../core/runtime-node.js";
 import { validateAwsEcsOptions, type AwsEcsOptions } from "./aws-ecs-schema.js";
 import type {
+  AvailableDriver,
+  ArtifactDriver,
+  BuildableDriver,
+  ExecutableDriver,
+  LogDriver,
+  RenderableDriver,
   RuntimeDriver,
   RuntimeOperationInput,
   BuildResult,
   DeploymentState,
   CommandResult,
   Artifact,
+  StatusDriver,
   StatusResult,
+  StartableDriver,
+  StoppableDriver,
 } from "./driver.js";
 import type { RuntimeTarget } from "../core/plan.js";
 import type { Plan } from "../core/plan.js";
@@ -97,7 +106,18 @@ function ensureLogGroup(
   }).pipe(Effect.asVoid);
 }
 
-export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
+export function createAwsEcsDriver(
+  clients?: AwsClients,
+): RuntimeDriver &
+  AvailableDriver &
+  RenderableDriver &
+  BuildableDriver &
+  StartableDriver &
+  StoppableDriver &
+  ExecutableDriver &
+  ArtifactDriver &
+  StatusDriver &
+  LogDriver {
   function getClients(options: AwsEcsOptions): AwsClients {
     return clients ?? createDefaultClients(options.region);
   }
@@ -123,7 +143,16 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
     }
   }
 
-  const driver: RuntimeDriver = {
+  const driver: RuntimeDriver &
+    AvailableDriver &
+    RenderableDriver &
+    BuildableDriver &
+    StartableDriver &
+    StoppableDriver &
+    ExecutableDriver &
+    ArtifactDriver &
+    StatusDriver &
+    LogDriver = {
     id: "aws-ecs",
 
     capabilities: capabilitiesOf(
@@ -587,7 +616,7 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
                   tasks: [taskArn],
                 }),
               ),
-            catch: () => ({ tasks: [] as any[] }),
+            catch: () => ({ tasks: [] }),
           });
 
           const task = desc.tasks?.[0];
@@ -732,7 +761,7 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
                 tasks: [taskArn],
               }),
             ),
-          catch: () => ({ tasks: [] as any[] }),
+          catch: () => ({ tasks: [] }),
         });
 
         const task = desc.tasks?.[0];
@@ -786,7 +815,7 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
                 limit: 10,
               }),
             ),
-          catch: () => ({ logStreams: [] as any[] }),
+          catch: () => ({ logStreams: [] }),
         });
 
         const logStreams = streamsResult.logStreams || [];
@@ -805,7 +834,7 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
                   limit: 100,
                 }),
               ),
-            catch: () => ({ events: [] as any[] }),
+            catch: () => ({ events: [] }),
           });
 
           const events = eventsResult.events || [];
@@ -818,15 +847,6 @@ export function createAwsEcsDriver(clients?: AwsClients): RuntimeDriver {
         Effect.provide(NodeRuntime),
         Effect.scoped,
         Effect.catch((error) => Effect.fail(wrapError(error))),
-      );
-    },
-
-    restart(
-      input: RuntimeOperationInput & { processName: string },
-    ): Effect.Effect<void, RuntimeError, EventStore> {
-      return driver.stop(input).pipe(
-        Effect.andThen(() => driver.start(input)),
-        Effect.map(() => undefined),
       );
     },
   };
