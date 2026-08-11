@@ -10,11 +10,11 @@ When running `biodome run <target> <task>`:
    - Build the harness command.
 2. **Environment Setup**:
    - Render target-scoped files.
-   - Build and start the development environment (Docker Compose).
+   - Build and start the provider-selected sandbox.
    - Write initial state.
 3. **Task Execution**:
    - Emit `task.started`.
-   - Execute the generated harness wrapper inside the container.
+   - Execute the generated harness wrapper in the provider-prepared workspace.
    - Enforce task-specific timeouts.
    - Capture bounded output.
 4. **Completion**:

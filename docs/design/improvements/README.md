@@ -26,29 +26,26 @@ The executor must not:
 
 ## Plans
 
-| Plan                          | Topic             | Priority | Status   | Main Result                                 |
-| ----------------------------- | ----------------- | -------- | -------- | ------------------------------------------- |
-| [04](04-deep-plan-builder.md) | Plan builder      | P1       | proposed | Deep domain modules behind a narrow context |
-| [14](14-split-generators.md)  | Generator modules | P2       | proposed | Cohesive output-oriented generator modules  |
-| [16](16-performance-budgets.md) | Performance     | P3       | proposed | Repeatable benchmarks and regression budgets |
+| Plan                            | Topic             | Priority | Status   | Main Result                                  |
+| ------------------------------- | ----------------- | -------- | -------- | -------------------------------------------- |
+| [04](04-deep-plan-builder.md)   | Plan builder      | P1       | proposed | Deep domain modules behind a narrow context  |
+| [14](14-split-generators.md)    | Generator modules | P2       | proposed | Cohesive output-oriented generator modules   |
+| [16](16-performance-budgets.md) | Performance       | P3       | proposed | Repeatable benchmarks and regression budgets |
 
 ## Dependency Graph
 
 ```text
-04 ----> 14 ----> 16
+14 ----> 16
 ```
 
 ## Recommended Execution Waves
 
-### Wave 1: Plan builder
+### Wave 1: Independent improvements
 
 - Plan 04: complete the remaining domain extractions.
+- Plan 14: split generator modules after the completed shared-rendering work.
 
-### Wave 2: Generator modules
-
-- Plan 14 after Plan 04.
-
-### Wave 3: Performance proof
+### Wave 2: Performance proof
 
 - Plan 16 after Plan 14 and the existing runtime and MCP improvements.
 

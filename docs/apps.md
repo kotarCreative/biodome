@@ -113,6 +113,11 @@ This creates or updates `.biodome/package.json` and its lockfile. Commit those
 files. `.biodome/node_modules/` is ignored. Biodome never installs missing
 recipes while planning, building, or running.
 
+Before modifying project-owned package state, `biodome app add` installs the
+requested package into a temporary project with lifecycle scripts disabled and
+checks that it declares a compatible Biodome app recipe. A rejected package
+does not create or change `.biodome` package files or the root `.gitignore`.
+
 App modules and recipe packages are trusted host-side JavaScript, just like
 features. Review and pin them as normal development dependencies; they are not
 sandboxed during plan construction.

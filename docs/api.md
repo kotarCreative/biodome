@@ -87,7 +87,7 @@ Declare an agent-discoverable endpoint with a name, optional URL/port, credentia
 
 ### `addProvider(spec)`
 
-Declare an external provider with a name, type, optional URL/project/mcpUrl, credentials (plain or env-referenced), and free-form metadata. Providers are surfaced in `biodome info`, `AGENTS.md`, `.biodome-build/plan.json`, and the MCP `get_providers` tool. See [Primitives](primitives.md#addproviderspec).
+Declare an external provider with a name, type, optional URL/project/mcpUrl, credentials (plain or env-referenced), and free-form metadata. Providers are surfaced in `biodome info`, `AGENTS.md`, `.biodome-build/plan.json`, and the MCP `get_providers` tool. Remote tool discovery requires an `mcpUrl` and a resolvable configured credential. See [Primitives](primitives.md#addproviderspec).
 
 ### `addMcpProvider(spec)`
 
@@ -119,7 +119,7 @@ Declare an environment variable. Provide exactly one of `value` (literal) or `fr
 
 ### `addVolume(spec)`
 
-Mount a local directory or cloud/network storage into the dev container as a live read/write access point, or declare a proxy volume for agent-safe access through the MCP server. Supported types: `"local"`, `"s3"`, `"gcs"`, `"azure"`, `"sftp"`, `"smb"`, `"webdav"`, `"dropbox"`, `"gdrive"`. Credentials can be literal strings or env references. See [Primitives](primitives.md#addvolumespec).
+Mount a local directory or cloud/network storage into Docker-based targets as a live read/write access point, or declare a proxy volume for agent-safe access through the MCP server. AWS ECS does not support mounted volumes. Supported types: `"local"`, `"s3"`, `"gcs"`, `"azure"`, `"sftp"`, `"smb"`, `"webdav"`, `"dropbox"`, `"gdrive"`. Credentials can be literal strings or env references. See [Primitives](primitives.md#addvolumespec).
 
 ### `addRepo(spec)`
 
@@ -181,12 +181,12 @@ When proxy volumes are enabled, the MCP server exposes these tools for agent acc
 
 When providers are declared, the MCP server exposes a progressive-discovery interface instead of per-provider tools. The agent uses these three tools to search, inspect, and call any upstream tool:
 
-- `get_providers` — list declared providers with resolved credentials.
+- `get_providers` — list declared provider metadata without credentials.
 - `provider_search` — search across all connected provider tools by keyword, provider name, or both. Returns tool names formatted as `provider.tool`.
 - `provider_describe` — get the full input schema and description for one provider tool (e.g. `linear.create_issue`).
 - `provider_execute` — call a tool by its qualified name with arguments. Credentials are attached by the server and never reach the agent.
 
-Provider discovery uses bounded parallel requests. Configure `mcp.providerConnectTimeoutMs`,
+Only providers with an `mcpUrl` and a resolvable configured credential are connected; skipped providers are reported by discovery. Provider discovery uses bounded parallel requests. Configure `mcp.providerConnectTimeoutMs`,
 `mcp.providerRequestTimeoutMs`, and `mcp.providerCatalogConcurrency` to set connection
 deadlines, list/describe/call deadlines, and the maximum simultaneous catalog requests.
 Defaults are 10 seconds, 30 seconds, and 4. A timed-out provider is reported without
@@ -391,24 +391,24 @@ type LifecyclePoint =
 
 Create a `.biodome/` directory with a starter config and a generated `.biodome/features/auto-detect.mjs` feature. The auto-detect feature inspects project files (`package.json`, `bun.lockb`, `requirements.txt`, `go.mod`, `Cargo.toml`, `pom.xml`, etc.) and calls `ctx.addLanguage` for each detected language. Pass `--bare` to skip auto-detection and create a minimal scaffold.
 
-### `biodome build`
+### `biodome build <target>`
 
-Generate `.biodome-build/Dockerfile`, `.biodome-build/docker-compose.yaml`, `.biodome-build/supervisord.conf` (when there are daemon processes), `.biodome-build/healthchecks/*.sh` (when there are daemon processes with health checks), `.dockerignore`, and build the dev image.
+Render and build the selected target. Docker Compose targets generate their Dockerfile, Compose file, supervisor configuration, and health checks under `.biodome-build/targets/<target>/`; other runtimes render and build their provider-specific resources.
 
-### `biodome up [--build] [--wait]`
+### `biodome up <target> [--build] [--wait]`
 
-Start the dev container and backing services with Docker Compose. Use `--build` to force a rebuild. Use `--wait` to keep the CLI alive until Ctrl+C.
+Start the selected target sandbox. Use `--build` to render and build it first. Use `--wait` to keep the CLI alive until Ctrl+C, then stop targets that support stopping.
 
-### `biodome down`
+### `biodome down <target>`
 
-Stop and remove the dev container and backing services.
+Stop the selected target sandbox. The command requires existing deployment state for that target.
 
-### `biodome exec <command...>`
+### `biodome exec <target> <command...>`
 
-Run a command inside the dev container.
+Run a command in the selected target sandbox.
 
 ```bash
-biodome exec npm test
+biodome exec local npm test
 ```
 
 ### `biodome info`
@@ -423,18 +423,18 @@ Validate the `.biodome/` configuration and feature modules without building. Thi
 
 Generate an `AGENTS.md` file with base image, languages, services, endpoints, providers, environment, connection info, processes, and available commands for AI coding agents.
 
-### `biodome logs [process]`
+### `biodome logs <target> [process]`
 
-Tail logs from a managed process. Omit the process name to see the `supervisord` log.
+Show logs from a managed process when the target supports log access. Docker-based targets can use `supervisord` logs; other providers may return bounded provider logs instead.
 
-### `biodome ps`
+### `biodome ps <target>`
 
-Show running containers for the project.
+Show the selected target's provider status.
 
-### `biodome status`
+### `biodome status <target>`
 
-Report container health and the status of managed processes. This runs `docker compose ps` for container health and `supervisorctl status` inside the dev container for running processes.
+Report the selected target's health and, where supported, managed-process status. Docker-based targets use provider status plus `supervisorctl`; providers without process-status support report only target health.
 
-### `biodome restart [process]`
+### `biodome restart <target> [process]`
 
-Restart a managed process or all daemon processes.
+Restart a managed process or all daemon processes when the target supports process control. Restarting all daemons reports unsupported processes as skipped.

@@ -33,7 +33,7 @@ my-project/
 │   │           ├── events-<runId>.jsonl
 │   │           └── runs/<runId>.json
 ├── .dockerignore            # generated
-└── .gitignore               # `.biodome-build/` entry added by `biodome build`
+└── .gitignore               # includes the `.biodome-build/` entry
 ```
 
 ## `.biodome/config.json`
@@ -90,7 +90,7 @@ export default function python(ctx) {
 
 ## Generated files
 
-After running `biodome build` or `biodome up` for a target, the CLI writes
+After running `biodome build <target>` or `biodome up <target>`, the CLI writes
 target-specific runtime files below `.biodome-build/targets/<target>/`:
 
 - `Dockerfile` — multi-stage image for the dev container.

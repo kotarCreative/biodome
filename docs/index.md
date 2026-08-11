@@ -38,7 +38,7 @@ biodome up local         # starts the local target + MCP server
 
 ## Event capture
 
-Every lifecycle command (`build`, `up`, `down`, `exec`, `restart`, `status`, `ps`, `logs`, `config validate`) captures a structured, append-only event log by default. Pass `--no-events` to disable. Events are written to `.biodome-build/logs/events-<runId>.jsonl` and include every plan load, generated file, hook, and runtime operation with timing. Files rotate before exceeding 10 MB, and each log directory retains its newest 100 event files.
+Every lifecycle command (`build`, `up`, `down`, `exec`, `restart`, `status`, `ps`, `logs`, `config validate`) captures a structured, append-only event log by default. Target-scoped commands write to `.biodome-build/targets/<target>/logs/events-<runId>.jsonl`; target-less commands write to `.biodome-build/logs/events-<runId>.jsonl`. Pass `--no-events` to disable. Events include every plan load, generated file, hook, and runtime operation with timing. Files rotate before exceeding 10 MB, and each log directory retains its newest 100 event files.
 
 ```bash
 biodome build local

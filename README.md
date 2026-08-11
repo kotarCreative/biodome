@@ -34,13 +34,13 @@ npx @kotarcreative/biodome down local
 - `biodome config validate` — validate `.biodome/`, feature/service module exports, and the computed plan (including port conflicts) without building.
 - `biodome target validate <target>` — validate a named target configuration without building or deploying.
 - `biodome generate agents.md` — create `AGENTS.md` for AI context.
-- `biodome logs <target> [process]` — tail logs from a managed process.
+- `biodome logs <target> [process]` — show logs from a managed process when the target supports log access.
 - `biodome ps <target>` — show the target status.
-- `biodome status <target>` — report target health and running managed processes.
-- `biodome restart <target> [process]` — restart a managed process or all daemons.
+- `biodome status <target>` — report target health and, when supported, managed-process status.
+- `biodome restart <target> [process]` — restart a managed process or all daemons when supported by the target.
 - `biodome events [--run <runId>] [--limit <n>]` — show a bounded set of captured structured events from previous runs.
 
-Every lifecycle command captures a structured event stream to `.biodome-build/logs/events-<runId>.jsonl` by default. Pass `--no-events` to disable. Event files rotate before exceeding 10 MB and retain the newest 100 files per log directory. `biodome events` returns up to 100 recent valid events by default (at most 1,000); malformed JSONL lines are reported with their filename and line number while other events remain available.
+Every lifecycle command captures a structured event stream by default. Target-scoped commands write to `.biodome-build/targets/<target>/logs/events-<runId>.jsonl`; target-less commands write to `.biodome-build/logs/events-<runId>.jsonl`. Pass `--no-events` to disable. Event files rotate before exceeding 10 MB and retain the newest 100 files per log directory. `biodome events` returns up to 100 valid events by default (at most 1,000); malformed JSONL lines are reported with their filename and line number while other events remain available.
 
 ## Documentation
 

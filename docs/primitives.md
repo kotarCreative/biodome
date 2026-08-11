@@ -168,7 +168,7 @@ Prefer env references for anything sensitive.
 
 ## `addProvider(spec)`
 
-Declares an external provider — a well-known SaaS API such as Jira, GitHub, or Slack. Providers are surfaced in `biodome info`, the generated `AGENTS.md`, `.biodome-build/plan.json`, and the MCP `get_providers` tool. When MCP is enabled, the server exposes three code-mode tools — `provider_search`, `provider_describe`, `provider_execute` — that aggregate all provider tools under a single progressive-discovery interface.
+Declares an external provider — a well-known SaaS API such as Jira, GitHub, or Slack. Providers are surfaced in `biodome info`, the generated `AGENTS.md`, `.biodome-build/plan.json`, and the MCP `get_providers` tool. When MCP is enabled and at least one provider is declared, the server exposes code-mode tools that aggregate successfully connected upstream MCP providers. A provider needs an `mcpUrl` and a resolvable configured credential to connect.
 
 ```javascript
 export default function providers(ctx) {
@@ -197,7 +197,7 @@ export default function providers(ctx) {
 
 ### Code mode
 
-When MCP is enabled, the server exposes exactly three provider tools regardless of how many providers or upstream tools are connected:
+When MCP is enabled and providers are declared, the server exposes these provider tools regardless of how many upstream tools are connected:
 
 - `provider_search` — discover available tools across all providers by keyword
 - `provider_describe` — get the full input schema for a specific tool
@@ -341,7 +341,7 @@ Use `value` for non-secret configuration you're happy to see in the built image 
 
 ## `addVolume(spec)`
 
-Mounts data into the dev container as a live read/write access point. Supports local bind mounts and cloud or network storage via `rclone`. No files are copied into the container.
+Mounts data into Docker-based targets as a live read/write access point. Supports local bind mounts and cloud or network storage via `rclone`. No files are copied into the container. AWS ECS does not support mounted volumes.
 
 ```javascript
 export default function volumes(ctx) {
@@ -405,7 +405,7 @@ export default function volumes(ctx) {
 
 - `name` — unique identifier.
 - `type` — `"local"`, `"s3"`, `"gcs"`, `"azure"`, `"sftp"`, `"smb"`, `"webdav"`, `"dropbox"`, or `"gdrive"`.
-- `target` — absolute path inside the dev container.
+- `target` — absolute path inside a Docker-based target.
 - `source` — local host path for `type: "local"`. Relative paths are resolved from the project root.
 - `bucket` / `prefix` — S3 or GCS location. Mount a prefix to access specific files inside it.
 - `account` / `container` / `path` — Azure Blob location.
@@ -414,9 +414,9 @@ export default function volumes(ctx) {
 - `url` / `path` / `vendor` — WebDAV location.
 - `path` — remote folder path for Dropbox or Google Drive.
 - `credentials` — map of provider credentials. Each value is either a literal string or an `{ env: "VAR_NAME" }` reference. Env references are resolved from the host at `up` time and never written to the generated files.
-- `options.readOnly` — set to `"true"` for read-only mounts (local only).
+- `options.readOnly` — set to `true` for a read-only local or `rclone` mount.
 
-Cloud-backed volumes install `rclone` and `fuse3` in the dev container, grant only the minimal FUSE capabilities (`/dev/fuse`, `SYS_ADMIN`, dropped default capabilities, `no-new-privileges`), and run an `rclone mount` daemon process. Files are read and written directly against the remote source. **Proxy mode** (see below) is the recommended approach for agent workloads — it avoids granting any container-level capabilities.
+Cloud-backed volumes on Docker-based targets install `rclone` and `fuse3`, grant only the minimal FUSE capabilities (`/dev/fuse`, `SYS_ADMIN`, dropped default capabilities, `no-new-privileges`), and run an `rclone mount` daemon process. Files are read and written directly against the remote source. **Proxy mode** (see below) is the recommended approach for agent workloads — it avoids granting any container-level capabilities.
 
 ### Proxy mode (agent-safe access)
 
@@ -448,7 +448,7 @@ In proxy mode:
 - Access rules are enforced by the MCP server (`allowedPaths`, `readOnly`).
 - **`allowedPaths` defaults to deny-all.** Without an explicit glob pattern like `["**"]`, no paths are accessible. This is a security-hardened default; existing proxy volume configurations must add an explicit `allowedPaths` entry.
 
-Proxy mode is supported for `local`, `s3`, `gcs`, and `azure` volumes. Other volume types still fall back to `rclone` mount.
+Proxy mode is supported only for `local`, `s3`, `gcs`, and `azure` volumes. Other volume types must use a non-proxy Docker-based mount; they cannot be proxied through MCP.
 
 ### Volume wrappers
 
