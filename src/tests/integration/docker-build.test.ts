@@ -6,6 +6,8 @@ import { buildPlan } from "../../builder/index.js";
 import { generateCompose } from "../../docker/generators/compose.js";
 import { generateDockerfile } from "../../docker/generators/dockerfile.js";
 import { generateHealthcheckScripts } from "../../docker/generators/healthchecks.js";
+import { generateInContainerServiceFiles } from "../../docker/generators/services.js";
+import { generateStartupScript } from "../../docker/generators/startup.js";
 import { generateSupervisordConf } from "../../docker/generators/supervisor.js";
 
 function hasDocker(): boolean {
@@ -107,7 +109,7 @@ describeIntegration("docker build integration", () => {
     }
   }, 300000);
 
-  it("generates a compose file with a healthy postgres service", async () => {
+  it("runs a healthy ephemeral Postgres process inside the dev container", async () => {
     const dir = join("/tmp", "sandbox-integration-" + Date.now());
     createProject(dir, {
       ".biodome/config.json": JSON.stringify({ project: { name: "pg-fixture" } }),
@@ -127,11 +129,21 @@ describeIntegration("docker build integration", () => {
     const project = `biodome-test-${Date.now()}`;
     try {
       mkdirSync(join(dir, ".sandbox"), { recursive: true });
+      mkdirSync(join(dir, ".biodome-build", "healthchecks"), { recursive: true });
+      mkdirSync(join(dir, ".biodome-build", "services"), { recursive: true });
       const plan = await buildPlan(dir);
       writeFileSync(join(dir, ".sandbox", "Dockerfile"), generateDockerfile(plan));
       const supervisord = generateSupervisordConf(plan);
       if (supervisord) {
-        writeFileSync(join(dir, ".sandbox", "supervisord.conf"), supervisord);
+        writeFileSync(join(dir, ".biodome-build", "supervisord.conf"), supervisord);
+      }
+      const startup = generateStartupScript(plan);
+      if (startup) writeFileSync(join(dir, ".biodome-build", "startup.sh"), startup);
+      for (const [path, content] of Object.entries(generateHealthcheckScripts(plan))) {
+        writeFileSync(join(dir, ".biodome-build", "healthchecks", path), content);
+      }
+      for (const [path, content] of Object.entries(generateInContainerServiceFiles(plan))) {
+        writeFileSync(join(dir, ".biodome-build", "services", path), content);
       }
       writeFileSync(
         join(dir, ".sandbox", "docker-compose.yaml"),
@@ -144,11 +156,21 @@ describeIntegration("docker build integration", () => {
 
       execFileSync(
         "docker",
-        ["compose", "-f", ".sandbox/docker-compose.yaml", "-p", project, "up", "-d", "--build"],
+        [
+          "compose",
+          "-f",
+          ".sandbox/docker-compose.yaml",
+          "-p",
+          project,
+          "up",
+          "-d",
+          "--build",
+          "--wait",
+        ],
         { cwd: dir, stdio: "inherit" },
       );
 
-      // Postgres must become healthy and accept connections.
+      // Postgres must become healthy and accept connections from inside dev.
       execFileSync(
         "docker",
         [
@@ -159,7 +181,7 @@ describeIntegration("docker build integration", () => {
           project,
           "exec",
           "-T",
-          "postgres",
+          "dev",
           "pg_isready",
           "-U",
           "postgres",
@@ -178,10 +200,8 @@ describeIntegration("docker build integration", () => {
         .split("\n")
         .filter((line) => line.trim().length > 0)
         .map((line) => JSON.parse(line) as { Service: string; Health?: string; State: string });
-      const postgres = services.find((s) => s.Service === "postgres");
-      expect(postgres).toBeDefined();
-      expect(postgres!.State).toBe("running");
-      expect(postgres!.Health).toBe("healthy");
+      expect(services).toHaveLength(1);
+      expect(services[0]).toMatchObject({ Service: "dev", State: "running", Health: "healthy" });
     } finally {
       try {
         execFileSync(
@@ -340,6 +360,8 @@ HTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
         mkdirSync(join(dir, ".biodome-build"), { recursive: true });
         writeFileSync(join(dir, ".biodome-build", "supervisord.conf"), supervisord);
       }
+      const startup = generateStartupScript(plan);
+      if (startup) writeFileSync(join(dir, ".biodome-build", "startup.sh"), startup);
       writeFileSync(
         join(dir, ".sandbox", "docker-compose.yaml"),
         generateCompose(plan, {

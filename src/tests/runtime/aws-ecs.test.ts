@@ -213,6 +213,41 @@ describe("createAwsEcsDriver", () => {
         ),
       ).toThrow(/does not support backing service containers/);
     });
+
+    it("renders plans with process-hosted services", () => {
+      const rootDir = join(tmpdir(), `ecs-root-${randomUUID()}`);
+      const outputDir = runtimeLayout(rootDir, sampleTarget.name).host.root;
+      mkdirSync(rootDir, { recursive: true });
+      try {
+        const planWithPostgres: Plan = {
+          ...samplePlan,
+          runtime: {
+            ...samplePlan.runtime,
+            services: [
+              {
+                name: "postgres",
+                type: "postgres",
+                runtime: "process",
+                image: "postgresql (in-container)",
+                containerName: "test-postgres",
+                environment: {},
+                ports: [],
+                volumes: [],
+                networks: [],
+              },
+            ],
+          },
+        };
+        const driver = createAwsEcsDriver(makeClients());
+        expect(
+          Effect.runSync(
+            driver.render({ rootDir, outputDir, plan: planWithPostgres, target: sampleTarget }),
+          ),
+        ).toContain(join(outputDir, "Dockerfile"));
+      } finally {
+        rmSync(rootDir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("start", () => {

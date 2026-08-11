@@ -29,11 +29,11 @@ WORKDIR /workspace
 FROM base AS dev
 WORKDIR /workspace
 
-# Copy supervisord configuration for managed processes.
-COPY .biodome-build/supervisord.conf /workspace/.biodome-build/supervisord.conf
+# Copy the managed-process startup script.
+COPY .biodome-build/startup.sh /workspace/.biodome-build/startup.sh
 
-# Start managed processes via supervisord.
-CMD ["supervisord", "-c", "/workspace/.biodome-build/supervisord.conf"]
+# Run lifecycle hooks, then start managed processes when declared.
+CMD ["sh", "/workspace/.biodome-build/startup.sh"]
 "
 `;
 
@@ -57,7 +57,7 @@ supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 
 [program:backend]
 command=node api.js
-autostart=true
+autostart=false
 autorestart=true
 startretries=10
 stdout_logfile=/tmp/backend.log
@@ -65,7 +65,7 @@ stderr_logfile=/tmp/backend.log
 
 [program:backend-healthcheck]
 command=sh /workspace/.biodome-build/healthchecks/backend-monitor.sh
-autostart=true
+autostart=false
 autorestart=true
 startsecs=5
 stdout_logfile=/tmp/backend-healthcheck.log
@@ -74,7 +74,7 @@ stderr_logfile=/tmp/backend-healthcheck.log
 [program:frontend]
 command=npm run dev
 directory=/workspace/frontend
-autostart=true
+autostart=false
 autorestart=true
 startretries=10
 stdout_logfile=/tmp/frontend.log
@@ -275,11 +275,11 @@ WORKDIR /workspace
 FROM base AS dev
 WORKDIR /workspace
 
-# Copy supervisord configuration for managed processes.
-COPY .biodome-build/supervisord.conf /workspace/.biodome-build/supervisord.conf
+# Copy the managed-process startup script.
+COPY .biodome-build/startup.sh /workspace/.biodome-build/startup.sh
 
-# Start managed processes via supervisord.
-CMD ["supervisord", "-c", "/workspace/.biodome-build/supervisord.conf"]
+# Run lifecycle hooks, then start managed processes when declared.
+CMD ["sh", "/workspace/.biodome-build/startup.sh"]
 "
 `;
 
@@ -303,7 +303,7 @@ supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 
 [program:web]
 command=node server.js
-autostart=true
+autostart=false
 autorestart=true
 startretries=10
 stdout_logfile=/tmp/web.log
@@ -312,7 +312,7 @@ environment=DEBUG="1"
 
 [program:web-healthcheck]
 command=sh /workspace/.biodome-build/healthchecks/web-monitor.sh
-autostart=true
+autostart=false
 autorestart=true
 startsecs=5
 stdout_logfile=/tmp/web-healthcheck.log
@@ -416,11 +416,11 @@ WORKDIR /workspace
 
 COPY --from=deps /workspace/vendor /workspace/vendor
 
-# Copy supervisord configuration for managed processes.
-COPY .biodome-build/supervisord.conf /workspace/.biodome-build/supervisord.conf
+# Copy the managed-process startup script.
+COPY .biodome-build/startup.sh /workspace/.biodome-build/startup.sh
 
-# Start managed processes via supervisord.
-CMD ["supervisord", "-c", "/workspace/.biodome-build/supervisord.conf"]
+# Run lifecycle hooks, then start managed processes when declared.
+CMD ["sh", "/workspace/.biodome-build/startup.sh"]
 "
 `;
 
@@ -444,7 +444,7 @@ supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 
 [program:laravel]
 command=php artisan serve --host=0.0.0.0 --port=8000
-autostart=true
+autostart=false
 autorestart=true
 startretries=10
 stdout_logfile=/tmp/laravel.log
@@ -452,7 +452,7 @@ stderr_logfile=/tmp/laravel.log
 
 [program:laravel-healthcheck]
 command=sh /workspace/.biodome-build/healthchecks/laravel-monitor.sh
-autostart=true
+autostart=false
 autorestart=true
 startsecs=5
 stdout_logfile=/tmp/laravel-healthcheck.log

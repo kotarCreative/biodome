@@ -8,8 +8,10 @@ export interface RuntimeLayout {
     dockerfile: string;
     composeFile: string;
     supervisordConfig: string;
+    startupScript: string;
     healthchecks: string;
     repositories: string;
+    services: string;
     mcp: string;
     mcpPlan: string;
     mcpServer: string;
@@ -39,8 +41,10 @@ export function runtimeLayout(rootDir: string, targetName?: string): RuntimeLayo
       dockerfile: join(hostRoot, "Dockerfile"),
       composeFile: join(hostRoot, "docker-compose.yaml"),
       supervisordConfig: join(hostRoot, "supervisord.conf"),
+      startupScript: join(hostRoot, "startup.sh"),
       healthchecks: join(hostRoot, "healthchecks"),
       repositories: join(hostRoot, "repos"),
+      services: join(hostRoot, "services"),
       mcp: join(hostRoot, "mcp"),
       mcpPlan: join(hostRoot, "plan.json"),
       mcpServer: join(hostRoot, "mcp", "server.js"),
@@ -56,8 +60,10 @@ export function runtimeLayout(rootDir: string, targetName?: string): RuntimeLayo
       root: containerRoot,
       dockerfile: join(containerRoot, "Dockerfile"),
       supervisordConfig: join(containerRoot, "supervisord.conf"),
+      startupScript: join(containerRoot, "startup.sh"),
       healthchecks: join(containerRoot, "healthchecks"),
       repositories: join(containerRoot, "repos"),
+      services: join(containerRoot, "services"),
       mcp: join(containerRoot, "mcp"),
       mcpPlan: join(containerRoot, "plan.json"),
       mcpServer: join(containerRoot, "mcp", "server.js"),

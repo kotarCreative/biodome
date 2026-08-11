@@ -46,7 +46,7 @@ export function generateCompose(plan: Plan, paths: ComposePaths = {}): string {
 
   const volumes: Record<string, unknown> = {};
 
-  for (const svc of plan.runtime.services) {
+  for (const svc of plan.runtime.services.filter((service) => service.runtime !== "process")) {
     services[svc.name] = serviceCompose(svc);
     for (const vol of svc.volumes) {
       if (isNamedVolume(vol.host)) {
@@ -213,9 +213,10 @@ function devService(plan: Plan, paths: ComposePaths): ComposeService {
     service.command = ["sleep", "infinity"];
   }
 
-  if (plan.runtime.services.length > 0) {
+  const sidecars = plan.runtime.services.filter((service) => service.runtime !== "process");
+  if (sidecars.length > 0) {
     service.depends_on = {};
-    for (const svc of plan.runtime.services) {
+    for (const svc of sidecars) {
       service.depends_on[svc.name] = {
         condition: svc.healthCheck ? "service_healthy" : "service_started",
       };

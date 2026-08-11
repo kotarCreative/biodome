@@ -8,7 +8,9 @@ import { generateDockerfile } from "../docker/generators/dockerfile.js";
 import { generateDockerignore } from "../docker/generators/dockerignore.js";
 import { generateHealthcheckScripts } from "../docker/generators/healthchecks.js";
 import { generateRepoScripts } from "../docker/generators/repositories.js";
+import { generateInContainerServiceFiles } from "../docker/generators/services.js";
 import { generateSupervisordConf } from "../docker/generators/supervisor.js";
+import { generateStartupScript } from "../docker/generators/startup.js";
 import { generateClaudeHarnessFiles } from "../docker/generators/harnesses/claude.js";
 import { generateCodexHarnessFiles } from "../docker/generators/harnesses/codex.js";
 import { generateHarnessFiles } from "../docker/generators/harnesses/opencode.js";
@@ -91,6 +93,11 @@ export function renderCommonArtifacts(plan: Plan, layout: RuntimeLayout): readon
       generateHealthcheckScripts(plan),
     ),
     ...generatedFiles(layout.host.projectRoot, layout.host.repositories, generateRepoScripts(plan)),
+    ...generatedFiles(
+      layout.host.projectRoot,
+      layout.host.services,
+      generateInContainerServiceFiles(plan),
+    ),
     ...generatedFiles(layout.host.projectRoot, layout.host.root, generateHarnessFiles(plan)),
     ...generatedFiles(layout.host.projectRoot, layout.host.root, generatePiHarnessFiles(plan)),
     ...generatedFiles(layout.host.projectRoot, layout.host.root, generateCodexHarnessFiles(plan)),
@@ -100,6 +107,10 @@ export function renderCommonArtifacts(plan: Plan, layout: RuntimeLayout): readon
   const supervisord = generateSupervisordConf(plan);
   if (supervisord)
     files.push(textFile(layout.host.projectRoot, layout.host.supervisordConfig, supervisord));
+
+  const startup = generateStartupScript(plan);
+  if (startup)
+    files.push(textFile(layout.host.projectRoot, layout.host.startupScript, startup, 0o755));
 
   if (plan.build.mcpEnabled) {
     files.push(textFile(layout.host.projectRoot, layout.host.mcpPlan, generatePlanJson(plan)));

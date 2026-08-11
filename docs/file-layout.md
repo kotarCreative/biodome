@@ -50,7 +50,9 @@ Static metadata for the project. Currently only the project name is required.
 
 ## `.biodome/services.mjs`
 
-Backing services run as separate containers. Use `ctx.addService()` for each service.
+Built-in Postgres runs as an ephemeral process inside the dev container. Other
+services, including custom container images and Redis, run as separate containers.
+Use `ctx.addService()` for each service.
 
 > Legacy `.js` extensions are also supported (`.biodome/services.js`).
 
@@ -95,9 +97,9 @@ target-specific runtime files below `.biodome-build/targets/<target>/`:
 
 - `Dockerfile` — multi-stage image for the dev container.
 - `supervisord.conf` — process manager config for daemon processes.
-- `docker-compose.yaml` — backing services and dev service when the target uses Docker Compose.
+- `docker-compose.yaml` — the dev service and any container-hosted backing services when the target uses Docker Compose.
 - `healthchecks/*.sh` — per-process health check and monitor scripts, plus an aggregate `all.sh`.
-- `repos/` and harness-home directories — generated repository and agent-harness helpers.
+- `repos/`, `services/`, and harness-home directories — generated repository, in-container service, and agent-harness helpers.
 - `artifacts/` — files collected after a successful named task.
 - `logs/events-<runId>.jsonl` and `logs/runs/<runId>.json` — structured lifecycle events and durable task-run records.
 - `state.json` — the provider state used to reuse or clean up the target.

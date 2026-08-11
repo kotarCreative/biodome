@@ -196,7 +196,7 @@ export function createAwsEcsDriver(
       plan: Plan;
       target: RuntimeTarget;
     }): Effect.Effect<string[], RuntimeError, never> {
-      if (input.plan.runtime.services.length > 0) {
+      if (input.plan.runtime.services.some((service) => service.runtime !== "process")) {
         return Effect.fail(
           new RuntimeError({
             message:
@@ -339,13 +339,8 @@ export function createAwsEcsDriver(
         const hasDaemonProcesses = input.plan.runtime.processes.some(
           (process) => process.mode === "daemon",
         );
-        const defaultCommand = hasDaemonProcesses
-          ? [
-              "/usr/bin/supervisord",
-              "-c",
-              runtimeLayout(input.rootDir, input.target.name).container.supervisordConfig,
-            ]
-          : undefined;
+        const layout = runtimeLayout(input.rootDir, input.target.name).container;
+        const defaultCommand = hasDaemonProcesses ? ["sh", layout.startupScript] : undefined;
         const imageRef = input.buildManifest.imageRef ?? imageUri(opts, input.deploymentId);
 
         yield* ensureLogGroup(c.cloudwatch, lgGroup);

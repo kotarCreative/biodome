@@ -29,7 +29,7 @@ describe("RepositoryBuilder", () => {
     expect(hooks).toContainEqual({
       name: "repo-sync-api",
       command: ["sh", "/workspace/.biodome-build/repos/api.sh"],
-      startOn: "start.post",
+      startOn: "start.pre",
     });
   });
 

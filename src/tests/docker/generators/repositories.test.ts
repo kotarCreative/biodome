@@ -19,6 +19,7 @@ describe("generateRepoScripts", () => {
     expect(script).toContain(
       'git clone --branch main https://github.com/acme/backend.git "$REPO_DIR"',
     );
+    expect(script).toContain('mkdir -p "$(dirname "$REPO_DIR")"');
     expect(script).toContain("git pull origin main");
   });
 
@@ -36,6 +37,25 @@ describe("generateRepoScripts", () => {
     expect(scripts["backend.sh"]).toContain(
       "git clone --branch main --depth 1 https://github.com/acme/backend.git",
     );
+  });
+
+  it("installs dependencies inside a cloned Python and Node repository", () => {
+    const plan = createPlan("my-app");
+    plan.build.languageRequests.push(
+      { name: "python", options: { version: "3.12" } },
+      { name: "node", options: { version: "20" } },
+    );
+    plan.runtime.repos.push({
+      name: "backend",
+      url: "https://github.com/acme/backend.git",
+      path: "/workspace/apps/backend",
+      branch: "main",
+    });
+
+    const script = generateRepoScripts(plan)["backend.sh"];
+    expect(script).toContain('cd "$REPO_DIR"');
+    expect(script).toContain("python -m pip install --no-cache-dir -r requirements.txt");
+    expect(script).toContain("if [ -f package-lock.json ]; then npm ci; else npm install; fi");
   });
 
   it("injects a token into an https url", () => {

@@ -48,7 +48,7 @@ describe("HarnessBuilder", () => {
         name: "agent",
         type: "opencode",
         port: 3002,
-        mcpServers: { biodome: { url: "http://localhost:3100" } },
+        mcpServers: {},
         telemetry: {
           enabled: true,
           path: "/workspace/.biodome-build/logs/opencode-events.jsonl",
@@ -98,6 +98,25 @@ describe("HarnessBuilder", () => {
     expect(() => builder.addOpencodeHarness({ name: "invalid", port: 70000 })).toThrow(
       /integer between 1 and 65535/,
     );
+  });
+
+  it("adds authenticated Biodome MCP only when MCP is enabled", () => {
+    const { builder, plan } = makeBuilder();
+    plan.build.mcpEnabled = true;
+    plan.build.mcpConfig.token = { env: "MCP_TOKEN" };
+
+    builder.addOpencodeHarness({ name: "agent" });
+
+    expect(plan.runtime.agentHarnesses[0].mcpServers).toEqual({
+      biodome: {
+        url: "http://localhost:3100",
+        auth: {
+          header: "Authorization",
+          env: "MCP_TOKEN",
+          value: "Bearer ${MCP_TOKEN}",
+        },
+      },
+    });
   });
 
   it("normalizes Pi resources, copies arrays, and declares API-key environment references", () => {
@@ -152,7 +171,7 @@ describe("HarnessBuilder", () => {
 
     expect(plan.runtime.codexHarnesses[0]).toMatchObject({
       port: 3003,
-      mcpServers: { biodome: { url: "http://localhost:3100" } },
+      mcpServers: {},
       telemetry: {
         enabled: true,
         path: "/workspace/.biodome-build/logs/codex-coder-events.jsonl",

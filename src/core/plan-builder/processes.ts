@@ -77,6 +77,7 @@ export class ProcessBuilder {
       healthCheck,
       mode: spec.mode ?? defaultMode,
       startOn: spec.startOn ?? defaultStartOn,
+      bootstrap: spec.bootstrap,
       mergeEnv: spec.mergeEnv,
     };
   }

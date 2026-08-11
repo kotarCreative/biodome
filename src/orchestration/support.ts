@@ -30,7 +30,8 @@ export const DRIVER_SUPPORT: Readonly<Record<string, DriverSupportDeclaration>> 
     artifactTransports: ["local"],
   },
   "aws-ecs": {
-    // Fargate cannot host backing service containers yet.
+    // Fargate cannot host backing service containers yet. Process-hosted services
+    // are part of the dev image and are therefore supported.
     serviceKinds: [],
     workspaceStrategies: ["upload"],
     networkModes: ["egress"],

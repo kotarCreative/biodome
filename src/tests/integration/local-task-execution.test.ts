@@ -75,6 +75,11 @@ export default function dev(ctx) {
       startPeriod: "1s",
     },
   });
+  ctx.addHook({
+    name: "fixture-setup",
+    command: ["sh", "-c", "printf hook-ready > /workspace/hook-marker"],
+    startOn: "start.pre",
+  });
   ctx.addPiHarness({ name: "reviewer", telemetry: { enabled: false } });
 }
 `,
@@ -156,6 +161,9 @@ if (!source.includes("workspace-source-ok")) throw new Error("workspace source u
 if (typeof pc.green !== "function") throw new Error("installed dependency unavailable");
 if (process.env.FIXTURE_RUNTIME_VALUE !== "runtime-environment-ok") {
   throw new Error("runtime environment unavailable");
+}
+if ((await readFile("/workspace/hook-marker", "utf8")) !== "hook-ready") {
+  throw new Error("start hook did not complete before task execution");
 }
 
 let daemonReady = false;

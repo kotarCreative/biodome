@@ -45,7 +45,7 @@ export function generateSupervisordConf(plan: Plan): string {
     if (proc.workingDir) {
       lines.push(`directory=${proc.workingDir}`);
     }
-    lines.push("autostart=true");
+    lines.push("autostart=false");
     lines.push("autorestart=true");
     lines.push("startretries=10");
     lines.push(`stdout_logfile=/tmp/${proc.name}.log`);
@@ -62,7 +62,7 @@ export function generateSupervisordConf(plan: Plan): string {
       const startPeriod = proc.healthCheck.startPeriod || "5s";
       lines.push(`[program:${proc.name}-healthcheck]`);
       lines.push(`command=sh ${generatedRuntimeDir(plan)}/healthchecks/${proc.name}-monitor.sh`);
-      lines.push("autostart=true");
+      lines.push("autostart=false");
       lines.push("autorestart=true");
       lines.push(`startsecs=${Math.ceil(parseDuration(startPeriod, 5))}`);
       lines.push(`stdout_logfile=/tmp/${proc.name}-healthcheck.log`);

@@ -64,7 +64,10 @@ describe("implicit app loader", () => {
 
     builder.finalize();
     expect(builder.getPlan().runtime.services).toHaveLength(1);
-    expect(builder.getPlan().runtime.processes).toEqual([]);
+    expect(builder.getPlan().runtime.processes.map((process) => process.name)).toEqual([
+      "postgres-server",
+      "postgres-init",
+    ]);
   });
 
   it("does not mutate the caller plan when a recipe references a missing endpoint", async () => {

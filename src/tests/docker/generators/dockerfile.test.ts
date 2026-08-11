@@ -32,10 +32,8 @@ describe("generateDockerfile", () => {
     const dockerfile = generateDockerfile(plan);
     expect(dockerfile).toContain("FROM python:3.12-slim AS base");
     expect(dockerfile).toContain("supervisor");
-    expect(dockerfile).toContain("supervisord.conf");
-    expect(dockerfile).toContain(
-      'CMD ["supervisord", "-c", "/workspace/.biodome-build/supervisord.conf"]',
-    );
+    expect(dockerfile).toContain("startup.sh");
+    expect(dockerfile).toContain('CMD ["sh", "/workspace/.biodome-build/startup.sh"]');
     expect(dockerfile).not.toContain('CMD ["bash"]');
   });
 

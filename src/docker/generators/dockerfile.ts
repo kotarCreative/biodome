@@ -146,16 +146,14 @@ export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}):
     lines.push("");
   }
 
-  if (hasDaemonProcesses) {
+  if (hasDaemonProcesses || plan.runtime.processes.some((p) => p.mode === "oneshot")) {
     if (!options.generatedFilesPath) {
-      lines.push("# Copy supervisord configuration for managed processes.");
-      lines.push(
-        `COPY ${generatedFilesPath}/supervisord.conf /workspace/.biodome-build/supervisord.conf`,
-      );
+      lines.push("# Copy the managed-process startup script.");
+      lines.push(`COPY ${generatedFilesPath}/startup.sh ${generatedRuntimeDir(plan)}/startup.sh`);
       lines.push("");
     }
-    lines.push("# Start managed processes via supervisord.");
-    lines.push(`CMD ["supervisord", "-c", "${generatedRuntimeDir(plan)}/supervisord.conf"]`);
+    lines.push("# Run lifecycle hooks, then start managed processes when declared.");
+    lines.push(`CMD ["sh", "${generatedRuntimeDir(plan)}/startup.sh"]`);
   } else {
     lines.push("# Source code is mounted at runtime via 'docker run -v .:/workspace'");
     lines.push('CMD ["bash"]');

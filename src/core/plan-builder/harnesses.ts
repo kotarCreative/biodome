@@ -21,6 +21,7 @@ import type {
   ProcessSpec,
 } from "../feature.js";
 import { ValidationError } from "../errors.js";
+import { mcpClientAuthFromToken } from "../mcp-client.js";
 
 export interface HarnessPaths {
   logs: string;
@@ -76,9 +77,7 @@ export class HarnessBuilder {
       name: validated.name,
       type: "opencode",
       port,
-      mcpServers: validated.mcpServers ?? {
-        biodome: { url: `http://localhost:${this.plan.build.mcpPort}` },
-      },
+      mcpServers: validated.mcpServers ?? this.defaultMcpServers(),
       telemetry: telemetry(validated.telemetry, `${this.paths.logs}/opencode-events.jsonl`),
       config: validated.config ? { ...validated.config } : {},
     };
@@ -149,9 +148,7 @@ export class HarnessBuilder {
       name: validated.name,
       type: "codex",
       port,
-      mcpServers: validated.mcpServers ?? {
-        biodome: { url: `http://localhost:${this.plan.build.mcpPort}` },
-      },
+      mcpServers: validated.mcpServers ?? this.defaultMcpServers(),
       apiKey: validated.apiKey,
       model: validated.model,
       telemetry: telemetry(
@@ -223,5 +220,17 @@ export class HarnessBuilder {
     if (apiKey && typeof apiKey === "object" && "env" in apiKey) {
       this.dependencies.addEnv(apiKey.env, { from: { env: apiKey.env } });
     }
+  }
+
+  private defaultMcpServers(): AgentHarness["mcpServers"] {
+    if (!this.plan.build.mcpEnabled) return {};
+    const token = this.plan.build.mcpConfig.token;
+    if (!token || typeof token === "string") return {};
+    return {
+      biodome: {
+        url: `http://localhost:${this.plan.build.mcpPort}`,
+        auth: mcpClientAuthFromToken(token),
+      },
+    };
   }
 }

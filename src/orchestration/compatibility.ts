@@ -235,7 +235,9 @@ export function preflightTargetCompatibility(
   const issues: CompatibilityIssue[] = [];
 
   if (provider.serviceKinds) {
-    for (const service of plan.runtime.services) {
+    for (const service of plan.runtime.services.filter(
+      (service) => service.runtime !== "process",
+    )) {
       if (!provider.serviceKinds.includes(service.type)) {
         issues.push({
           kind: "service",

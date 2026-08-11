@@ -8,6 +8,7 @@ export function generateDockerignore(): string {
     ".biodome/node_modules/",
     ".biodome-build/*",
     "!.biodome-build/supervisord.conf",
+    "!.biodome-build/startup.sh",
     "!.biodome-build/targets",
     "!.biodome-build/targets/**",
     ".biodome-build/targets/*/artifacts/",

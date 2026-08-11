@@ -54,10 +54,6 @@ export const buildPlanEffect = Effect.fnUntraced(function* (
   const builder = new PlanBuilder(rootDir, config.project.name, options.dryRun);
   const ctx = builder.context;
 
-  yield* loadServices(rootDir, ctx);
-  yield* loadAppsEffect(rootDir, builder);
-  yield* loadFeatures(rootDir, ctx);
-
   if (config.mcp?.enabled) {
     const port = config.mcp.port ?? 3001;
     const mcpToken = config.mcp.token;
@@ -75,6 +71,10 @@ export const buildPlanEffect = Effect.fnUntraced(function* (
       providerCatalogConcurrency: config.mcp.providerCatalogConcurrency,
     });
   }
+
+  yield* loadServices(rootDir, ctx);
+  yield* loadAppsEffect(rootDir, builder);
+  yield* loadFeatures(rootDir, ctx);
 
   builder.finalize();
 

@@ -9,7 +9,6 @@ export const serviceConfigs: Record<string, (svc: Service, options: ServiceOptio
     svc.environment.POSTGRES_USER = user;
     svc.environment.POSTGRES_PASSWORD = password;
     svc.environment.POSTGRES_DB = database;
-    svc.volumes.push({ host: `${svc.name}_data`, container: "/var/lib/postgresql/data" });
     svc.healthCheck = {
       test: ["CMD-SHELL", `pg_isready -U ${user} -d ${database}`],
       interval: "5s",
@@ -29,7 +28,7 @@ export const serviceConfigs: Record<string, (svc: Service, options: ServiceOptio
 };
 
 export const defaultImages: Record<string, string> = {
-  postgres: "postgres:16-alpine",
+  postgres: "postgresql (in-container)",
   redis: "redis:7-alpine",
 };
 

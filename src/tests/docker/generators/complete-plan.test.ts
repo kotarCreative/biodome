@@ -127,13 +127,13 @@ describe("complete-plan artifact regression", () => {
     const expectedOrder = files.map((file) => file.relativePath).sort((a, b) => a.localeCompare(b));
     expect(files.map((file) => file.relativePath)).toEqual(expectedOrder);
 
-    // Dockerfile: target-scoped copy + supervisord CMD for daemon processes.
+    // Dockerfile: target-scoped copy + lifecycle startup command for daemon processes.
     const dockerfile = byPath(files, ".biodome-build/targets/local/Dockerfile");
     expect(dockerfile.content).toContain(
       "COPY .biodome-build/targets/local/ /workspace/.biodome-build/targets/local/",
     );
     expect(dockerfile.content).toContain(
-      'CMD ["supervisord", "-c", "/workspace/.biodome-build/targets/local/supervisord.conf"]',
+      'CMD ["sh", "/workspace/.biodome-build/targets/local/startup.sh"]',
     );
     expect(dockerfile.content).toContain("@modelcontextprotocol/sdk");
 
@@ -148,6 +148,7 @@ describe("complete-plan artifact regression", () => {
     expect(supervisord.content).toContain(
       "sh /workspace/.biodome-build/targets/local/healthchecks/web-monitor.sh",
     );
+    expect(byPath(files, ".biodome-build/targets/local/startup.sh").mode).toBe(0o755);
 
     // Health-check scripts are executable shell scripts.
     const healthCheck = byPath(files, ".biodome-build/targets/local/healthchecks/web.sh");

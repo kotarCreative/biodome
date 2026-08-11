@@ -231,6 +231,8 @@ export interface Provider {
 export interface Service {
   name: string;
   type: string;
+  /** Container services are provider sidecars; process services run in the dev image. */
+  runtime?: "container" | "process";
   image: string;
   containerName: string;
   environment: Record<string, string>;
@@ -320,6 +322,8 @@ export interface Process {
   healthCheck?: ProcessHealthCheck;
   mode: "daemon" | "oneshot";
   startOn: LifecyclePoint;
+  /** Start this daemon and wait for its health check before lifecycle hooks run. */
+  bootstrap?: boolean;
   // When false, the process environment is not merged into the global runtime
   // environment. This keeps sensitive env vars (e.g. MCP proxy credentials) out of
   // the dev service's compose environment.
@@ -535,6 +539,7 @@ export const ProcessSpecSchema = Schema.Struct({
   mode: Schema.optional(Schema.Literals(["daemon", "oneshot"])),
   startOn: Schema.optional(LifecyclePointSchema),
   mergeEnv: Schema.optional(Schema.Boolean),
+  bootstrap: Schema.optional(Schema.Boolean),
 });
 
 export const HookSpecSchema = ProcessSpecSchema.pipe(
@@ -936,12 +941,14 @@ export const ProcessSchema = Schema.Struct({
   healthCheck: Schema.optional(ProcessHealthCheckSchema),
   mode: Schema.Literals(["daemon", "oneshot"]),
   startOn: LifecyclePointSchema,
+  bootstrap: Schema.optional(Schema.Boolean),
   mergeEnv: Schema.optional(Schema.Boolean),
 });
 
 export const ServiceSchema = Schema.Struct({
   name: Schema.String,
   type: Schema.String,
+  runtime: Schema.optional(Schema.Literals(["container", "process"])),
   image: Schema.String,
   containerName: Schema.String,
   environment: Schema.Record(Schema.String, Schema.String),

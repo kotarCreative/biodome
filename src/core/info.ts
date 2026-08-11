@@ -141,7 +141,7 @@ export function serviceConnection(svc: Service): ServiceConnection | undefined {
     const hostPort = svc.ports[0]?.host || 5432;
     return {
       label: "PostgreSQL",
-      internal: `postgresql://${user}:${password}@${svc.name}:5432/${database}`,
+      internal: `postgresql://${user}:${password}@${svc.runtime === "process" ? "localhost" : svc.name}:5432/${database}`,
       external: `postgresql://${user}:${password}@localhost:${hostPort}/${database}`,
     };
   }

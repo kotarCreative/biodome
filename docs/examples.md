@@ -50,7 +50,7 @@ export default function migrate(ctx) {
   ctx.addHook({
     name: "migrate",
     command: ["python", "manage.py", "migrate"],
-    startOn: "start.post",
+    startOn: "start.pre",
   });
 }
 ```

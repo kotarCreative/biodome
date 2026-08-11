@@ -115,7 +115,15 @@ export default function tools(ctx) {
 
 ## `addService(name, options)`
 
-Declares a backing service. See [services in file-layout.md](file-layout.md) for details.
+Declares a backing service. Built-in Postgres runs as an ephemeral process inside
+the dev container by default. Use an external provider primitive when a task
+needs a managed or persistent database. See [services in file-layout.md](file-layout.md)
+for details.
+
+The built-in Postgres profile is tuned for short-lived coding tasks: it limits
+connections and memory, disables autovacuum, replication, and durable WAL
+flushes, and stores data under `/tmp`. Do not use it for data that must survive
+an unexpected container stop.
 
 ```javascript
 export default function services(ctx) {
@@ -532,7 +540,7 @@ export default function volumes(ctx) {
 
 ## `addRepo(spec)`
 
-Declares a Git repository that should be cloned into the sandbox. When the sandbox starts, biodome runs a generated `start.post` hook that clones the repo if it is not present, or fetches, checks out, and pulls the tracked branch if it already is. This is useful for polyglot or microservice projects where the agent needs multiple repositories side by side.
+Declares a Git repository that should be cloned into the sandbox. Before managed processes start, biodome runs a generated `start.pre` hook that clones the repo if it is not present, or fetches, checks out, and pulls the tracked branch if it already is. It then installs dependencies from that repository using its declared Python and Node runtimes. This is useful for polyglot or microservice projects where the agent needs multiple repositories side by side.
 
 ```javascript
 export default function repos(ctx) {
@@ -561,7 +569,7 @@ export default function repos(ctx) {
   - `token` — for HTTPS URLs. Injected as `https://$TOKEN@host/...`.
   - `sshKey` — for SSH URLs. Written to a temporary key file and used via `GIT_SSH_COMMAND`.
 
-Each repo generates a sync script at `.biodome-build/repos/<name>.sh` and a `start.post` hook named `repo-sync-<name>`. `git` and `openssh-client` are automatically installed in the dev image when any repo is declared.
+Each repo generates a sync and setup script at `.biodome-build/repos/<name>.sh` and a `start.pre` hook named `repo-sync-<name>`. `git` and `openssh-client` are automatically installed in the dev image when any repo is declared.
 
 ## `addOpencodeHarness(spec)`
 
@@ -585,7 +593,7 @@ export default function agent(ctx) {
 
 - `name` — unique identifier for the harness.
 - `port` — port for `opencode serve`. Defaults to `3002`.
-- `mcpServers` — map of MCP servers the agent can use. Defaults to `{ biodome: { url: "http://localhost:<mcpPort>" } }`.
+- `mcpServers` — map of MCP servers the agent can use. Defaults to the authenticated Biodome MCP server only when MCP is enabled in `config.json`; otherwise it defaults to `{}`.
 - `telemetry` —
   - `enabled` — whether to install the telemetry plugin. Defaults to `true`.
   - `path` — JSONL file where OpenCode events are written. Defaults to `/workspace/.biodome-build/logs/opencode-events.jsonl`.

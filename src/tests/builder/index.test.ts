@@ -76,7 +76,7 @@ describe("buildPlan", () => {
     const plan = await buildPlan(dir);
     expect(plan.project).toBe("my-app");
     expect(plan.build.baseImage).toBe("python:3.12-slim");
-    expect(plan.runtime.processes).toHaveLength(1);
+    expect(plan.runtime.processes).toHaveLength(3);
     expect(plan.runtime.services).toHaveLength(1);
     expect(plan.runtime.services[0].name).toBe("postgres");
   });

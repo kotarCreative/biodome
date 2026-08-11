@@ -40,7 +40,7 @@ export class RepositoryBuilder {
     this.addHook({
       name: `repo-sync-${validated.name}`,
       command: ["sh", `${this.repositoriesPath}/${validated.name}.sh`],
-      startOn: "start.post",
+      startOn: "start.pre",
     });
   }
 

@@ -48,7 +48,13 @@ export class PlanBuilder {
     this.build = new BuildBuilder(this.plan, (path) => this.io.fileExists(path));
     this.environment = new EnvironmentBuilder(this.plan);
     this.processes = new ProcessBuilder(this.plan, (name) => this.build.addAptPackage(name));
-    this.services = new ServiceBuilder(this.plan);
+    this.services = new ServiceBuilder(
+      this.plan,
+      (name) => this.build.addAptPackage(name),
+      (spec) => this.processes.addProcess(spec),
+      (spec) => this.processes.addHook(spec),
+      `${layout.root}/services`,
+    );
 
     const addProcess: FeatureContext["addProcess"] = (spec) =>
       this.mutate(() => this.processes.addProcess(spec));

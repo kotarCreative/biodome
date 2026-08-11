@@ -25,7 +25,7 @@ npx @kotarcreative/biodome up local
 - **Plan:** The intermediate representation of your environment. Each feature contributes to it.
 - **Applications:** Implicit modules in `.biodome/apps/` that expand a local app or npm-distributed recipe into ordinary primitives.
 - **Features:** JavaScript modules in `.biodome/features/` that export a default function receiving the biodome context and extend the base plan after applications.
-- **Services:** Backing containers like Postgres or Redis, declared in `.biodome/services.mjs`.
+- **Services:** Backing dependencies declared in `.biodome/services.mjs`. Built-in Postgres runs ephemerally inside the dev container; Redis and custom images remain containers.
 
 ## MCP (Model Context Protocol)
 
