@@ -1,8 +1,6 @@
-import { Plan, DependencyInstall, CopyArtifact } from "./plan.js";
+import { DependencyInstall, CopyArtifact } from "./plan.js";
 
 export interface BuildContext {
-  plan: Plan;
-
   setBaseImage(name: string): boolean;
   requireDependencyFiles(files: string[]): string[];
   addDependencyInstall(install: DependencyInstall): void;

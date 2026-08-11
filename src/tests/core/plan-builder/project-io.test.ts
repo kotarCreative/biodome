@@ -58,6 +58,10 @@ describe("PlanBuilder", () => {
       name: "lmstudio",
       options: { apiKey: { env: "LMSTUDIO_API_KEY" } },
     });
+    builder.context.addOpencodeHarness({ name: "open" });
+    builder.context.addPiHarness({ name: "pi", apiKey: { env: "PI_API_KEY" } });
+    builder.context.addCodexHarness({ name: "codex", apiKey: { env: "CODEX_API_KEY" } });
+    builder.context.addClaudeHarness({ name: "claude", apiKey: { env: "CLAUDE_API_KEY" } });
     builder.configureMcp(3001);
 
     const plan = builder.getPlan();
@@ -65,6 +69,10 @@ describe("PlanBuilder", () => {
     expect(plan.runtime.endpoints).toHaveLength(1);
     expect(plan.runtime.providers).toHaveLength(1);
     expect(plan.runtime.llmProviders).toHaveLength(1);
+    expect(plan.runtime.agentHarnesses).toHaveLength(1);
+    expect(plan.runtime.piHarnesses).toHaveLength(1);
+    expect(plan.runtime.codexHarnesses).toHaveLength(1);
+    expect(plan.runtime.claudeHarnesses).toHaveLength(1);
     expect(mcp).toMatchObject({
       mergeEnv: false,
       environment: { JIRA_TOKEN: "${JIRA_TOKEN}" },
