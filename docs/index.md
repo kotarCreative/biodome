@@ -59,5 +59,4 @@ Queries return at most 100 events by default and accept up to 1,000 with `--limi
 - [API reference](api.md)
 - [Examples](examples.md)
 - [Agent task orchestration](orchestration.md)
-- [Project improvement implementation plans](design/improvements/README.md)
-- [Security, performance, and ergonomics implementation plan](design/security-performance-ergonomics-plan.md)
+- [Active design and implementation plans](design/README.md)

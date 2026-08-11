@@ -8,9 +8,18 @@
 - [x] End-to-end local task execution workflow
 - [x] Docker timeout enforcement and bounded output
 - [x] Task preflight capability checks
-- [x] ECS task execution and artifact collection
-- [x] Remote artifact storage
+- [x] Provider-neutral execution plans and durable run records
+- [x] Initial ECS task execution and S3 artifact collection
 
 ## Upcoming
 
-- [ ] Security and performance ergonomics
+- [ ] Mandatory MCP authentication and typed secret handling
+- [ ] Complete provider-neutral runtime execution contracts
+- [ ] Non-root local container and process isolation
+- [ ] AWS ECS production hardening and integration proof
+- [ ] Bounded MCP I/O and complete event observability
+- [ ] Security release documentation and automation
+- [ ] Stable package and startup performance budgets
+
+See [the active design plans](design/README.md) for dependencies, acceptance criteria,
+and verification commands.
