@@ -28,7 +28,6 @@ The executor must not:
 
 | Plan                            | Topic             | Priority | Status   | Main Result                                  |
 | ------------------------------- | ----------------- | -------- | -------- | -------------------------------------------- |
-| [04](04-deep-plan-builder.md)   | Plan builder      | P1       | proposed | Deep domain modules behind a narrow context  |
 | [14](14-split-generators.md)    | Generator modules | P2       | proposed | Cohesive output-oriented generator modules   |
 | [16](16-performance-budgets.md) | Performance       | P3       | proposed | Repeatable benchmarks and regression budgets |
 
@@ -40,9 +39,8 @@ The executor must not:
 
 ## Recommended Execution Waves
 
-### Wave 1: Independent improvements
+### Wave 1: Generator improvements
 
-- Plan 04: complete the remaining domain extractions.
 - Plan 14: split generator modules after the completed shared-rendering work.
 
 ### Wave 2: Performance proof
@@ -51,19 +49,7 @@ The executor must not:
 
 ## Pull Request Boundaries
 
-Use one pull request per numbered plan except Plan 04. Plan 04 should use one pull request per migrated domain after its facade and `ProjectIO` foundation land.
-
-For Plan 04, use this order:
-
-1. Foundation and `ProjectIO`.
-2. Environment.
-3. Processes.
-4. Services.
-5. Repositories.
-6. Volumes.
-7. Providers.
-8. Harnesses.
-9. Build and final facade cleanup.
+Use one pull request per numbered plan.
 
 Do not merge a migration pull request while old and new modules both mutate the same domain state.
 

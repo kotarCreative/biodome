@@ -2,8 +2,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Effect } from "effect";
-import type { FeatureContext } from "../core/feature.js";
-import { type Plan, validateTargetName } from "../core/plan.js";
+import { validateTargetName } from "../core/plan.js";
 import { PlanBuilder } from "../core/plan-builder/plan-builder.js";
 import { FeatureError, ValidationError } from "../core/errors.js";
 import { ApplicationBuilderImpl } from "./application-builder.js";
@@ -114,22 +113,6 @@ function normalizeDependencies(value: unknown, path: string): string[] {
   return [...new Set(value)].sort();
 }
 
-/**
- * App expansion can call every normal feature primitive, so use a normal
- * PlanBuilder over a cloned plan rather than trying to replay its mutations.
- * The caller's plan is replaced only after all app expansion and reference
- * validation has succeeded.
- */
-function createExpansionBuilder(rootDir: string, source: PlanBuilder): PlanBuilder {
-  const expansion = new PlanBuilder(rootDir, source.getPlan().project, true);
-  Object.assign(expansion.getPlan(), structuredClone(source.getPlan()));
-  return expansion;
-}
-
-function commitExpandedPlan(target: Plan, expanded: Plan): void {
-  Object.assign(target, expanded);
-}
-
 /** Discover only immediate, trusted app modules. Imports happen once per plan build. */
 export async function discoverApps(rootDir: string): Promise<LoadedAppDeclaration[]> {
   const appsDir = join(rootDir, ".biodome", "apps");
@@ -207,14 +190,11 @@ export function loadAppsEffect(
         declarations.map(({ name, dependsOn }) => ({ name, dependencies: dependsOn })),
       );
       const byName = new Map(declarations.map((declaration) => [declaration.name, declaration]));
-      const expansionBuilder = createExpansionBuilder(rootDir, builder);
-      for (const name of order) {
-        const declaration = byName.get(name)!;
-        const recipe = isAppRecipe(declaration.default) ? declaration.default : undefined;
-        const app = new ApplicationBuilderImpl(
-          expansionBuilder.context as FeatureContext,
-          expansionBuilder.getPlan(),
-          {
+      await builder.expandApplications(async (context, plan) => {
+        for (const name of order) {
+          const declaration = byName.get(name)!;
+          const recipe = isAppRecipe(declaration.default) ? declaration.default : undefined;
+          const app = new ApplicationBuilderImpl(context, plan, {
             name,
             declarationPath: relative(rootDir, declaration.path) || declaration.path,
             recipe: recipe
@@ -225,47 +205,41 @@ export function loadAppsEffect(
                 }
               : undefined,
             knownApps,
-          },
-        );
-        try {
-          if (recipe) await recipe.expand(app, recipe.options);
-          else
-            await (declaration.default as (app: ApplicationBuilder) => void | Promise<void>)(app);
-        } catch (error) {
-          if (error instanceof FeatureError || error instanceof ValidationError) throw error;
-          throw new FeatureError({
-            message: error instanceof Error ? error.message : String(error),
-            path: declaration.path,
           });
-        }
-        const application = app.finish();
-        for (const dependency of declaration.dependsOn) {
-          if (!application.dependencies.includes(dependency))
-            application.dependencies.push(dependency);
-        }
-        application.dependencies.sort();
-        expansionBuilder.getPlan().runtime.applications.push(application);
-      }
-      for (const declaration of declarations) {
-        if (!isAppRecipe(declaration.default)) continue;
-        for (const reference of appReferencesFromOptions(declaration.default.options)) {
-          const endpointName = `${reference.app}:${reference.endpoint}`;
-          if (
-            !expansionBuilder
-              .getPlan()
-              .runtime.endpoints.some((endpoint) => endpoint.name === endpointName)
-          ) {
-            throw new ValidationError({
-              message: `Application "${declaration.name}" references endpoint "${reference.app}.${reference.endpoint}", which is not declared`,
+          try {
+            if (recipe) await recipe.expand(app, recipe.options);
+            else
+              await (declaration.default as (app: ApplicationBuilder) => void | Promise<void>)(app);
+          } catch (error) {
+            if (error instanceof FeatureError || error instanceof ValidationError) throw error;
+            throw new FeatureError({
+              message: error instanceof Error ? error.message : String(error),
+              path: declaration.path,
             });
           }
+          const application = app.finish();
+          for (const dependency of declaration.dependsOn) {
+            if (!application.dependencies.includes(dependency)) {
+              application.dependencies.push(dependency);
+            }
+          }
+          application.dependencies.sort();
+          plan.recordApplication(application);
         }
-      }
-      expansionBuilder.getPlan().runtime.applications.sort((a, b) => a.name.localeCompare(b.name));
-      expansionBuilder
-        .getPlan()
-        .runtime.contributions.sort((a, b) => a.qualifiedName.localeCompare(b.qualifiedName));
-      commitExpandedPlan(builder.getPlan(), expansionBuilder.getPlan());
+        for (const declaration of declarations) {
+          if (!isAppRecipe(declaration.default)) continue;
+          for (const reference of appReferencesFromOptions(declaration.default.options)) {
+            const endpointName = `${reference.app}:${reference.endpoint}`;
+            if (!plan.hasEndpoint(endpointName)) {
+              throw new ValidationError({
+                message: `Application "${declaration.name}" references endpoint "${reference.app}.${reference.endpoint}", which is not declared`,
+              });
+            }
+          }
+        }
+        plan.sortApplications();
+        plan.sortContributions();
+      });
     },
     catch: (error) =>
       error instanceof FeatureError || error instanceof ValidationError

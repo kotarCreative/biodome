@@ -57,13 +57,14 @@ describe("implicit app loader", () => {
     });
     const builder = new PlanBuilder(root, "apps");
     builder.context.addService("postgres");
-    const before = structuredClone(builder.getPlan());
 
     await expect(Effect.runPromise(loadAppsEffect(root, builder))).rejects.toThrow(
       'Application "z-invalid" requires unknown service "missing"',
     );
 
-    expect(builder.getPlan()).toEqual(before);
+    builder.finalize();
+    expect(builder.getPlan().runtime.services).toHaveLength(1);
+    expect(builder.getPlan().runtime.processes).toEqual([]);
   });
 
   it("does not mutate the caller plan when a recipe references a missing endpoint", async () => {
@@ -81,13 +82,14 @@ describe("implicit app loader", () => {
       `,
     });
     const builder = new PlanBuilder(root, "apps");
-    const before = structuredClone(builder.getPlan());
 
     await expect(Effect.runPromise(loadAppsEffect(root, builder))).rejects.toThrow(
       'Application "z-invalid" references endpoint "a-valid.http", which is not declared',
     );
 
-    expect(builder.getPlan()).toEqual(before);
+    builder.finalize();
+    expect(builder.getPlan().runtime.applications).toEqual([]);
+    expect(builder.getPlan().runtime.processes).toEqual([]);
   });
 
   it("records recipe versions in application metadata and contribution provenance", async () => {

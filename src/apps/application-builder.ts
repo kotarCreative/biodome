@@ -1,6 +1,5 @@
 import { posix } from "node:path";
 import type { FeatureContext } from "../core/feature.js";
-import type { Plan } from "../core/plan.js";
 import { ValidationError } from "../core/errors.js";
 import { isServiceReference } from "./references.js";
 import type {
@@ -12,6 +11,7 @@ import type {
   Application,
   ApplicationBuilder,
   AppRecipeMetadata,
+  ContributionProvenance,
   EndpointRef,
   HookRef,
   ProcessRef,
@@ -25,6 +25,16 @@ export interface ApplicationBuilderOptions {
   declarationPath: string;
   recipe?: AppRecipeMetadata;
   knownApps: ReadonlySet<string>;
+}
+
+export interface ApplicationPlanAccess {
+  serviceEnvironment(name: string): Record<string, string> | undefined;
+  processPort(name: string): number | null | undefined;
+  hasEndpoint(name: string): boolean;
+  recordApplication(application: Application): void;
+  recordContribution(contribution: ContributionProvenance): void;
+  sortApplications(): void;
+  sortContributions(): void;
 }
 
 function qualifiedDeclaration(app: string, name: string): string {
@@ -74,7 +84,7 @@ export class ApplicationBuilderImpl implements ApplicationBuilder {
 
   constructor(
     private readonly context: FeatureContext,
-    private readonly plan: Plan,
+    private readonly plan: ApplicationPlanAccess,
     private readonly options: ApplicationBuilderOptions,
   ) {
     this.name = options.name;
@@ -125,8 +135,8 @@ export class ApplicationBuilderImpl implements ApplicationBuilder {
     const serviceName = isServiceReference(name) ? name.service : name;
     if (!serviceName)
       throw new ValidationError({ message: `Application ${this.name} requires a service name` });
-    const service = this.plan.runtime.services.find((entry) => entry.name === serviceName);
-    if (!service) {
+    const environment = this.plan.serviceEnvironment(serviceName);
+    if (!environment) {
       throw new ValidationError({
         message: `Application "${this.name}" requires unknown service "${serviceName}"`,
       });
@@ -142,12 +152,12 @@ export class ApplicationBuilderImpl implements ApplicationBuilder {
         });
       }
       for (const [applicationKey, serviceKey] of Object.entries(binding.environment)) {
-        if (typeof serviceKey !== "string" || !(serviceKey in service.environment)) {
+        if (typeof serviceKey !== "string" || !(serviceKey in environment)) {
           throw new ValidationError({
             message: `Application "${this.name}" service "${serviceName}" references invalid environment key "${String(serviceKey)}"`,
           });
         }
-        this.context.addEnv(applicationKey, { value: service.environment[serviceKey] });
+        this.context.addEnv(applicationKey, { value: environment[serviceKey] });
       }
     }
     if (!this.application.requiredServices.includes(serviceName)) {
@@ -166,7 +176,7 @@ export class ApplicationBuilderImpl implements ApplicationBuilder {
     if (!this.application.dependencies.includes(dependency))
       this.application.dependencies.push(dependency);
     const endpointName = `${reference.app}:${reference.endpoint}`;
-    if (!this.plan.runtime.endpoints.some((endpoint) => endpoint.name === endpointName)) {
+    if (!this.plan.hasEndpoint(endpointName)) {
       throw new ValidationError({
         message: `Application "${this.name}" references endpoint "${reference.app}.${reference.endpoint}", which is not declared`,
       });
@@ -215,15 +225,13 @@ export class ApplicationBuilderImpl implements ApplicationBuilder {
         ? processName
         : qualifiedReference(this.name, processName)
       : undefined;
-    const process = resolvedProcess
-      ? this.plan.runtime.processes.find((entry) => entry.name === resolvedProcess)
-      : undefined;
-    if (resolvedProcess && !process) {
+    const processPort = resolvedProcess ? this.plan.processPort(resolvedProcess) : undefined;
+    if (resolvedProcess && processPort === undefined) {
       throw new ValidationError({
         message: `Application "${this.name}" endpoint "${name}" references unknown process "${resolvedProcess}"`,
       });
     }
-    const port = options.port ?? process?.ports[0]?.container;
+    const port = options.port ?? processPort ?? undefined;
     this.context.addEndpoint({
       name: qualifiedName,
       description: options.description,
@@ -260,7 +268,7 @@ export class ApplicationBuilderImpl implements ApplicationBuilder {
     qualifiedName: string,
     localName: string,
   ): void {
-    this.plan.runtime.contributions.push({
+    this.plan.recordContribution({
       kind,
       qualifiedName,
       source: {

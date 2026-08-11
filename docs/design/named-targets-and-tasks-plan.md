@@ -280,8 +280,8 @@ export interface TaskContext {
 }
 ```
 
-Implement `TargetContextImpl` and `TaskContextImpl` as small wrappers around a
-private plan-reference object rather than subclasses of `SandboxContext`.
+Implement `TargetContextImpl` and `TaskContextImpl` as narrow state holders,
+separate from `FeatureContext` and `PlanBuilder`.
 
 Rules enforced by the implementations:
 

@@ -4,12 +4,17 @@ import { ApplicationBuilderImpl } from "../../apps/application-builder.js";
 
 function app(name = "backend") {
   const plan = new PlanBuilder("/tmp/app-builder", "test");
-  const builder = new ApplicationBuilderImpl(plan.context, plan.getPlan(), {
+  const builder = new ApplicationBuilderImpl(plan.context, plan.applications, {
     name,
     declarationPath: `.biodome/apps/${name}.mjs`,
     knownApps: new Set([name]),
   });
   return { plan, builder };
+}
+
+function finalized(plan: PlanBuilder) {
+  plan.finalize();
+  return plan.getPlan();
 }
 
 describe("application builder", () => {
@@ -23,17 +28,18 @@ describe("application builder", () => {
     builder.addProcess("web", { command: ["python", "manage.py", "runserver"], port: 8000 });
     builder.exposeEndpoint("http", { process: "web" });
     const metadata = builder.finish();
-    expect(plan.getPlan().runtime.repos[0]).toMatchObject({
+    const result = finalized(plan);
+    expect(result.runtime.repos[0]).toMatchObject({
       name: "backend",
       path: "/workspace/apps/backend",
     });
-    expect(plan.getPlan().runtime.processes.map((item) => item.name)).toEqual(
+    expect(result.runtime.processes.map((item) => item.name)).toEqual(
       expect.arrayContaining(["backend:migrate", "backend:web"]),
     );
-    expect(
-      plan.getPlan().runtime.processes.find((item) => item.name === "backend:web")?.workingDir,
-    ).toBe("/workspace/apps/backend");
-    expect(plan.getPlan().runtime.endpoints[0]).toMatchObject({ name: "backend:http", port: 8000 });
+    expect(result.runtime.processes.find((item) => item.name === "backend:web")?.workingDir).toBe(
+      "/workspace/apps/backend",
+    );
+    expect(result.runtime.endpoints[0]).toMatchObject({ name: "backend:http", port: 8000 });
     expect(metadata.processes).toEqual(["backend:web"]);
   });
 
@@ -42,11 +48,11 @@ describe("application builder", () => {
     const second = app("worker");
     first.builder.addProcess("web", { command: ["one"] });
     second.builder.addProcess("web", { command: ["two"] });
-    expect(first.plan.getPlan().runtime.processes[0].name).toBe("api:web");
-    expect(second.plan.getPlan().runtime.processes[0].name).toBe("worker:web");
     expect(() => first.builder.addProcess("web", { command: ["again"] })).toThrow(
       "Duplicate process",
     );
+    expect(finalized(first.plan).runtime.processes[0].name).toBe("api:web");
+    expect(finalized(second.plan).runtime.processes[0].name).toBe("worker:web");
   });
 
   it("binds application environment variables to declared service environment keys", () => {
@@ -59,10 +65,11 @@ describe("application builder", () => {
       environment: { DATABASE_URL: "POSTGRES_CONNECTION" },
     });
 
-    expect(plan.getPlan().runtime.environment.DATABASE_URL).toBe(
+    const result = finalized(plan);
+    expect(result.runtime.environment.DATABASE_URL).toBe(
       "postgresql://postgres:postgres@postgres:5432/app",
     );
-    expect(plan.getPlan().runtime.envVars).toContainEqual({
+    expect(result.runtime.envVars).toContainEqual({
       key: "DATABASE_URL",
       scope: "runtime",
       value: "postgresql://postgres:postgres@postgres:5432/app",
@@ -101,7 +108,7 @@ describe("application builder", () => {
 
     builder.exposeEndpoint("other-web", { process: "other:web" });
 
-    expect(plan.getPlan().runtime.endpoints[0]).toMatchObject({
+    expect(finalized(plan).runtime.endpoints[0]).toMatchObject({
       name: "backend:other-web",
       port: 4300,
     });

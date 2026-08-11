@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PlanBuilder } from "../../../core/plan-builder/plan-builder.js";
 import type { ProjectIO } from "../../../core/plan-builder/project-io.js";
 
@@ -35,13 +35,23 @@ describe("PlanBuilder", () => {
   });
 
   it("keeps dry-run command execution side-effect free", () => {
-    const builder = new PlanBuilder("/unused", "test", true, fakeProjectIO({}));
+    let executions = 0;
+    const io = fakeProjectIO({});
+    io.exec = () => {
+      executions += 1;
+      return { stdout: "unexpected", stderr: "", exitCode: 1 };
+    };
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const builder = new PlanBuilder("/unused", "test", true, io);
 
     expect(builder.context.exec("git branch --show-current")).toEqual({
       stdout: "",
       stderr: "",
       exitCode: 0,
     });
+    expect(executions).toBe(0);
+    expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
   });
 
   it("composes endpoint, MCP provider, and LLM provider contributions", () => {
@@ -58,24 +68,38 @@ describe("PlanBuilder", () => {
       name: "lmstudio",
       options: { apiKey: { env: "LMSTUDIO_API_KEY" } },
     });
+    builder.context.addProcess({ name: "web", command: ["node", "server.js"], port: 3000 });
+    builder.context.addS3Volume({
+      name: "assets",
+      bucket: "test-assets",
+      target: "/workspace/assets",
+      proxy: true,
+      credentials: { accessKeyId: { env: "AWS_ACCESS_KEY_ID" } },
+    });
     builder.context.addOpencodeHarness({ name: "open" });
     builder.context.addPiHarness({ name: "pi", apiKey: { env: "PI_API_KEY" } });
     builder.context.addCodexHarness({ name: "codex", apiKey: { env: "CODEX_API_KEY" } });
     builder.context.addClaudeHarness({ name: "claude", apiKey: { env: "CLAUDE_API_KEY" } });
     builder.configureMcp(3001);
+    builder.finalize();
 
     const plan = builder.getPlan();
     const mcp = plan.runtime.processes.find((process) => process.name === "biodome-mcp");
     expect(plan.runtime.endpoints).toHaveLength(1);
     expect(plan.runtime.providers).toHaveLength(1);
     expect(plan.runtime.llmProviders).toHaveLength(1);
+    expect(plan.runtime.volumes).toHaveLength(1);
+    expect(plan.runtime.processes).toHaveLength(4);
     expect(plan.runtime.agentHarnesses).toHaveLength(1);
     expect(plan.runtime.piHarnesses).toHaveLength(1);
     expect(plan.runtime.codexHarnesses).toHaveLength(1);
     expect(plan.runtime.claudeHarnesses).toHaveLength(1);
     expect(mcp).toMatchObject({
       mergeEnv: false,
-      environment: { JIRA_TOKEN: "${JIRA_TOKEN}" },
+      environment: {
+        AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}",
+        JIRA_TOKEN: "${JIRA_TOKEN}",
+      },
     });
     expect(plan.runtime.environment.JIRA_TOKEN).toBeUndefined();
     expect(plan.runtime.envVars).toContainEqual({
@@ -85,5 +109,20 @@ describe("PlanBuilder", () => {
       required: undefined,
       default: undefined,
     });
+  });
+
+  it("exposes the plan only after exactly one successful finalization", () => {
+    const builder = new PlanBuilder("/unused", "test", false, fakeProjectIO({}));
+    builder.context.addLanguage("node", { version: "20" });
+
+    expect("plan" in builder.context).toBe(false);
+    expect(() => builder.getPlan()).toThrow("Plan is not available before finalization");
+
+    builder.finalize();
+    const plan = builder.getPlan();
+    const snapshot = structuredClone(plan);
+
+    expect(() => builder.finalize()).toThrow("PlanBuilder is already finalized");
+    expect(plan).toEqual(snapshot);
   });
 });
