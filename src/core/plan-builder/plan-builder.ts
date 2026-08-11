@@ -1,6 +1,7 @@
 import type { FeatureContext } from "../feature.js";
 import type { Plan } from "../plan.js";
 import { SandboxContext } from "../context.js";
+import type { McpOptions } from "./mcp.js";
 import { createNodeProjectIO, type ProjectIO } from "./project-io.js";
 
 export class PlanBuilder {
@@ -21,7 +22,7 @@ export class PlanBuilder {
     this.contextImpl.finalizeBuildPlan();
   }
 
-  configureMcp(port: number, options: Parameters<SandboxContext["configureMcp"]>[1] = {}): void {
+  configureMcp(port: number, options: McpOptions = {}): void {
     this.contextImpl.configureMcp(port, options);
   }
 

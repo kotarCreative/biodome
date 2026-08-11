@@ -155,6 +155,33 @@ describe("VolumeBuilder", () => {
     expect(processes).toEqual([]);
   });
 
+  it("contributes only proxy credential references to the MCP environment", () => {
+    const { builder } = makeBuilder();
+    builder.addS3({
+      name: "proxy-assets",
+      bucket: "example-assets",
+      target: "/workspace/assets",
+      proxy: true,
+      credentials: {
+        accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
+        secretAccessKey: "literal-secret",
+      },
+    });
+    builder.addS3({
+      name: "mounted-assets",
+      bucket: "example-assets",
+      target: "/workspace/mounted-assets",
+      credentials: { secretAccessKey: { env: "MOUNT_SECRET" } },
+    });
+
+    const environment = builder.mcpCredentialEnvironment();
+    expect(environment).toEqual({ AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}" });
+    environment.AWS_ACCESS_KEY_ID = "changed";
+    expect(builder.mcpCredentialEnvironment()).toEqual({
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}",
+    });
+  });
+
   it("rejects invalid and duplicate volume definitions", () => {
     const { builder } = makeBuilder();
     builder.addLocal({ name: "data", source: "./data", target: "/workspace/data" });

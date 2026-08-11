@@ -185,6 +185,17 @@ export class VolumeBuilder {
     });
   }
 
+  mcpCredentialEnvironment(): Record<string, string> {
+    const environment: Record<string, string> = {};
+    for (const volume of this.plan.runtime.volumes) {
+      if (!volume.proxy || !volume.credentials) continue;
+      for (const value of Object.values(volume.credentials)) {
+        if (typeof value !== "string") environment[value.env] = `\${${value.env}}`;
+      }
+    }
+    return environment;
+  }
+
   private rcloneRemote(volume: Volume): string {
     switch (volume.type) {
       case "s3":

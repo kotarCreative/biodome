@@ -20,7 +20,6 @@ import {
   GdriveVolumeSpec,
   RepoSpec,
 } from "./feature.js";
-import { ValidationError } from "./errors.js";
 import { runtimeLayout } from "../runtime/layout.js";
 import { createNodeProjectIO, type ProjectIO } from "./plan-builder/project-io.js";
 import { EnvironmentBuilder } from "./plan-builder/environment.js";
@@ -31,6 +30,7 @@ import { VolumeBuilder } from "./plan-builder/volumes.js";
 import { ProviderBuilder } from "./plan-builder/providers.js";
 import { HarnessBuilder } from "./plan-builder/harnesses.js";
 import { BuildBuilder } from "./plan-builder/build.js";
+import { McpBuilder, type McpOptions } from "./plan-builder/mcp.js";
 
 export class SandboxContext implements FeatureContext {
   plan: Plan;
@@ -45,6 +45,7 @@ export class SandboxContext implements FeatureContext {
   private volumes: VolumeBuilder;
   private providers: ProviderBuilder;
   private harnesses: HarnessBuilder;
+  private mcp: McpBuilder;
   readonly addEndpoint: FeatureContext["addEndpoint"];
   readonly addProvider: FeatureContext["addProvider"];
   readonly addMcpProvider: FeatureContext["addMcpProvider"];
@@ -90,6 +91,12 @@ export class SandboxContext implements FeatureContext {
       addLanguageSnippet: (snippet) => this.build.addLanguageSnippet(snippet),
       addProcess: (spec) => this.addProcess(spec),
       addEnv: (key, spec) => this.addEnv(key, spec),
+    });
+    this.mcp = new McpBuilder(this.plan, this.layout.container, {
+      addLanguage: (name, options) => this.addLanguage(name, options),
+      addProcess: (spec) => this.addProcess(spec),
+      volumeCredentialEnvironment: () => this.volumes.mcpCredentialEnvironment(),
+      providerCredentialEnvironment: () => this.providers.mcpCredentialEnvironment(),
     });
     this.addEndpoint = this.providers.addEndpoint.bind(this.providers);
     this.addProvider = this.providers.addProvider.bind(this.providers);
@@ -207,104 +214,7 @@ export class SandboxContext implements FeatureContext {
     return this.io.exec(command);
   }
 
-  configureMcp(
-    port: number,
-    config?: {
-      token?: { env: string };
-      allowExec?: boolean;
-      allowProcessControl?: boolean;
-      maxReadBytes?: number;
-      maxWriteBytes?: number;
-      maxListEntries?: number;
-      providerConnectTimeoutMs?: number;
-      providerRequestTimeoutMs?: number;
-      providerCatalogConcurrency?: number;
-    },
-  ): void {
-    this.plan.build.mcpEnabled = true;
-    this.plan.build.mcpPort = port;
-    this.plan.build.mcpConfig.enabled = true;
-    this.plan.build.mcpConfig.port = port;
-
-    if (config) {
-      if (config.token) {
-        if (typeof config.token === "string") {
-          throw new ValidationError({
-            message: 'MCP token must be an environment variable reference ({ env: "VAR" })',
-          });
-        }
-        this.plan.build.mcpConfig.token = { env: config.token.env };
-      }
-      if (config.allowExec !== undefined) {
-        this.plan.build.mcpConfig.allowExec = config.allowExec;
-      }
-      if (config.allowProcessControl !== undefined) {
-        this.plan.build.mcpConfig.allowProcessControl = config.allowProcessControl;
-      }
-      if (config.maxReadBytes !== undefined) {
-        this.plan.build.mcpConfig.maxReadBytes = config.maxReadBytes;
-      }
-      if (config.maxWriteBytes !== undefined) {
-        this.plan.build.mcpConfig.maxWriteBytes = config.maxWriteBytes;
-      }
-      if (config.maxListEntries !== undefined) {
-        this.plan.build.mcpConfig.maxListEntries = config.maxListEntries;
-      }
-      if (config.providerConnectTimeoutMs !== undefined) {
-        this.plan.build.mcpConfig.providerConnectTimeoutMs = config.providerConnectTimeoutMs;
-      }
-      if (config.providerRequestTimeoutMs !== undefined) {
-        this.plan.build.mcpConfig.providerRequestTimeoutMs = config.providerRequestTimeoutMs;
-      }
-      if (config.providerCatalogConcurrency !== undefined) {
-        this.plan.build.mcpConfig.providerCatalogConcurrency = config.providerCatalogConcurrency;
-      }
-    }
-
-    // The MCP server is a Node script. Ensure a Node runtime is present without
-    // clobbering an explicit node request the user may already have made.
-    const hasNode = this.plan.build.languageRequests.some((r) => r.name === "node");
-    if (!hasNode) {
-      this.addLanguage("node", { version: "20" });
-    }
-
-    // Collect proxy-volume and provider credential env references so the MCP
-    // server can resolve them at runtime. Keep them isolated to the MCP process
-    // so they are not merged into the dev service's global environment.
-    const mcpEnvironment: Record<string, string> = {};
-    for (const volume of this.plan.runtime.volumes) {
-      if (!volume.proxy) continue;
-      if (!volume.credentials) continue;
-      for (const value of Object.values(volume.credentials)) {
-        if (typeof value === "string") continue;
-        mcpEnvironment[value.env] = `\${${value.env}}`;
-      }
-    }
-    Object.assign(mcpEnvironment, this.providers.mcpCredentialEnvironment());
-
-    // Include the MCP token env var so it reaches the MCP server process at runtime.
-    const token = this.plan.build.mcpConfig.token;
-    if (token && typeof token === "object") {
-      mcpEnvironment[token.env] = `\${${token.env}}`;
-    }
-
-    this.addProcess({
-      name: "biodome-mcp",
-      command: [
-        "node",
-        this.layout.container.mcpServer,
-        "--port",
-        String(port),
-        "--plan",
-        this.layout.container.mcpPlan,
-      ],
-      port,
-      healthCheck: { type: "http", url: `http://localhost:${port}/health` },
-      environment: {
-        ...mcpEnvironment,
-        MCP_EVENTS_LOG: `${this.layout.container.logs}/mcp-events.jsonl`,
-      },
-      mergeEnv: false,
-    });
+  configureMcp(port: number, options: McpOptions = {}): void {
+    this.mcp.configure(port, options);
   }
 }
