@@ -43,4 +43,39 @@ describe("PlanBuilder", () => {
       exitCode: 0,
     });
   });
+
+  it("composes endpoint, MCP provider, and LLM provider contributions", () => {
+    const builder = new PlanBuilder("/unused", "test", false, fakeProjectIO({}));
+
+    builder.context.addEndpoint({ name: "api", port: 8000 });
+    builder.context.addMcpProvider({
+      name: "jira",
+      type: "jira",
+      mcpUrl: "https://mcp.atlassian.com/v1/mcp/authv2",
+      credentials: { token: { env: "JIRA_TOKEN" } },
+    });
+    builder.context.addLlmProvider({
+      name: "lmstudio",
+      options: { apiKey: { env: "LMSTUDIO_API_KEY" } },
+    });
+    builder.configureMcp(3001);
+
+    const plan = builder.getPlan();
+    const mcp = plan.runtime.processes.find((process) => process.name === "biodome-mcp");
+    expect(plan.runtime.endpoints).toHaveLength(1);
+    expect(plan.runtime.providers).toHaveLength(1);
+    expect(plan.runtime.llmProviders).toHaveLength(1);
+    expect(mcp).toMatchObject({
+      mergeEnv: false,
+      environment: { JIRA_TOKEN: "${JIRA_TOKEN}" },
+    });
+    expect(plan.runtime.environment.JIRA_TOKEN).toBeUndefined();
+    expect(plan.runtime.envVars).toContainEqual({
+      key: "LMSTUDIO_API_KEY",
+      scope: "runtime",
+      from: { env: "LMSTUDIO_API_KEY" },
+      required: undefined,
+      default: undefined,
+    });
+  });
 });

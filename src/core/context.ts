@@ -4,16 +4,8 @@ import {
   Plan,
   DependencyInstall,
   CopyArtifact,
-  EndpointSpecSchema,
-  ProviderSpecSchema,
-  VolumeSpecSchema,
-  Volume,
-  Provider,
-  SecretValue,
   AgentHarnessSpecSchema,
   AgentHarness,
-  LlmProviderSpecSchema,
-  LlmProvider,
   PiHarnessSpecSchema,
   PiHarness,
   CodexHarnessSpecSchema,
@@ -29,14 +21,6 @@ import {
   PackageOptions,
   ToolOptions,
   ServiceOptions,
-  EndpointSpec,
-  ProviderSpec,
-  McpProviderSpec,
-  JiraProviderSpec,
-  LinearProviderSpec,
-  SentryProviderSpec,
-  SlackProviderSpec,
-  GithubProviderSpec,
   EnvSpec,
   VolumeSpec,
   LocalVolumeSpec,
@@ -53,7 +37,6 @@ import {
   PiHarnessSpec,
   CodexHarnessSpec,
   ClaudeHarnessSpec,
-  LlmProviderSpec,
 } from "./feature.js";
 import { BuildContext } from "./build-context.js";
 import { languageHandlers, getDefaultBaseImage } from "./languages.js";
@@ -66,25 +49,13 @@ import { EnvironmentBuilder } from "./plan-builder/environment.js";
 import { ProcessBuilder } from "./plan-builder/processes.js";
 import { ServiceBuilder } from "./plan-builder/services.js";
 import { RepositoryBuilder } from "./plan-builder/repositories.js";
+import { VolumeBuilder } from "./plan-builder/volumes.js";
+import { ProviderBuilder } from "./plan-builder/providers.js";
 
 function validatePort(value: unknown, label: string): void {
   if (value === undefined) return;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 65535) {
     throw new ValidationError({ message: `${label} must be an integer between 1 and 65535` });
-  }
-}
-
-function validateEnv(
-  env: Record<string, unknown>,
-  label: string,
-): asserts env is Record<string, string> {
-  if (typeof env !== "object" || env === null || Array.isArray(env)) {
-    throw new ValidationError({ message: `${label} must be a record of strings` });
-  }
-  for (const [key, value] of Object.entries(env)) {
-    if (typeof value !== "string") {
-      throw new ValidationError({ message: `${label}.${key} must be a string` });
-    }
   }
 }
 
@@ -97,6 +68,17 @@ export class SandboxContext implements FeatureContext, BuildContext {
   private processes: ProcessBuilder;
   private services: ServiceBuilder;
   private repositories: RepositoryBuilder;
+  private volumes: VolumeBuilder;
+  private providers: ProviderBuilder;
+  readonly addEndpoint: FeatureContext["addEndpoint"];
+  readonly addProvider: FeatureContext["addProvider"];
+  readonly addMcpProvider: FeatureContext["addMcpProvider"];
+  readonly addJiraProvider: FeatureContext["addJiraProvider"];
+  readonly addLinearProvider: FeatureContext["addLinearProvider"];
+  readonly addSentryProvider: FeatureContext["addSentryProvider"];
+  readonly addSlackProvider: FeatureContext["addSlackProvider"];
+  readonly addGithubProvider: FeatureContext["addGithubProvider"];
+  readonly addLlmProvider: FeatureContext["addLlmProvider"];
 
   constructor(
     rootDir: string,
@@ -116,6 +98,21 @@ export class SandboxContext implements FeatureContext, BuildContext {
       (spec) => this.addHook(spec),
       this.layout.container.repositories,
     );
+    this.volumes = new VolumeBuilder(
+      this.plan,
+      (name) => this.addAptPackage(name),
+      (spec) => this.addProcess(spec),
+    );
+    this.providers = new ProviderBuilder(this.plan, (key, spec) => this.addEnv(key, spec));
+    this.addEndpoint = this.providers.addEndpoint.bind(this.providers);
+    this.addProvider = this.providers.addProvider.bind(this.providers);
+    this.addMcpProvider = this.providers.addMcpProvider.bind(this.providers);
+    this.addJiraProvider = this.providers.addJiraProvider.bind(this.providers);
+    this.addLinearProvider = this.providers.addLinearProvider.bind(this.providers);
+    this.addSentryProvider = this.providers.addSentryProvider.bind(this.providers);
+    this.addSlackProvider = this.providers.addSlackProvider.bind(this.providers);
+    this.addGithubProvider = this.providers.addGithubProvider.bind(this.providers);
+    this.addLlmProvider = this.providers.addLlmProvider.bind(this.providers);
   }
 
   addProcess(spec: ProcessSpec): void {
@@ -211,236 +208,12 @@ export class SandboxContext implements FeatureContext, BuildContext {
     this.services.add(name, options);
   }
 
-  addEndpoint(spec: EndpointSpec): void {
-    const validated = Schema.decodeSync(EndpointSpecSchema)(spec);
-    if (validated.port !== undefined)
-      validatePort(validated.port, `Endpoint ${validated.name}: port`);
-    if (validated.metadata) {
-      validateEnv(
-        validated.metadata as Record<string, unknown>,
-        `Endpoint ${validated.name}: metadata`,
-      );
-    }
-
-    if (this.plan.runtime.endpoints.some((e) => e.name === validated.name)) {
-      throw new ValidationError({ message: `Duplicate endpoint name: ${validated.name}` });
-    }
-
-    this.plan.runtime.endpoints.push({
-      name: validated.name,
-      description: validated.description,
-      url: validated.url,
-      port: validated.port,
-      credentials: validated.credentials ? { ...validated.credentials } : undefined,
-      metadata: validated.metadata ? { ...validated.metadata } : undefined,
-    });
-  }
-
-  addProvider(spec: ProviderSpec): void {
-    const validated = Schema.decodeSync(ProviderSpecSchema)(spec);
-    if (validated.metadata) {
-      validateEnv(
-        validated.metadata as Record<string, unknown>,
-        `Provider ${validated.name}: metadata`,
-      );
-    }
-
-    if (this.plan.runtime.providers.some((p) => p.name === validated.name)) {
-      throw new ValidationError({ message: `Duplicate provider name: ${validated.name}` });
-    }
-
-    // Reject literal credential values for providers; require env refs.
-    if (validated.credentials) {
-      for (const [key, value] of Object.entries(validated.credentials)) {
-        if (typeof value === "string") {
-          throw new ValidationError({
-            message: `Provider ${validated.name}: credentials.${key} must be an environment reference ({ env: "VAR" }), not a literal string`,
-          });
-        }
-      }
-    }
-
-    const provider: Provider = {
-      name: validated.name,
-      type: validated.type,
-      url: validated.url,
-      project: validated.project,
-      mcpUrl: validated.mcpUrl,
-      authHeader: validated.authHeader,
-      authScheme: validated.authScheme,
-      authCredential: validated.authCredential,
-      credentials: validated.credentials ? { ...validated.credentials } : undefined,
-      metadata: validated.metadata ? { ...validated.metadata } : undefined,
-    };
-    this.plan.runtime.providers.push(provider);
-  }
-
-  addMcpProvider(spec: McpProviderSpec): void {
-    if (!spec.name) throw new ValidationError({ message: "MCP provider requires a name" });
-    if (!spec.mcpUrl)
-      throw new ValidationError({ message: `Provider ${spec.name}: mcpUrl is required` });
-    if (!spec.credentials?.token) {
-      throw new ValidationError({
-        message: `Provider ${spec.name}: credentials.token is required`,
-      });
-    }
-    this.addProvider({
-      name: spec.name,
-      type: spec.type,
-      mcpUrl: spec.mcpUrl,
-      authHeader: spec.authHeader ?? "Authorization",
-      authScheme: spec.authScheme ?? "Bearer ",
-      authCredential: "token",
-      project: spec.project,
-      credentials: { token: spec.credentials.token },
-      metadata: spec.metadata,
-    });
-  }
-
-  addJiraProvider(spec: JiraProviderSpec): void {
-    if (!spec.name) throw new ValidationError({ message: "Jira provider requires a name" });
-    if (!spec.credentials?.token) {
-      throw new ValidationError({
-        message: `Jira provider ${spec.name}: credentials.token is required`,
-      });
-    }
-    this.addMcpProvider({
-      name: spec.name,
-      type: "jira",
-      mcpUrl: spec.mcpUrl ?? "https://mcp.atlassian.com/v1/mcp/authv2",
-      project: spec.project,
-      credentials: spec.credentials,
-      metadata: spec.metadata,
-    });
-  }
-
-  addLinearProvider(spec: LinearProviderSpec): void {
-    if (!spec.name) throw new ValidationError({ message: "Linear provider requires a name" });
-    if (!spec.credentials?.token) {
-      throw new ValidationError({
-        message: `Linear provider ${spec.name}: credentials.token is required`,
-      });
-    }
-    this.addMcpProvider({
-      name: spec.name,
-      type: "linear",
-      mcpUrl: spec.mcpUrl ?? "https://mcp.linear.app/mcp",
-      project: spec.team,
-      credentials: spec.credentials,
-      metadata: spec.metadata,
-    });
-  }
-
-  addSentryProvider(spec: SentryProviderSpec): void {
-    if (!spec.name) throw new ValidationError({ message: "Sentry provider requires a name" });
-    if (!spec.credentials?.token) {
-      throw new ValidationError({
-        message: `Sentry provider ${spec.name}: credentials.token is required`,
-      });
-    }
-    this.addMcpProvider({
-      name: spec.name,
-      type: "sentry",
-      mcpUrl: spec.mcpUrl ?? "https://mcp.sentry.dev/mcp",
-      credentials: spec.credentials,
-      metadata: spec.metadata,
-    });
-  }
-
-  addSlackProvider(spec: SlackProviderSpec): void {
-    if (!spec.name) throw new ValidationError({ message: "Slack provider requires a name" });
-    if (!spec.mcpUrl)
-      throw new ValidationError({ message: `Slack provider ${spec.name}: mcpUrl is required` });
-    if (!spec.credentials?.token) {
-      throw new ValidationError({
-        message: `Slack provider ${spec.name}: credentials.token is required`,
-      });
-    }
-    this.addMcpProvider({
-      name: spec.name,
-      type: "slack",
-      mcpUrl: spec.mcpUrl,
-      credentials: spec.credentials,
-      metadata: spec.metadata,
-    });
-  }
-
-  addGithubProvider(spec: GithubProviderSpec): void {
-    if (!spec.name) throw new ValidationError({ message: "GitHub provider requires a name" });
-    if (!spec.credentials?.token) {
-      throw new ValidationError({
-        message: `GitHub provider ${spec.name}: credentials.token is required`,
-      });
-    }
-    this.addMcpProvider({
-      name: spec.name,
-      type: "github",
-      mcpUrl: spec.mcpUrl ?? "https://api.githubcopilot.com/mcp/",
-      credentials: spec.credentials,
-      metadata: spec.metadata,
-    });
-  }
-
   addEnv(key: string, spec: EnvSpec): void {
     this.environment.add(key, spec);
   }
 
   addVolume(spec: VolumeSpec): void {
-    const validated = Schema.decodeSync(VolumeSpecSchema)(spec);
-
-    if (this.plan.runtime.volumes.some((v) => v.name === validated.name)) {
-      throw new ValidationError({ message: `Duplicate volume name: ${validated.name}` });
-    }
-
-    this.validateVolumeSpec(validated);
-
-    const readOnly = validated.readOnly || validated.options?.readOnly === "true";
-
-    const volume: Volume = {
-      ...validated,
-      readOnly,
-      credentials: validated.credentials ? { ...validated.credentials } : undefined,
-      options: validated.options ? { ...validated.options } : undefined,
-      allowedPaths: validated.allowedPaths ? [...validated.allowedPaths] : undefined,
-    };
-
-    this.plan.runtime.volumes.push(volume);
-
-    if (validated.proxy) {
-      // Proxy volumes are accessed through the MCP server, not mounted.
-      return;
-    }
-
-    if (validated.type === "local") {
-      // Local bind mounts are emitted directly in compose; nothing else to do.
-      return;
-    }
-
-    // Cloud-backed volumes use rclone. Ensure it and FUSE are available.
-    this.addAptPackage("rclone");
-    this.addAptPackage("fuse3");
-
-    const env = this.buildRcloneEnv(volume);
-
-    // Bucket/folder mounts run as a daemon process.
-    const remote = this.rcloneRemote(volume);
-    const command = [
-      "rclone",
-      "mount",
-      remote,
-      validated.target,
-      "--allow-other",
-      "--vfs-cache-mode",
-      "writes",
-    ];
-    if (readOnly) {
-      command.push("--read-only");
-    }
-    this.addProcess({
-      name: `rclone-mount-${validated.name}`,
-      command,
-      environment: env,
-    });
+    this.volumes.add(spec);
   }
 
   addRepo(spec: RepoSpec): void {
@@ -661,366 +434,40 @@ export class SandboxContext implements FeatureContext, BuildContext {
     }
   }
 
-  addLlmProvider(spec: LlmProviderSpec): void {
-    const validated = Schema.decodeSync(LlmProviderSpecSchema)(spec);
-
-    if (this.plan.runtime.llmProviders.some((p) => p.name === validated.name)) {
-      throw new ValidationError({ message: `Duplicate LLM provider name: ${validated.name}` });
-    }
-
-    const provider: LlmProvider = {
-      name: validated.name,
-      npm: validated.npm,
-      displayName: validated.displayName,
-      options: validated.options ? { ...validated.options } : {},
-      models: validated.models ? { ...validated.models } : {},
-    };
-
-    // Reject literal credential strings in provider options to keep secrets out
-    // of plan.json and generated config files.
-    for (const [key, value] of Object.entries(provider.options)) {
-      if (typeof value === "string" && key.toLowerCase().includes("key")) {
-        throw new ValidationError({
-          message: `LLM provider ${validated.name}: option "${key}" looks like a credential and must be an environment reference ({ env: "VAR" }), not a literal string`,
-        });
-      }
-    }
-
-    // Passthrough env-referenced options so Docker Compose injects them into the
-    // container at runtime; the harness start script then substitutes them into
-    // the generated OpenCode config.
-    for (const value of Object.values(provider.options)) {
-      if (value !== undefined && typeof value === "object" && "env" in value) {
-        this.addEnv(value.env, { from: { env: value.env } });
-      }
-    }
-
-    this.plan.runtime.llmProviders.push(provider);
-  }
-
-  private validateVolumeSpec(spec: VolumeSpec): void {
-    switch (spec.type) {
-      case "local": {
-        if (!spec.source) {
-          throw new ValidationError({
-            message: `Volume ${spec.name}: local volumes require a source path`,
-          });
-        }
-        break;
-      }
-      case "s3":
-      case "gcs": {
-        if (!spec.bucket) {
-          const label = spec.type === "s3" ? "S3" : "GCS";
-          throw new ValidationError({
-            message: `Volume ${spec.name}: ${label} volumes require a bucket`,
-          });
-        }
-        break;
-      }
-      case "azure": {
-        if (!spec.account) {
-          throw new ValidationError({
-            message: `Volume ${spec.name}: azure volumes require an account`,
-          });
-        }
-        if (!spec.container) {
-          throw new ValidationError({
-            message: `Volume ${spec.name}: azure volumes require a container`,
-          });
-        }
-        break;
-      }
-      case "sftp": {
-        if (!spec.host) {
-          throw new ValidationError({
-            message: `Volume ${spec.name}: sftp volumes require a host`,
-          });
-        }
-        if (!spec.path) {
-          throw new ValidationError({
-            message: `Volume ${spec.name}: sftp volumes require a path`,
-          });
-        }
-        break;
-      }
-      case "smb": {
-        if (!spec.host) {
-          throw new ValidationError({ message: `Volume ${spec.name}: smb volumes require a host` });
-        }
-        if (!spec.share) {
-          throw new ValidationError({
-            message: `Volume ${spec.name}: smb volumes require a share`,
-          });
-        }
-        break;
-      }
-      case "webdav": {
-        if (!spec.url) {
-          throw new ValidationError({
-            message: `Volume ${spec.name}: webdav volumes require a url`,
-          });
-        }
-        break;
-      }
-      case "dropbox":
-      case "gdrive": {
-        if (!spec.path) {
-          throw new ValidationError({
-            message: `Volume ${spec.name}: ${spec.type} volumes require a path`,
-          });
-        }
-        break;
-      }
-    }
-  }
-
-  private rcloneRemote(volume: Volume): string {
-    switch (volume.type) {
-      case "s3": {
-        const prefix = volume.prefix || "";
-        return `s3:${volume.bucket}/${prefix}`;
-      }
-      case "gcs": {
-        const prefix = volume.prefix || "";
-        return `gcs:${volume.bucket}/${prefix}`;
-      }
-      case "azure": {
-        const path = volume.path || "";
-        return `azure:${volume.container}/${path}`;
-      }
-      case "sftp": {
-        return `sftp:${volume.path}`;
-      }
-      case "smb": {
-        return `smb:${volume.host}/${volume.share}`;
-      }
-      case "webdav": {
-        const path = volume.path || "";
-        return `webdav:${path}`;
-      }
-      case "dropbox":
-        return `dropbox:${volume.path}`;
-      case "gdrive":
-        return `drive:${volume.path}`;
-      default:
-        throw new ValidationError({
-          message: `Unsupported volume type for rclone: ${volume.type}`,
-        });
-    }
-  }
-
-  private buildRcloneEnv(volume: Volume): Record<string, string> {
-    const env: Record<string, string> = {};
-    if (!volume.credentials) return env;
-
-    const mappings: Record<string, Record<string, string>> = {
-      s3: {
-        accessKeyId: "RCLONE_S3_ACCESS_KEY_ID",
-        secretAccessKey: "RCLONE_S3_SECRET_ACCESS_KEY",
-        region: "RCLONE_S3_REGION",
-        sessionToken: "RCLONE_S3_SESSION_TOKEN",
-        endpoint: "RCLONE_S3_ENDPOINT",
-      },
-      gcs: {
-        clientId: "RCLONE_GCS_CLIENT_ID",
-        clientSecret: "RCLONE_GCS_CLIENT_SECRET",
-        token: "RCLONE_GCS_TOKEN",
-        serviceAccountFile: "RCLONE_GCS_SERVICE_ACCOUNT_FILE",
-        projectNumber: "RCLONE_GCS_PROJECT_NUMBER",
-      },
-      azure: {
-        accountKey: "RCLONE_AZURE_KEY",
-        sasUrl: "RCLONE_AZURE_SAS_URL",
-      },
-      sftp: {
-        user: "RCLONE_SFTP_USER",
-        password: "RCLONE_SFTP_PASS",
-        keyFile: "RCLONE_SFTP_KEY_FILE",
-      },
-      smb: {
-        user: "RCLONE_SMB_USER",
-        password: "RCLONE_SMB_PASS",
-        domain: "RCLONE_SMB_DOMAIN",
-      },
-      webdav: {
-        user: "RCLONE_WEBDAV_USER",
-        password: "RCLONE_WEBDAV_PASS",
-        bearerToken: "RCLONE_WEBDAV_BEARER_TOKEN",
-      },
-      dropbox: {
-        token: "RCLONE_DROPBOX_TOKEN",
-      },
-      gdrive: {
-        clientId: "RCLONE_DRIVE_CLIENT_ID",
-        clientSecret: "RCLONE_DRIVE_CLIENT_SECRET",
-        token: "RCLONE_DRIVE_TOKEN",
-      },
-    };
-
-    // Provider-level settings that are not credentials but still configure rclone.
-    if (volume.type === "sftp" && volume.host) {
-      env.RCLONE_SFTP_HOST = volume.host;
-      if (volume.port) env.RCLONE_SFTP_PORT = String(volume.port);
-    }
-    if (volume.type === "smb" && volume.host) {
-      env.RCLONE_SMB_HOST = volume.host;
-    }
-    if (volume.type === "azure" && volume.account) {
-      env.RCLONE_AZURE_ACCOUNT = volume.account;
-    }
-    if (volume.type === "webdav" && volume.url) {
-      env.RCLONE_WEBDAV_URL = volume.url;
-      if (volume.vendor) env.RCLONE_WEBDAV_VENDOR = volume.vendor;
-    }
-
-    const map = mappings[volume.type];
-    for (const [key, value] of Object.entries(volume.credentials)) {
-      const rcloneKey = map[key];
-      if (!rcloneKey) continue;
-      env[rcloneKey] = typeof value === "string" ? value : `\${${value.env}}`;
-    }
-
-    return env;
-  }
-
-  // Volume wrappers — thin helpers that delegate to addVolume with the right
-  // provider-specific shape and credential mapping.
-
   addLocalVolume(spec: LocalVolumeSpec): void {
-    this.addVolume({
-      name: spec.name,
-      type: "local",
-      source: spec.source,
-      target: spec.target,
-      readOnly: spec.readOnly,
-      allowedPaths: spec.allowedPaths,
-    });
+    this.volumes.addLocal(spec);
   }
 
   addS3Volume(spec: S3VolumeSpec): void {
-    this.addVolume({
-      name: spec.name,
-      type: "s3",
-      bucket: spec.bucket,
-      prefix: spec.prefix,
-      target: spec.target,
-      credentials: this.normalizeCredentials(spec.credentials),
-      proxy: spec.proxy,
-      readOnly: spec.readOnly,
-      allowedPaths: spec.allowedPaths,
-    });
+    this.volumes.addS3(spec);
   }
 
   addGcsVolume(spec: GcsVolumeSpec): void {
-    this.addVolume({
-      name: spec.name,
-      type: "gcs",
-      bucket: spec.bucket,
-      prefix: spec.prefix,
-      target: spec.target,
-      credentials: this.normalizeCredentials(spec.credentials),
-      proxy: spec.proxy,
-      readOnly: spec.readOnly,
-      allowedPaths: spec.allowedPaths,
-    });
+    this.volumes.addGcs(spec);
   }
 
   addAzureVolume(spec: AzureVolumeSpec): void {
-    this.addVolume({
-      name: spec.name,
-      type: "azure",
-      account: spec.account,
-      container: spec.container,
-      path: spec.path,
-      target: spec.target,
-      credentials: this.normalizeCredentials(spec.credentials),
-      proxy: spec.proxy,
-      readOnly: spec.readOnly,
-      allowedPaths: spec.allowedPaths,
-    });
+    this.volumes.addAzure(spec);
   }
 
   addSftpVolume(spec: SftpVolumeSpec): void {
-    this.addVolume({
-      name: spec.name,
-      type: "sftp",
-      host: spec.host,
-      port: spec.port,
-      path: spec.path,
-      target: spec.target,
-      credentials: this.normalizeCredentials(spec.credentials),
-      proxy: spec.proxy,
-      readOnly: spec.readOnly,
-      allowedPaths: spec.allowedPaths,
-    });
+    this.volumes.addSftp(spec);
   }
 
   addSmbVolume(spec: SmbVolumeSpec): void {
-    this.addVolume({
-      name: spec.name,
-      type: "smb",
-      host: spec.host,
-      share: spec.share,
-      target: spec.target,
-      credentials: this.normalizeCredentials(spec.credentials),
-      proxy: spec.proxy,
-      readOnly: spec.readOnly,
-      allowedPaths: spec.allowedPaths,
-    });
+    this.volumes.addSmb(spec);
   }
 
   addWebdavVolume(spec: WebdavVolumeSpec): void {
-    this.addVolume({
-      name: spec.name,
-      type: "webdav",
-      url: spec.url,
-      path: spec.path,
-      target: spec.target,
-      vendor: spec.vendor,
-      credentials: spec.credentials ? this.normalizeCredentials(spec.credentials) : undefined,
-      proxy: spec.proxy,
-      readOnly: spec.readOnly,
-      allowedPaths: spec.allowedPaths,
-    });
+    this.volumes.addWebdav(spec);
   }
 
   addDropboxVolume(spec: DropboxVolumeSpec): void {
-    this.addVolume({
-      name: spec.name,
-      type: "dropbox",
-      path: spec.path,
-      target: spec.target,
-      credentials: this.normalizeCredentials(spec.credentials),
-      proxy: spec.proxy,
-      readOnly: spec.readOnly,
-      allowedPaths: spec.allowedPaths,
-    });
+    this.volumes.addDropbox(spec);
   }
 
   addGdriveVolume(spec: GdriveVolumeSpec): void {
-    this.addVolume({
-      name: spec.name,
-      type: "gdrive",
-      path: spec.path,
-      target: spec.target,
-      credentials: this.normalizeCredentials(spec.credentials),
-      proxy: spec.proxy,
-      readOnly: spec.readOnly,
-      allowedPaths: spec.allowedPaths,
-    });
-  }
-
-  private normalizeCredentials(
-    credentials: Record<string, SecretValue | undefined>,
-  ): Record<string, SecretValue> {
-    const result: Record<string, SecretValue> = {};
-    for (const [key, value] of Object.entries(credentials)) {
-      if (value !== undefined) {
-        result[key] = value;
-      }
-    }
-    return result;
+    this.volumes.addGdrive(spec);
   }
 
   fileExists(path: string): boolean {
@@ -1172,13 +619,7 @@ export class SandboxContext implements FeatureContext, BuildContext {
         mcpEnvironment[value.env] = `\${${value.env}}`;
       }
     }
-    for (const provider of this.plan.runtime.providers) {
-      if (!provider.credentials) continue;
-      for (const value of Object.values(provider.credentials)) {
-        if (typeof value === "string") continue;
-        mcpEnvironment[value.env] = `\${${value.env}}`;
-      }
-    }
+    Object.assign(mcpEnvironment, this.providers.mcpCredentialEnvironment());
 
     // Include the MCP token env var so it reaches the MCP server process at runtime.
     const token = this.plan.build.mcpConfig.token;
