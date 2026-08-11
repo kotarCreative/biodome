@@ -35,7 +35,7 @@ describe("validateCompatibility", () => {
       plan([{ capability: "network.policy", level: "required", reason: "allowlist API access" }]),
       {
         id: "compose",
-        capabilities: capabilitiesOf("exec.command"),
+        capabilities: capabilitiesOf("exec.inplace"),
       },
     );
 
@@ -65,7 +65,7 @@ describe("validateCompatibility", () => {
       plan([{ capability: "snapshot.create", level: "preferred" }]),
       {
         id: "ecs",
-        capabilities: capabilitiesOf("exec.command"),
+        capabilities: capabilitiesOf("exec.inplace"),
       },
     );
 

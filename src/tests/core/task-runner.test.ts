@@ -18,6 +18,7 @@ import { EventStore } from "../../core/events.js";
 import { RuntimeError } from "../../core/errors.js";
 import { targetBuildDir } from "../../runtime/output.js";
 import { writeState } from "../../runtime/state.js";
+import { writeBuildManifest } from "../../runtime/build-manifest.js";
 
 function fakeEventStore(): EventStore {
   return {
@@ -36,12 +37,12 @@ function createFakeDriver(overrides?: Partial<RuntimeDriver>): RuntimeDriver {
       "lifecycle.start",
       "lifecycle.stop",
       "status.read",
-      "exec.command",
+      "exec.inplace",
       "artifact.collect",
     ),
     render: () => Effect.succeed([]),
     ensureAvailable: () => Effect.void,
-    build: () => Effect.succeed({}),
+    build: () => Effect.succeed({ imageRef: "fake:image" }),
     start: () =>
       Effect.succeed<DeploymentState>({
         driver: "fake-driver",
@@ -105,6 +106,17 @@ function setupStateFile(rootDir: string, plan: Plan): void {
     deploymentId: plan.deployment!.deploymentId,
     createdAt: new Date().toISOString(),
     resourceIds: {},
+  });
+  writeBuildManifest(rootDir, targetName, {
+    schemaVersion: 1,
+    target: targetName,
+    driver: "fake-driver",
+    deploymentId: plan.deployment!.deploymentId,
+    imageRef: "fake:image",
+    digest: "fake-digest",
+    contentId: "fake-content",
+    createdAt: new Date().toISOString(),
+    provider: {},
   });
 }
 
@@ -234,7 +246,7 @@ describe("executeTask", () => {
     expect(buildFn).toHaveBeenCalled();
   });
 
-  it("fails before runtime calls if exec.command is missing", async () => {
+  it("fails before runtime calls if exec.inplace is missing", async () => {
     const renderFn = vi.fn().mockReturnValue(Effect.succeed([]));
     const execFn = vi.fn().mockReturnValue(
       Effect.succeed({
@@ -269,7 +281,7 @@ describe("executeTask", () => {
         "lifecycle.start",
         "lifecycle.stop",
         "status.read",
-        "exec.command",
+        "exec.inplace",
       ),
     });
     const plan = planWithTask({ artifacts: ["review.md"] });
@@ -281,7 +293,7 @@ describe("executeTask", () => {
   it("fails before runtime calls when required lifecycle capabilities are missing", async () => {
     const render = vi.fn().mockReturnValue(Effect.succeed([]));
     const driver = createFakeDriver({
-      capabilities: capabilitiesOf("exec.command", "artifact.collect"),
+      capabilities: capabilitiesOf("exec.inplace", "artifact.collect"),
       render,
     });
     await expect(Effect.runPromise(runTask(driver, planWithTask()))).rejects.toThrow(
@@ -305,10 +317,17 @@ describe("executeTask", () => {
         "lifecycle.start",
         "lifecycle.stop",
         "status.read",
-        "exec.command",
+        "exec.inplace",
         "artifact.collect",
       ),
       exec: execFn,
+      start: () =>
+        Effect.succeed({
+          driver: "fake-driver",
+          deploymentId: "test",
+          resourceIds: {},
+          createdAt: new Date().toISOString(),
+        }),
     });
     const plan = createPlan("test-project");
     plan.runtime.agentHarnesses.push({
@@ -349,7 +368,7 @@ describe("executeTask", () => {
         "lifecycle.start",
         "lifecycle.stop",
         "status.read",
-        "exec.command",
+        "exec.inplace",
       ),
     });
     const plan = planWithTask({ artifacts: [] });

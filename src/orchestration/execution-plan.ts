@@ -29,6 +29,8 @@ export interface NetworkRequirement {
 
 export type SecretExposure = "request-proxy" | "environment" | "file" | "agent-forwarding";
 
+export type ArtifactTransport = "local" | "s3" | "gcs" | "azure" | "webdav" | (string & {});
+
 export interface SecretRequirement {
   name: string;
   purpose: string;
@@ -47,6 +49,8 @@ export interface WorkspaceRequirement {
 export interface ArtifactRequirement {
   path: string;
   required: boolean;
+  /** How the artifact is delivered back to the host. */
+  transport?: ArtifactTransport;
 }
 
 export interface ServiceRequirement {
@@ -119,6 +123,7 @@ const WorkspaceRequirementSchema = Schema.Struct({
 const ArtifactRequirementSchema = Schema.Struct({
   path: Schema.String.check(Schema.isMinLength(1)),
   required: Schema.Boolean,
+  transport: Schema.optional(Schema.Literals(["local", "s3", "gcs", "azure", "webdav"])),
 });
 const CapabilityRequirementSchema = Schema.Struct({
   capability: Schema.String,

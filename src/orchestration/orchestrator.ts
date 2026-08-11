@@ -57,7 +57,7 @@ export function orchestrateTask(
     };
     yield* writeRunRecordEffect(rootDir, run);
 
-    const result = yield* executeTask(rootDir, plan, driver).pipe(
+    const result = yield* executeTask(rootDir, plan, driver, portablePlan).pipe(
       Effect.catch((error) =>
         Effect.gen(function* () {
           run = transitionRun(run, error.message.includes("timed out") ? "timed-out" : "failed");

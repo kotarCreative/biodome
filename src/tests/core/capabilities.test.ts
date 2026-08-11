@@ -11,7 +11,7 @@ describe("dockerComposeDriver capabilities", () => {
     expect(hasCapability(caps, "lifecycle.start")).toBe(true);
     expect(hasCapability(caps, "lifecycle.stop")).toBe(true);
     expect(hasCapability(caps, "lifecycle.restart")).toBe(true);
-    expect(hasCapability(caps, "exec.command")).toBe(true);
+    expect(hasCapability(caps, "exec.inplace")).toBe(true);
     expect(hasCapability(caps, "logs.stream")).toBe(true);
     expect(hasCapability(caps, "status.read")).toBe(true);
     expect(hasCapability(caps, "process.status")).toBe(true);

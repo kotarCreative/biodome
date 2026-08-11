@@ -15,7 +15,7 @@ const DOCKER_CAPABILITIES = capabilitiesOf(
   "lifecycle.start",
   "lifecycle.stop",
   "lifecycle.restart",
-  "exec.command",
+  "exec.inplace",
   "logs.stream",
   "status.read",
   "process.signal",

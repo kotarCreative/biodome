@@ -3,6 +3,9 @@ import type { Capabilities } from "../core/capabilities.js";
 import { RuntimeError } from "../core/errors.js";
 import type { EventStore } from "../core/events.js";
 import type { Plan, RuntimeTarget } from "../core/plan.js";
+import type { BuildManifest } from "./build-manifest.js";
+import type { DeploymentState as ValidatedDeploymentState } from "./state.js";
+import type { ExecutionPlan } from "../orchestration/execution-plan.js";
 
 export type DeploymentStatus = "pending" | "running" | "stopped" | "failed" | "unknown";
 
@@ -15,12 +18,29 @@ export interface RenderInput {
 
 export interface RuntimeOperationInput extends RenderInput {
   deploymentId: string;
+  /** Validated deployment state, identity-checked once outside drivers. */
+  state?: ValidatedDeploymentState;
+  /** The durable build artifact selected by the most recent build operation. */
+  buildManifest?: BuildManifest;
+  /** The provider-neutral contract that was preflight-validated for this run. */
+  executionPlan?: ExecutionPlan;
 }
 
 export interface ExecInput extends RuntimeOperationInput {
   command: string[];
   timeoutMs?: number;
   artifactPaths?: string[];
+}
+
+export interface JobInput extends RuntimeOperationInput {
+  buildManifest: BuildManifest;
+  command: string[];
+  timeoutMs?: number;
+  artifactPaths?: string[];
+}
+
+export interface StartInput extends RuntimeOperationInput {
+  buildManifest: BuildManifest;
 }
 
 export interface ArtifactInput extends RuntimeOperationInput {
@@ -38,6 +58,7 @@ export interface RestartInput extends RuntimeOperationInput {
 export interface BuildResult {
   imageRef?: string;
   digest?: string;
+  provider?: Readonly<Record<string, string>>;
 }
 
 export interface DeploymentState {
@@ -87,7 +108,7 @@ export interface BuildableDriver {
 }
 
 export interface StartableDriver {
-  start(input: RuntimeOperationInput): Effect.Effect<DeploymentState, RuntimeError, EventStore>;
+  start(input: StartInput): Effect.Effect<DeploymentState, RuntimeError, EventStore>;
 }
 
 export interface StoppableDriver {
@@ -96,6 +117,10 @@ export interface StoppableDriver {
 
 export interface ExecutableDriver {
   exec(input: ExecInput): Effect.Effect<CommandResult, RuntimeError, EventStore>;
+}
+
+export interface JobDriver {
+  runJob(input: JobInput): Effect.Effect<CommandResult, RuntimeError, EventStore>;
 }
 
 export interface ArtifactDriver {
@@ -140,8 +165,14 @@ export function supportsStop(driver: RuntimeDriver): driver is RuntimeDriver & S
   return driver.capabilities.has("lifecycle.stop") && hasMethod(driver, "stop");
 }
 
-export function supportsExec(driver: RuntimeDriver): driver is RuntimeDriver & ExecutableDriver {
-  return driver.capabilities.has("exec.command") && hasMethod(driver, "exec");
+export function supportsInplaceExec(
+  driver: RuntimeDriver,
+): driver is RuntimeDriver & ExecutableDriver {
+  return driver.capabilities.has("exec.inplace") && hasMethod(driver, "exec");
+}
+
+export function supportsJob(driver: RuntimeDriver): driver is RuntimeDriver & JobDriver {
+  return driver.capabilities.has("job.run") && hasMethod(driver, "runJob");
 }
 
 export function supportsArtifacts(driver: RuntimeDriver): driver is RuntimeDriver & ArtifactDriver {
@@ -169,6 +200,7 @@ type Operation =
   | "start"
   | "stop"
   | "exec"
+  | "runJob"
   | "collectArtifacts"
   | "status"
   | "logs"
@@ -179,7 +211,8 @@ const operationCapabilities: Readonly<Record<Operation, readonly string[]>> = {
   build: ["lifecycle.build"],
   start: ["lifecycle.start"],
   stop: ["lifecycle.stop"],
-  exec: ["exec.command"],
+  exec: ["exec.inplace"],
+  runJob: ["job.run"],
   collectArtifacts: ["artifact.collect"],
   status: ["status.read"],
   logs: ["logs.stream"],

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDockerExecArgs } from "../../runtime/docker-compose.js";
+import { buildDockerExecArgs, imageRefFromLocalDigest } from "../../runtime/docker-compose.js";
 
 describe("buildDockerExecArgs", () => {
   it("preserves normal docker exec arguments", () => {
@@ -22,5 +22,18 @@ describe("buildDockerExecArgs", () => {
       "echo",
       "hello",
     ]);
+  });
+});
+
+describe("imageRefFromLocalDigest", () => {
+  it("creates an immutable local image tag", () => {
+    const digest = `sha256:${"a".repeat(64)}`;
+    expect(imageRefFromLocalDigest("test-project", digest)).toBe(
+      `test-project-dev:${"a".repeat(64)}`,
+    );
+  });
+
+  it("rejects a mutable or malformed image ID", () => {
+    expect(() => imageRefFromLocalDigest("test-project", "latest")).toThrow(/invalid image digest/);
   });
 });

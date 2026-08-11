@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { Effect } from "effect";
-import { createAwsEcsDriver, type AwsClients } from "../../runtime/aws-ecs.js";
+import { buildxImageDigest, createAwsEcsDriver, type AwsClients } from "../../runtime/aws-ecs.js";
 import type { RuntimeTarget } from "../../core/plan.js";
 import type { Plan } from "../../core/plan.js";
 import type { RuntimeOperationInput } from "../../runtime/driver.js";
@@ -121,7 +121,29 @@ function makeInput(overrides?: Partial<RuntimeOperationInput>): RuntimeOperation
     plan: samplePlan,
     target: sampleTarget,
     deploymentId: "test-deploy-001",
+    buildManifest: {
+      schemaVersion: 1,
+      target: sampleTarget.name,
+      driver: "aws-ecs",
+      deploymentId: "test-deploy-001",
+      imageRef: `123456789012.dkr.ecr.us-east-1.amazonaws.com/test-repo@sha256:${"a".repeat(64)}`,
+      digest: `sha256:${"a".repeat(64)}`,
+      contentId: "test-content",
+      createdAt: new Date().toISOString(),
+      provider: {},
+    },
     ...overrides,
+  };
+}
+
+function makeState(resourceIds: Record<string, string>): RuntimeOperationInput["state"] {
+  return {
+    schemaVersion: 1,
+    target: sampleTarget.name,
+    driver: "aws-ecs",
+    deploymentId: "test-deploy-001",
+    createdAt: new Date().toISOString(),
+    resourceIds,
   };
 }
 
@@ -140,7 +162,7 @@ describe("createAwsEcsDriver", () => {
       expect(caps).toContain("lifecycle.stop");
       expect(caps).toContain("status.read");
       expect(caps).toContain("logs.stream");
-      expect(caps).toContain("exec.command");
+      expect(caps).toContain("job.run");
       expect(caps).toContain("artifact.collect");
     });
   });
@@ -234,7 +256,7 @@ describe("createAwsEcsDriver", () => {
       const registerCommand = ecsSend.mock.calls[0][0];
       const container = registerCommand.input.containerDefinitions[0];
       expect(container.image).toBe(
-        "123456789012.dkr.ecr.us-east-1.amazonaws.com/test-repo:test-deploy-001",
+        `123456789012.dkr.ecr.us-east-1.amazonaws.com/test-repo@sha256:${"a".repeat(64)}`,
       );
       expect(container.command).toBeUndefined();
     });
@@ -303,24 +325,18 @@ describe("createAwsEcsDriver", () => {
         .mockResolvedValueOnce({});
       const clients = makeClients({ ecsSend });
 
-      const outputDir = join(tmpdir(), `ecs-stop-${randomUUID()}`);
-      mkdirSync(outputDir, { recursive: true });
-      try {
-        writeFileSync(
-          join(outputDir, "state.json"),
-          JSON.stringify({
-            resourceIds: {
+      const driver = createAwsEcsDriver(clients);
+      await run(
+        driver.stop(
+          makeInput({
+            state: makeState({
               taskArn: "arn:aws:ecs:...:task/abc123",
               taskDefinitionArn: "arn:aws:ecs:...:task-def/test-deploy:1",
-            },
+            }),
           }),
-        );
-        const driver = createAwsEcsDriver(clients);
-        await run(driver.stop(makeInput({ outputDir })));
-        expect(ecsSend).toHaveBeenCalledTimes(4);
-      } finally {
-        rmSync(outputDir, { recursive: true, force: true });
-      }
+        ),
+      );
+      expect(ecsSend).toHaveBeenCalledTimes(4);
     });
 
     it("succeeds without stopping when the task is missing", async () => {
@@ -328,42 +344,30 @@ describe("createAwsEcsDriver", () => {
         tasks: [],
         failures: [{ arn: "task", reason: "MISSING" }],
       });
-      const outputDir = join(tmpdir(), `ecs-stop-${randomUUID()}`);
-      mkdirSync(outputDir, { recursive: true });
-      try {
-        writeFileSync(
-          join(outputDir, "state.json"),
-          JSON.stringify({ resourceIds: { taskArn: "arn:aws:ecs:...:task/missing" } }),
-        );
 
-        await expect(
-          run(createAwsEcsDriver(makeClients({ ecsSend })).stop(makeInput({ outputDir }))),
-        ).resolves.toBeUndefined();
-        expect(ecsSend).toHaveBeenCalledTimes(1);
-      } finally {
-        rmSync(outputDir, { recursive: true, force: true });
-      }
+      await expect(
+        run(
+          createAwsEcsDriver(makeClients({ ecsSend })).stop(
+            makeInput({ state: makeState({ taskArn: "arn:aws:ecs:...:task/missing" }) }),
+          ),
+        ),
+      ).resolves.toBeUndefined();
+      expect(ecsSend).toHaveBeenCalledTimes(1);
     });
 
     it("succeeds without stopping when the task is already stopped", async () => {
       const ecsSend = vi.fn().mockResolvedValueOnce({
         tasks: [{ lastStatus: "STOPPED" }],
       });
-      const outputDir = join(tmpdir(), `ecs-stop-${randomUUID()}`);
-      mkdirSync(outputDir, { recursive: true });
-      try {
-        writeFileSync(
-          join(outputDir, "state.json"),
-          JSON.stringify({ resourceIds: { taskArn: "arn:aws:ecs:...:task/stopped" } }),
-        );
 
-        await expect(
-          run(createAwsEcsDriver(makeClients({ ecsSend })).stop(makeInput({ outputDir }))),
-        ).resolves.toBeUndefined();
-        expect(ecsSend).toHaveBeenCalledTimes(1);
-      } finally {
-        rmSync(outputDir, { recursive: true, force: true });
-      }
+      await expect(
+        run(
+          createAwsEcsDriver(makeClients({ ecsSend })).stop(
+            makeInput({ state: makeState({ taskArn: "arn:aws:ecs:...:task/stopped" }) }),
+          ),
+        ),
+      ).resolves.toBeUndefined();
+      expect(ecsSend).toHaveBeenCalledTimes(1);
     });
 
     it("returns RuntimeError when stopping the task fails", async () => {
@@ -371,20 +375,14 @@ describe("createAwsEcsDriver", () => {
         .fn()
         .mockResolvedValueOnce({ tasks: [{ lastStatus: "RUNNING" }] })
         .mockRejectedValueOnce(new Error("stop denied"));
-      const outputDir = join(tmpdir(), `ecs-stop-${randomUUID()}`);
-      mkdirSync(outputDir, { recursive: true });
-      try {
-        writeFileSync(
-          join(outputDir, "state.json"),
-          JSON.stringify({ resourceIds: { taskArn: "arn:aws:ecs:...:task/running" } }),
-        );
 
-        await expect(
-          run(createAwsEcsDriver(makeClients({ ecsSend })).stop(makeInput({ outputDir }))),
-        ).rejects.toThrow(/Failed to stop ECS task.*stop denied/);
-      } finally {
-        rmSync(outputDir, { recursive: true, force: true });
-      }
+      await expect(
+        run(
+          createAwsEcsDriver(makeClients({ ecsSend })).stop(
+            makeInput({ state: makeState({ taskArn: "arn:aws:ecs:...:task/running" }) }),
+          ),
+        ),
+      ).rejects.toThrow(/Failed to stop ECS task.*stop denied/);
     });
 
     it("returns RuntimeError when polling the task fails", async () => {
@@ -393,47 +391,41 @@ describe("createAwsEcsDriver", () => {
         .mockResolvedValueOnce({ tasks: [{ lastStatus: "RUNNING" }] })
         .mockResolvedValueOnce({})
         .mockRejectedValueOnce(new Error("poll failed"));
-      const outputDir = join(tmpdir(), `ecs-stop-${randomUUID()}`);
-      mkdirSync(outputDir, { recursive: true });
-      try {
-        writeFileSync(
-          join(outputDir, "state.json"),
-          JSON.stringify({ resourceIds: { taskArn: "arn:aws:ecs:...:task/running" } }),
-        );
 
-        await expect(
-          run(createAwsEcsDriver(makeClients({ ecsSend })).stop(makeInput({ outputDir }))),
-        ).rejects.toThrow(/Failed to stop ECS task.*poll failed/);
-      } finally {
-        rmSync(outputDir, { recursive: true, force: true });
-      }
+      await expect(
+        run(
+          createAwsEcsDriver(makeClients({ ecsSend })).stop(
+            makeInput({ state: makeState({ taskArn: "arn:aws:ecs:...:task/running" }) }),
+          ),
+        ),
+      ).rejects.toThrow(/Failed to stop ECS task.*poll failed/);
     });
 
     it("returns RuntimeError when the task does not stop before timeout", async () => {
       vi.useFakeTimers();
       const ecsSend = vi.fn().mockResolvedValue({ tasks: [{ lastStatus: "RUNNING" }] });
-      const outputDir = join(tmpdir(), `ecs-stop-${randomUUID()}`);
-      mkdirSync(outputDir, { recursive: true });
-      try {
-        writeFileSync(
-          join(outputDir, "state.json"),
-          JSON.stringify({ resourceIds: { taskArn: "arn:aws:ecs:...:task/running" } }),
-        );
-        const result = run(
-          createAwsEcsDriver(makeClients({ ecsSend })).stop(makeInput({ outputDir })),
-        );
-        const assertion = expect(result).rejects.toThrow(/Timed out waiting for ECS task/);
+      const result = run(
+        createAwsEcsDriver(makeClients({ ecsSend })).stop(
+          makeInput({ state: makeState({ taskArn: "arn:aws:ecs:...:task/running" }) }),
+        ),
+      );
+      const assertion = expect(result).rejects.toThrow(/Timed out waiting for ECS task/);
 
-        await vi.runAllTimersAsync();
-        await assertion;
-      } finally {
-        vi.useRealTimers();
-        rmSync(outputDir, { recursive: true, force: true });
-      }
+      await vi.runAllTimersAsync();
+      await assertion;
+      vi.useRealTimers();
+    });
+
+    it("rejects stopping without validated deployment state", async () => {
+      const ecsSend = vi.fn();
+      await expect(
+        run(createAwsEcsDriver(makeClients({ ecsSend })).stop(makeInput())),
+      ).rejects.toThrow(/without validated deployment state/);
+      expect(ecsSend).not.toHaveBeenCalled();
     });
   });
 
-  describe("exec", () => {
+  describe("runJob", () => {
     it("registers task, runs, waits for completion, deregisters", async () => {
       process.env.TEST_TASK_ROLE_ARN = "arn:aws:iam::123456789012:role/task";
       try {
@@ -464,7 +456,7 @@ describe("createAwsEcsDriver", () => {
           },
         };
         const result = await run(
-          driver.exec({
+          driver.runJob({
             ...makeInput({ target: targetWithArtifacts }),
             command: ["echo", "hello"],
             artifactPaths: ["summary.md"],
@@ -475,7 +467,7 @@ describe("createAwsEcsDriver", () => {
         expect(ecsSend).toHaveBeenCalledTimes(5);
         const registerCommand = ecsSend.mock.calls[0][0];
         expect(registerCommand.input.containerDefinitions[0].image).toBe(
-          "123456789012.dkr.ecr.us-east-1.amazonaws.com/test-repo:test-deploy-001",
+          `123456789012.dkr.ecr.us-east-1.amazonaws.com/test-repo@sha256:${"a".repeat(64)}`,
         );
         expect(registerCommand.input.containerDefinitions[0].environment).toEqual(
           expect.arrayContaining([
@@ -505,7 +497,9 @@ describe("createAwsEcsDriver", () => {
           .mockResolvedValueOnce({})
           .mockResolvedValueOnce({});
         const driver = createAwsEcsDriver(makeClients({ ecsSend }));
-        const result = run(driver.exec({ ...makeInput(), command: ["sleep", "10"], timeoutMs: 1 }));
+        const result = run(
+          driver.runJob({ ...makeInput(), command: ["sleep", "10"], timeoutMs: 1 }),
+        );
 
         await vi.runAllTimersAsync();
 
@@ -522,7 +516,7 @@ describe("createAwsEcsDriver", () => {
 
       await expect(
         run(
-          driver.exec({
+          driver.runJob({
             ...makeInput(),
             command: ["echo", "hello"],
             artifactPaths: ["summary.md"],
@@ -542,7 +536,7 @@ describe("createAwsEcsDriver", () => {
 
       await expect(
         run(
-          driver.exec({
+          driver.runJob({
             ...makeInput({ target: targetWithBucket }),
             command: ["echo", "hello"],
             artifactPaths: ["summary.md"],
@@ -559,25 +553,18 @@ describe("createAwsEcsDriver", () => {
         tasks: [{ lastStatus: "RUNNING" }],
       });
       const clients = makeClients({ ecsSend });
-      const outputDir = join(tmpdir(), `ecs-status-${randomUUID()}`);
-      mkdirSync(outputDir, { recursive: true });
-      try {
-        writeFileSync(
-          join(outputDir, "state.json"),
-          JSON.stringify({ resourceIds: { taskArn: "arn:aws:ecs:...:task/abc" } }),
-        );
-        const driver = createAwsEcsDriver(clients);
-        const result = await run(driver.status(makeInput({ outputDir })));
-        expect(result.state).toBe("running");
-      } finally {
-        rmSync(outputDir, { recursive: true, force: true });
-      }
+      const driver = createAwsEcsDriver(clients);
+      const result = await run(
+        driver.status(makeInput({ state: makeState({ taskArn: "arn:aws:ecs:...:task/abc" }) })),
+      );
+      expect(result.state).toBe("running");
     });
 
-    it("returns unknown when no state file exists", async () => {
+    it("rejects status queries without validated deployment state", async () => {
       const driver = createAwsEcsDriver(makeClients());
-      const result = await run(driver.status(makeInput({ outputDir: "/tmp/nonexistent" })));
-      expect(result.state).toBe("unknown");
+      await expect(run(driver.status(makeInput()))).rejects.toThrow(
+        /without validated deployment state/,
+      );
     });
   });
 
@@ -656,5 +643,16 @@ describe("createAwsEcsDriver", () => {
         delete process.env.TEST_ARTIFACT_BUCKET;
       }
     });
+  });
+});
+
+describe("buildxImageDigest", () => {
+  it("reads the immutable OCI digest from Buildx metadata", () => {
+    const digest = `sha256:${"a".repeat(64)}`;
+    expect(buildxImageDigest(JSON.stringify({ "containerimage.digest": digest }))).toBe(digest);
+  });
+
+  it("rejects Buildx metadata without an OCI digest", () => {
+    expect(() => buildxImageDigest("{}")).toThrow(/did not return an immutable image digest/);
   });
 });

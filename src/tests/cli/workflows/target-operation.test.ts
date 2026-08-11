@@ -13,9 +13,11 @@ import {
   buildWorkflow,
   downWorkflow,
   execWorkflow,
+  logsWorkflow,
   restartWorkflow,
   upWorkflow,
 } from "../../../cli/workflows/target.js";
+import { targetValidateWorkflow } from "../../../cli/workflows/config.js";
 import { writeState } from "../../../runtime/state.js";
 
 function driver(
@@ -31,7 +33,7 @@ function driver(
     capabilities,
     render: () => Effect.succeed([]),
     ensureAvailable: () => Effect.void,
-    build: () => Effect.succeed({}),
+    build: () => Effect.succeed({ imageRef: "fake:image" }),
     start: () =>
       Effect.succeed({
         driver: "fake",
@@ -87,17 +89,22 @@ describe("target workflows", () => {
         order.push("build");
         return {};
       });
-    await Effect.runPromise(
-      buildWorkflow("/project", "local", dependencies(runtimeDriver)).pipe(
-        Effect.provide(NoOpEventStoreLive("test")),
-      ),
-    );
-    expect(order).toEqual(["ensure", "render", "build"]);
+    const rootDir = mkdtempSync(join(tmpdir(), "biodome-build-"));
+    try {
+      await Effect.runPromise(
+        buildWorkflow(rootDir, "local", dependencies(runtimeDriver)).pipe(
+          Effect.provide(NoOpEventStoreLive("test")),
+        ),
+      );
+      expect(order).toEqual(["ensure", "render", "build"]);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
   });
 
   it("up builds when requested and preserves exec capability errors", async () => {
     const runtimeDriver = driver();
-    const build = vi.fn(() => Effect.succeed({}));
+    const build = vi.fn(() => Effect.succeed({ imageRef: "fake:image" }));
     runtimeDriver.build = build;
     await Effect.runPromise(
       upWorkflow("/tmp", "local", { build: true }, dependencies(runtimeDriver)).pipe(
@@ -132,13 +139,34 @@ describe("target workflows", () => {
         resourceIds: {},
         createdAt: "",
       });
-      await expect(Effect.runPromise(downWorkflow(rootDir, "local", deps))).resolves.toEqual({
-        message: 'Target "local" stopped',
-      });
+      await expect(
+        Effect.runPromise(
+          downWorkflow(rootDir, "local", deps).pipe(Effect.provide(NoOpEventStoreLive("test"))),
+        ),
+      ).resolves.toEqual({ message: 'Target "local" stopped' });
       expect(stop).toHaveBeenCalledOnce();
     } finally {
       rmSync(rootDir, { recursive: true, force: true });
     }
+  });
+
+  it("reads logs without requiring stopped deployment state or a build manifest", async () => {
+    const logs = vi.fn(() => Effect.void);
+    const runtimeDriver = driver(
+      capabilitiesOf("lifecycle.build", "lifecycle.start", "lifecycle.stop", "logs.stream"),
+    ) as RuntimeDriver & { logs: typeof logs };
+    runtimeDriver.logs = logs;
+
+    await expect(
+      Effect.runPromise(
+        logsWorkflow("/project", "local", undefined, dependencies(runtimeDriver)).pipe(
+          Effect.provide(NoOpEventStoreLive("test")),
+        ),
+      ),
+    ).resolves.toBeUndefined();
+    expect(logs).toHaveBeenCalledOnce();
+    expect(logs.mock.calls[0][0]).not.toHaveProperty("state");
+    expect(logs.mock.calls[0][0]).not.toHaveProperty("buildManifest");
   });
 
   it("restarts every daemon or reports them as skipped when unsupported", async () => {
@@ -166,5 +194,36 @@ describe("target workflows", () => {
     );
     expect(result.skipped).toEqual([]);
     expect(restarted).toEqual(["web", "worker"]);
+  });
+
+  it("rejects unsupported target services during validation before driver operations", async () => {
+    const plan = createPlan("project");
+    plan.runtime.services.push({
+      name: "postgres",
+      type: "postgres",
+      image: "postgres:17",
+      containerName: "postgres",
+      environment: {},
+      ports: [],
+      volumes: [],
+      networks: [],
+    });
+    plan.deployment = {
+      target: { name: "remote", driver: "aws-ecs", options: {} },
+      deploymentId: "deployment",
+    };
+    const baseDriver = driver();
+    const render = vi.fn(baseDriver.render);
+    const runtimeDriver: RuntimeDriver = { ...baseDriver, id: "aws-ecs", render };
+    const deps = {
+      plan,
+      buildTargetPlan: vi.fn(() => Effect.succeed(plan)),
+      getDriver: vi.fn(() => Effect.succeed(runtimeDriver)),
+    };
+
+    await expect(Effect.runPromise(targetValidateWorkflow("/tmp", "remote", deps))).rejects.toThrow(
+      /incompatible with provider/,
+    );
+    expect(render).not.toHaveBeenCalled();
   });
 });

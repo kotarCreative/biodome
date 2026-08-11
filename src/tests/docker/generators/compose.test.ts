@@ -13,6 +13,7 @@ describe("generateCompose", () => {
     expect(compose).toContain("context: ../../..");
     expect(compose).toContain("dockerfile: .biodome-build/targets/local/Dockerfile");
     expect(compose).toContain("- ../../..:/workspace");
+    expect(compose).toContain("${BIODOME_DEV_IMAGE:-my-app-dev:latest}");
   });
 
   it("generates compose with ports and no sleep infinity for daemon processes", () => {

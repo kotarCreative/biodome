@@ -17,6 +17,7 @@ import type {
   RestartDriver,
   RuntimeDriver,
   RuntimeOperationInput,
+  StartInput,
   BuildResult,
   DeploymentState,
   CommandResult,
@@ -39,6 +40,18 @@ const TIMEOUT_KILL_AFTER_SECONDS = 5;
 
 function getComposePath(outputDir: string): string {
   return join(outputDir, COMPOSE_FILE);
+}
+
+function stagingImageRef(input: RuntimeOperationInput): string {
+  return `${input.plan.project}-dev:${input.deploymentId}-build`;
+}
+
+export function imageRefFromLocalDigest(project: string, digest: string): string {
+  const value = digest.replace(/^sha256:/, "");
+  if (!/^[a-f0-9]{64}$/i.test(value)) {
+    throw new RuntimeError({ message: `Docker returned an invalid image digest: ${digest}` });
+  }
+  return `${project}-dev:${value}`;
 }
 
 function platformErrorMessage(error: unknown): string {
@@ -83,10 +96,15 @@ function collectBoundedOutput(
   ).pipe(Effect.map(({ chunks, size }) => Buffer.concat(chunks, size).toString("utf8")));
 }
 
-function runDockerCmd(args: string[], cwd?: string): Effect.Effect<void, RuntimeError, never> {
+function runDockerCmd(
+  args: string[],
+  cwd?: string,
+  environment?: Record<string, string>,
+): Effect.Effect<void, RuntimeError, never> {
   return Effect.gen(function* () {
     const handle = yield* ChildProcess.make("docker", args, {
       cwd,
+      env: environment ? { ...process.env, ...environment } : undefined,
       stdin: "inherit",
       stdout: "inherit",
       stderr: "inherit",
@@ -129,7 +147,7 @@ export const dockerComposeDriver: RuntimeDriver &
     "lifecycle.start",
     "lifecycle.stop",
     "lifecycle.restart",
-    "exec.command",
+    "exec.inplace",
     "logs.stream",
     "status.read",
     "process.status",
@@ -197,33 +215,59 @@ export const dockerComposeDriver: RuntimeDriver &
   },
 
   build(input: RuntimeOperationInput): Effect.Effect<BuildResult, RuntimeError, EventStore> {
-    return runDockerCmd(
-      ["compose", "-f", getComposePath(input.outputDir), "-p", input.deploymentId, "build"],
-      input.outputDir,
-    ).pipe(Effect.map(() => ({})));
+    const stagingImage = stagingImageRef(input);
+    return Effect.gen(function* () {
+      yield* runDockerCmd(
+        ["compose", "-f", getComposePath(input.outputDir), "-p", input.deploymentId, "build"],
+        input.outputDir,
+        { BIODOME_DEV_IMAGE: stagingImage },
+      );
+      const digest = yield* Effect.try({
+        try: () =>
+          execFileSync("docker", ["image", "inspect", "--format", "{{.Id}}", stagingImage], {
+            encoding: "utf-8",
+          }).trim(),
+        catch: (error) =>
+          new RuntimeError({
+            message: `Failed to inspect Docker image ${stagingImage}: ${platformErrorMessage(error)}`,
+          }),
+      });
+      const imageRef = imageRefFromLocalDigest(input.plan.project, digest);
+      yield* runDockerCmd(["image", "tag", stagingImage, imageRef], input.outputDir);
+      return { imageRef, digest };
+    });
   },
 
-  start(input: RuntimeOperationInput): Effect.Effect<DeploymentState, RuntimeError, EventStore> {
-    return runDockerCmd(
-      [
-        "compose",
-        "-f",
-        getComposePath(input.outputDir),
-        "-p",
-        input.deploymentId,
-        "up",
-        "-d",
-        "--wait",
-      ],
-      input.outputDir,
-    ).pipe(
-      Effect.map(() => ({
+  start(input: StartInput): Effect.Effect<DeploymentState, RuntimeError, EventStore> {
+    return Effect.gen(function* () {
+      const imageRef = input.buildManifest.imageRef;
+      if (!imageRef) {
+        return yield* new RuntimeError({
+          message: "Docker Compose build manifest is missing its immutable image reference",
+        });
+      }
+      yield* runDockerCmd(
+        [
+          "compose",
+          "-f",
+          getComposePath(input.outputDir),
+          "-p",
+          input.deploymentId,
+          "up",
+          "-d",
+          "--no-build",
+          "--wait",
+        ],
+        input.outputDir,
+        { BIODOME_DEV_IMAGE: imageRef },
+      );
+      return {
         driver: "docker-compose" as const,
         deploymentId: input.deploymentId,
         resourceIds: { project: input.deploymentId },
         createdAt: new Date().toISOString(),
-      })),
-    );
+      };
+    });
   },
 
   stop(input: RuntimeOperationInput): Effect.Effect<void, RuntimeError, EventStore> {

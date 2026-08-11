@@ -14,7 +14,7 @@ plan.deployment = {
     cleanup: "on-success",
     requiredServices: ["postgres"],
     requiredProcesses: ["web"],
-    capabilities: [{ capability: "exec.command", level: "required", reason: "runs checks" }],
+    capabilities: [{ capability: "exec.inplace", level: "required", reason: "runs checks" }],
     resources: { cpu: 1024, memoryMiB: 2048, diskMiB: 4096 },
     network: { mode: "egress", allow: ["registry.npmjs.org"] },
     workspace: { strategy: "clone", repository: "app", ref: "main", path: "/workspace" },

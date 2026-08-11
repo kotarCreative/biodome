@@ -11,6 +11,7 @@ import type { EventStore } from "../core/events.js";
 import type { Plan, RuntimeTarget } from "../core/plan.js";
 import { runtimeLayout } from "./layout.js";
 import { renderCommonArtifacts, writeArtifacts } from "./artifacts.js";
+import { directoryDigest } from "./build-manifest.js";
 import { generateCompose } from "../docker/generators/compose.js";
 import type {
   Artifact,
@@ -26,6 +27,7 @@ import type {
   RestartDriver,
   RuntimeDriver,
   RuntimeOperationInput,
+  StartInput,
   StatusDriver,
   StatusResult,
   StartableDriver,
@@ -222,9 +224,59 @@ function artifactPath(input: RuntimeOperationInput, artifact: string): string {
       message: `Invalid artifact path "${artifact}": must be a relative path without traversal`,
     });
   }
-  const options = dockerSandboxOptions(input.target);
-  const workspace = options.clone ? (options.cloneWorkspacePath ?? input.rootDir) : input.rootDir;
-  return join(workspace, artifact);
+  return join(snapshotWorkspace(sandboxId(input)), artifact);
+}
+
+function sandboxId(input: RuntimeOperationInput): string {
+  return (
+    input.state?.resourceIds.sandbox ?? input.buildManifest?.provider.sandbox ?? input.deploymentId
+  );
+}
+
+function buildSandboxId(input: RuntimeOperationInput): string {
+  return `${input.deploymentId}-build-${directoryDigest(input.outputDir).slice(0, 12)}`;
+}
+
+function snapshotWorkspace(id: string): string {
+  return `/tmp/biodome-builds/${id}`;
+}
+
+function stagingImageRef(input: RuntimeOperationInput): string {
+  return `${input.plan.project}-dev:${input.deploymentId}-build`;
+}
+
+function imageRefFromDigest(project: string, digest: string): string {
+  const value = digest.replace(/^sha256:/, "");
+  if (!/^[a-f0-9]{64}$/i.test(value)) {
+    throw new RuntimeError({ message: `Docker returned an invalid image digest: ${digest}` });
+  }
+  return `${project}-dev:${value}`;
+}
+
+function runSbxCapture(args: string[], cwd?: string): Effect.Effect<string, RuntimeError, never> {
+  return Effect.gen(function* () {
+    const handle = yield* ChildProcess.make("sbx", args, {
+      cwd,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [exitCode, stdout, stderr] = yield* Effect.all(
+      [handle.exitCode, collectBoundedOutput(handle.stdout), collectBoundedOutput(handle.stderr)],
+      { concurrency: "unbounded" },
+    );
+    if (exitCode !== 0) {
+      return yield* new RuntimeError({
+        message: stderr || `exited with code ${exitCode}`,
+        command: `sbx ${args.join(" ")}`,
+      });
+    }
+    return stdout.trim();
+  }).pipe(
+    Effect.provide(NodeRuntime),
+    Effect.scoped,
+    Effect.catch((error) => Effect.fail(runtimeError(error))),
+  );
 }
 
 export function translateWorkspaceCommand(
@@ -261,7 +313,7 @@ export const dockerSandboxDriver: RuntimeDriver &
     "lifecycle.build",
     "lifecycle.start",
     "lifecycle.stop",
-    "exec.command",
+    "exec.inplace",
     "exec.pty",
     "process.signal",
     "logs.stream",
@@ -326,48 +378,81 @@ export const dockerSandboxDriver: RuntimeDriver &
   },
 
   build(input: RuntimeOperationInput): Effect.Effect<BuildResult, RuntimeError, EventStore> {
-    // `sbx` consumes an existing template or kit. Rendering above keeps task
-    // scripts in the mounted workspace; template construction is intentionally
-    // an explicit provider concern rather than an implicit Docker build.
-    const options = dockerSandboxOptions(input.target);
-    return Effect.succeed(options.template ? { imageRef: options.template } : {});
-  },
-
-  start(input: RuntimeOperationInput): Effect.Effect<DeploymentState, RuntimeError, EventStore> {
     return Effect.gen(function* () {
       const options = resolvedDockerSandboxOptions(input);
-      const workspace = options.clone
+      const id = buildSandboxId(input);
+      const sourceWorkspace = options.clone
         ? (options.cloneWorkspacePath ?? input.rootDir)
         : input.rootDir;
+      const workspace = snapshotWorkspace(id);
+      const composeFile = `${workspace}/.biodome-build/targets/${input.target.name}/docker-compose.yaml`;
+      const stagingImage = stagingImageRef(input);
+
+      // A content-addressed builder sandbox lets start consume this exact image
+      // rather than rebuilding the mutable host workspace.
+      yield* runSbxCmd(["rm", "--force", id], input.rootDir).pipe(Effect.catch(() => Effect.void));
+      yield* runSbxCmd(buildSbxCreateArgs(id, input.rootDir, options), input.rootDir);
+      if (options.clone) {
+        const generatedParent = `${sourceWorkspace}/.biodome-build/targets`;
+        yield* runSbxCmd(["exec", id, "mkdir", "-p", generatedParent], input.rootDir);
+        yield* runSbxCmd(["cp", input.outputDir, `${id}:${generatedParent}/`], input.rootDir);
+      }
+      yield* runSbxCmd(["exec", id, "mkdir", "-p", workspace], input.rootDir);
+      yield* runSbxCmd(["exec", id, "cp", "-a", `${sourceWorkspace}/.`, workspace], input.rootDir);
+      // Generated task commands use /workspace. Point it at the immutable
+      // snapshot rather than the source mount used while constructing it.
+      yield* runSbxCmd(["exec", id, "sudo", "ln", "-sfnT", workspace, "/workspace"], input.rootDir);
       yield* runSbxCmd(
-        buildSbxCreateArgs(input.deploymentId, input.rootDir, options),
+        [
+          "exec",
+          id,
+          "env",
+          `BIODOME_DEV_IMAGE=${stagingImage}`,
+          "docker",
+          "compose",
+          "-f",
+          composeFile,
+          "-p",
+          input.deploymentId,
+          "build",
+        ],
         input.rootDir,
       );
-      if (options.clone) {
-        const generatedParent = `${workspace}/.biodome-build/targets`;
-        yield* runSbxCmd(
-          ["exec", input.deploymentId, "mkdir", "-p", generatedParent],
-          input.rootDir,
-        );
-        yield* runSbxCmd(
-          ["cp", input.outputDir, `${input.deploymentId}:${generatedParent}/`],
-          input.rootDir,
-        );
+      const digest = yield* runSbxCapture(
+        ["exec", id, "docker", "image", "inspect", "--format", "{{.Id}}", stagingImage],
+        input.rootDir,
+      );
+      const imageRef = imageRefFromDigest(input.plan.project, digest);
+      yield* runSbxCmd(
+        ["exec", id, "docker", "image", "tag", stagingImage, imageRef],
+        input.rootDir,
+      );
+      return { imageRef, digest, provider: { sandbox: id } };
+    });
+  },
+
+  start(input: StartInput): Effect.Effect<DeploymentState, RuntimeError, EventStore> {
+    return Effect.gen(function* () {
+      const id = input.buildManifest.provider.sandbox;
+      if (!id) {
+        return yield* new RuntimeError({
+          message: "Docker Sandbox build manifest is missing its builder sandbox identity",
+        });
       }
-      // Existing generated harness files use Biodome's portable /workspace
-      // layout. Docker Sandboxes preserves host absolute paths, so bridge the
-      // two layouts inside the isolated VM.
-      if (workspace !== "/workspace") {
-        yield* runSbxCmd(
-          ["exec", input.deploymentId, "sudo", "ln", "-sfnT", workspace, "/workspace"],
-          input.rootDir,
-        );
+      const imageRef = input.buildManifest.imageRef;
+      if (!imageRef) {
+        return yield* new RuntimeError({
+          message: "Docker Sandbox build manifest is missing its immutable image reference",
+        });
       }
+      const workspace = snapshotWorkspace(id);
       const composeFile = `${workspace}/.biodome-build/targets/${input.target.name}/docker-compose.yaml`;
       yield* runSbxCmd(
         [
           "exec",
-          input.deploymentId,
+          id,
+          "env",
+          `BIODOME_DEV_IMAGE=${imageRef}`,
           "docker",
           "compose",
           "-f",
@@ -376,7 +461,7 @@ export const dockerSandboxDriver: RuntimeDriver &
           input.deploymentId,
           "up",
           "-d",
-          "--build",
+          "--no-build",
           "--wait",
         ],
         input.rootDir,
@@ -384,32 +469,22 @@ export const dockerSandboxDriver: RuntimeDriver &
       return {
         driver: "docker-sandbox",
         deploymentId: input.deploymentId,
-        resourceIds: { sandbox: input.deploymentId },
+        resourceIds: { sandbox: id },
         createdAt: new Date().toISOString(),
       };
     });
   },
 
   stop(input: RuntimeOperationInput): Effect.Effect<void, RuntimeError, EventStore> {
-    const options = resolvedDockerSandboxOptions(input);
-    const workspace = options.clone ? (options.cloneWorkspacePath ?? input.rootDir) : input.rootDir;
+    const id = sandboxId(input);
+    const workspace = snapshotWorkspace(id);
     const composeFile = `${workspace}/.biodome-build/targets/${input.target.name}/docker-compose.yaml`;
     return Effect.gen(function* () {
       yield* runSbxCmd(
-        [
-          "exec",
-          input.deploymentId,
-          "docker",
-          "compose",
-          "-f",
-          composeFile,
-          "-p",
-          input.deploymentId,
-          "down",
-        ],
+        ["exec", id, "docker", "compose", "-f", composeFile, "-p", input.deploymentId, "down"],
         input.rootDir,
       ).pipe(Effect.catch(() => Effect.void));
-      yield* runSbxCmd(["rm", "--force", input.deploymentId], input.rootDir);
+      yield* runSbxCmd(["rm", "--force", id], input.rootDir);
     });
   },
 
@@ -417,8 +492,9 @@ export const dockerSandboxDriver: RuntimeDriver &
     input: RuntimeOperationInput & { command: string[]; timeoutMs?: number },
   ): Effect.Effect<CommandResult, RuntimeError, EventStore> {
     const start = Date.now();
+    const id = sandboxId(input);
     const command = ["docker", "exec", `${input.deploymentId}-dev`, ...input.command];
-    const args = buildSbxExecArgs(input.deploymentId, command, input.timeoutMs);
+    const args = buildSbxExecArgs(id, command, input.timeoutMs);
     return Effect.gen(function* () {
       const handle = yield* ChildProcess.make("sbx", args, {
         stdin: input.timeoutMs === undefined ? "inherit" : "ignore",
@@ -448,20 +524,17 @@ export const dockerSandboxDriver: RuntimeDriver &
   ): Effect.Effect<Artifact[], RuntimeError, EventStore> {
     return Effect.try({
       try: () => {
+        const id = sandboxId(input);
         const artifactsDir = join(input.outputDir, "artifacts");
         mkdirSync(artifactsDir, { recursive: true });
         return input.paths.map((path) => {
           const localPath = join(artifactsDir, path);
           mkdirSync(dirname(localPath), { recursive: true });
           try {
-            execFileSync("sbx", [
-              "cp",
-              `${input.deploymentId}:${artifactPath(input, path)}`,
-              localPath,
-            ]);
+            execFileSync("sbx", ["cp", `${id}:${artifactPath(input, path)}`, localPath]);
           } catch {
             throw new RuntimeError({
-              message: `Artifact "${path}" was not found in sandbox ${input.deploymentId}`,
+              message: `Artifact "${path}" was not found in sandbox ${id}`,
             });
           }
           return { path, localPath, sizeBytes: statSync(localPath).size };
@@ -479,7 +552,7 @@ export const dockerSandboxDriver: RuntimeDriver &
           encoding: "utf-8",
           stdio: ["pipe", "pipe", "pipe"],
         });
-        return parseSbxListOutput(output, input.deploymentId);
+        return parseSbxListOutput(output, sandboxId(input));
       },
       catch: (error) =>
         new RuntimeError({
@@ -492,17 +565,9 @@ export const dockerSandboxDriver: RuntimeDriver &
     input: RuntimeOperationInput & { processName?: string },
   ): Effect.Effect<void, RuntimeError, EventStore> {
     const logFile = input.processName ? `/tmp/${input.processName}.log` : "/tmp/supervisord.log";
+    const id = sandboxId(input);
     return runSbxCmd(
-      [
-        "exec",
-        input.deploymentId,
-        "docker",
-        "exec",
-        `${input.deploymentId}-dev`,
-        "tail",
-        "-f",
-        logFile,
-      ],
+      ["exec", id, "docker", "exec", `${input.deploymentId}-dev`, "tail", "-f", logFile],
       input.rootDir,
     );
   },
@@ -510,10 +575,11 @@ export const dockerSandboxDriver: RuntimeDriver &
   restart(
     input: RuntimeOperationInput & { processName: string },
   ): Effect.Effect<void, RuntimeError, EventStore> {
+    const id = sandboxId(input);
     return runSbxCmd(
       [
         "exec",
-        input.deploymentId,
+        id,
         "docker",
         "exec",
         `${input.deploymentId}-dev`,

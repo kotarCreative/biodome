@@ -3,19 +3,39 @@ import { Effect } from "effect";
 import { parseDuration, type Plan } from "./plan.js";
 import type { RuntimeDriver } from "../runtime/driver.js";
 import { runtimeLayout } from "../runtime/layout.js";
-import { statePath, readState, writeState, removeState } from "../runtime/state.js";
-import { EventStore } from "./events.js";
+import {
+  statePath,
+  readState,
+  writeState,
+  removeState,
+  type DeploymentState,
+} from "../runtime/state.js";
+import {
+  manifestFromBuildResult,
+  writeBuildManifest,
+  readBuildManifest,
+} from "../runtime/build-manifest.js";
+import { EventStore, instrumentOperation, type EventScope } from "./events.js";
 import { RuntimeError, ValidationError } from "./errors.js";
 import {
   supportsArtifacts,
   supportsBuild,
-  supportsExec,
+  supportsInplaceExec,
+  supportsJob,
   supportsRender,
   supportsStart,
   supportsStatus,
   supportsStop,
 } from "../runtime/driver.js";
+import type {
+  BuildableDriver,
+  RenderableDriver,
+  StartableDriver,
+  StatusDriver,
+  StoppableDriver,
+} from "../runtime/driver.js";
 import { agentTaskCommand } from "../agents/registry.js";
+import type { ExecutionPlan } from "../orchestration/execution-plan.js";
 
 export function harnessTaskCommand(plan: Plan, harnessName: string, prompt: string): string[] {
   return agentTaskCommand(plan, harnessName, prompt);
@@ -32,6 +52,7 @@ export function executeTask(
   rootDir: string,
   plan: Plan,
   driver: RuntimeDriver,
+  executionPlan?: ExecutionPlan,
 ): Effect.Effect<TaskResult, RuntimeError, EventStore> {
   const task = plan.deployment?.task;
   if (!task) {
@@ -45,7 +66,7 @@ export function executeTask(
   const startTime = Date.now();
 
   const runEffect = Effect.gen(function* () {
-    const input = { rootDir, outputDir, plan, target, deploymentId };
+    const input = { rootDir, outputDir, plan, target, deploymentId, executionPlan };
 
     const cmd = yield* Effect.try({
       try: () => harnessTaskCommand(plan, task.harness, task.prompt),
@@ -57,7 +78,7 @@ export function executeTask(
       },
     });
 
-    if (!supportsExec(driver)) {
+    if (!supportsJob(driver) && !supportsInplaceExec(driver)) {
       return yield* Effect.fail(
         new RuntimeError({
           message: `Driver "${driver.id}" does not support command execution`,
@@ -87,9 +108,20 @@ export function executeTask(
         }),
       );
     }
+    const driverOps: RuntimeDriver &
+      RenderableDriver &
+      BuildableDriver &
+      StartableDriver &
+      StoppableDriver &
+      StatusDriver = driver;
     const timeoutSeconds = parseDuration(task.timeout);
     const timeoutMs = timeoutSeconds * 1000;
     const store = yield* EventStore;
+    const scope: EventScope = {
+      runId: store.runId,
+      target: targetName,
+      provider: driver.id,
+    };
 
     yield* store.emit("task.started", {
       target: targetName,
@@ -100,30 +132,114 @@ export function executeTask(
 
     const stateFilePath = statePath(rootDir, targetName);
 
+    let state: DeploymentState;
+    let buildManifest: ReturnType<typeof readBuildManifest>;
     if (existsSync(stateFilePath)) {
-      readState(rootDir, targetName, deploymentId, driver.id);
-      const st = yield* driver.status(input);
-      if (st.state !== "running") {
-        yield* driver.stop(input);
+      const existing = readState(rootDir, targetName, deploymentId, driver.id);
+      const st = yield* instrumentOperation(
+        store,
+        scope,
+        "status",
+        {},
+        driverOps.status({ ...input, state: existing }),
+      );
+      if (st.state === "running") {
+        state = existing;
+        buildManifest = readBuildManifest(rootDir, targetName, deploymentId, driver.id);
+      } else {
+        yield* instrumentOperation(
+          store,
+          scope,
+          "stop",
+          { rootDir },
+          driverOps.stop({ ...input, state: existing }),
+        );
         removeState(rootDir, targetName);
-        yield* driver.render(input);
-        yield* driver.build(input);
-        const newState = yield* driver.start(input);
-        writeState(rootDir, targetName, newState);
+        const deployed = yield* deploy();
+        state = deployed.state;
+        buildManifest = deployed.buildManifest;
       }
     } else {
-      yield* driver.render(input);
-      yield* driver.build(input);
-      const newState = yield* driver.start(input);
-      writeState(rootDir, targetName, newState);
+      const deployed = yield* deploy();
+      state = deployed.state;
+      buildManifest = deployed.buildManifest;
     }
 
-    const execResult = yield* driver.exec({
+    function deploy(): Effect.Effect<
+      { state: DeploymentState; buildManifest: ReturnType<typeof readBuildManifest> },
+      RuntimeError,
+      EventStore
+    > {
+      return Effect.gen(function* () {
+        yield* driverOps.render(input);
+        const buildResult = yield* instrumentOperation(
+          store,
+          scope,
+          "build",
+          { rootDir },
+          driverOps.build(input),
+        );
+        const manifest = manifestFromBuildResult({
+          rootDir,
+          targetName,
+          driver: driverOps.id,
+          deploymentId,
+          buildResult,
+          contentId: buildResult.digest ?? deploymentId,
+          provider: buildResult.provider,
+        });
+        writeBuildManifest(rootDir, targetName, manifest);
+        const newState = yield* instrumentOperation(
+          store,
+          scope,
+          "start",
+          { rootDir, build: true },
+          driverOps.start({ ...input, buildManifest: manifest }),
+        );
+        writeState(rootDir, targetName, newState);
+        return {
+          state: readState(rootDir, targetName, deploymentId, driverOps.id),
+          buildManifest: readBuildManifest(rootDir, targetName, deploymentId, driverOps.id),
+        };
+      });
+    }
+
+    const commandInput = {
       ...input,
-      command: cmd,
-      timeoutMs,
-      artifactPaths: task.artifacts,
-    });
+      state,
+      buildManifest,
+    };
+
+    const runCommand = (
+      command: string[],
+      artifactPaths?: string[],
+    ): Effect.Effect<{ exitCode: number; timedOut?: boolean }, RuntimeError, EventStore> => {
+      if (supportsJob(driverOps)) {
+        return instrumentOperation(
+          store,
+          scope,
+          "job",
+          { command },
+          driverOps.runJob({ ...commandInput, command, timeoutMs, artifactPaths }),
+        );
+      }
+      if (supportsInplaceExec(driverOps)) {
+        return instrumentOperation(
+          store,
+          scope,
+          "exec",
+          { command },
+          driverOps.exec({ ...commandInput, command, timeoutMs, artifactPaths }),
+        );
+      }
+      return Effect.fail(
+        new RuntimeError({
+          message: `Driver "${driverOps.id}" does not support command execution`,
+        }),
+      );
+    };
+
+    const execResult = yield* runCommand(cmd, task.artifacts);
 
     const durationMs = Date.now() - startTime;
 
@@ -161,11 +277,7 @@ export function executeTask(
     }
 
     for (const validationCommand of task.validationCommands ?? []) {
-      const validation = yield* driver.exec({
-        ...input,
-        command: validationCommand,
-        timeoutMs,
-      });
+      const validation = yield* runCommand(validationCommand);
       if (validation.timedOut || validation.exitCode !== 0) {
         const reason = validation.timedOut
           ? `validation timed out: ${validationCommand.join(" ")}`
@@ -192,7 +304,10 @@ export function executeTask(
           }),
         );
       }
-      const collected = yield* driver.collectArtifacts({ ...input, paths: task.artifacts });
+      const collected = yield* driver.collectArtifacts({
+        ...commandInput,
+        paths: task.artifacts,
+      });
       taskArtifacts = collected.map((a) => ({
         path: a.path,
         sizeBytes: a.sizeBytes,
@@ -214,8 +329,26 @@ export function executeTask(
   });
 
   const cleanupEffect = Effect.gen(function* () {
-    const input = { rootDir, outputDir, plan, target, deploymentId };
-    if (supportsStop(driver)) yield* driver.stop(input);
+    const input = { rootDir, outputDir, plan, target, deploymentId, executionPlan };
+    const store = yield* EventStore;
+    const scope: EventScope = { runId: store.runId, target: targetName, provider: driver.id };
+    if (supportsStop(driver)) {
+      let validatedState: DeploymentState | undefined;
+      try {
+        validatedState = readState(rootDir, targetName, deploymentId, driver.id);
+      } catch {
+        validatedState = undefined;
+      }
+      if (validatedState) {
+        yield* instrumentOperation(
+          store,
+          scope,
+          "stop",
+          { rootDir },
+          driver.stop({ ...input, state: validatedState }),
+        );
+      }
+    }
     removeState(rootDir, targetName);
   });
 

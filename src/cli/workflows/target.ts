@@ -1,10 +1,11 @@
 import { Effect } from "effect";
 import { RuntimeError } from "../../core/errors.js";
-import { EventStore } from "../../core/events.js";
+import { EventStore, instrumentOperation, type EventScope } from "../../core/events.js";
 import {
   supportsAvailability,
   supportsBuild,
-  supportsExec,
+  supportsInplaceExec,
+  supportsJob,
   supportsLogs,
   supportsRender,
   supportsRestart,
@@ -14,10 +15,64 @@ import {
 } from "../../runtime/driver.js";
 import { readState, removeState, writeState } from "../../runtime/state.js";
 import {
+  manifestFromBuildResult,
+  writeBuildManifest,
+  readBuildManifest,
+  type BuildManifest,
+} from "../../runtime/build-manifest.js";
+import {
   createTargetOperation,
+  type TargetOperation,
   type TargetOperationDependencies,
   operationInput,
 } from "../target-operation.js";
+
+/** Pass validated deployment state and the durable build manifest to an operation. */
+function operationInputWithState(operation: TargetOperation) {
+  const state = readState(
+    operation.rootDir,
+    operation.target.name,
+    operation.deploymentId,
+    operation.driver.id,
+  );
+  const buildManifest = readBuildManifest(
+    operation.rootDir,
+    operation.target.name,
+    operation.deploymentId,
+    operation.driver.id,
+  );
+  return { ...operationInput(operation), state, buildManifest };
+}
+
+function persistBuildManifest(
+  operation: TargetOperation,
+  buildResult: { imageRef?: string; digest?: string; provider?: Readonly<Record<string, string>> },
+): BuildManifest {
+  const manifest = manifestFromBuildResult({
+    rootDir: operation.rootDir,
+    targetName: operation.target.name,
+    driver: operation.driver.id,
+    deploymentId: operation.deploymentId,
+    buildResult,
+    contentId: buildResult.digest ?? operation.deploymentId,
+    provider: buildResult.provider,
+  });
+  writeBuildManifest(operation.rootDir, operation.target.name, manifest);
+  return manifest;
+}
+
+function readCurrentBuildManifest(operation: TargetOperation): BuildManifest | undefined {
+  try {
+    return readBuildManifest(
+      operation.rootDir,
+      operation.target.name,
+      operation.deploymentId,
+      operation.driver.id,
+    );
+  } catch {
+    return undefined;
+  }
+}
 
 function planLoaded(
   operation: {
@@ -55,7 +110,16 @@ export function buildWorkflow(
     if (!supportsBuild(driver)) return yield* unsupported(driver.id, "lifecycle.build");
     yield* driver.ensureAvailable(operation.target);
     yield* driver.render(operationInput(operation));
-    yield* driver.build(operationInput(operation));
+    const store = yield* EventStore;
+    const scope: EventScope = { runId: store.runId, target: targetName, provider: driver.id };
+    const buildResult = yield* instrumentOperation(
+      store,
+      scope,
+      "build",
+      { rootDir },
+      driver.build(operationInput(operation)),
+    );
+    persistBuildManifest(operation, buildResult);
     return { message: `Target "${targetName}" built` };
   });
 }
@@ -73,14 +137,36 @@ export function upWorkflow(
     if (!supportsAvailability(driver)) return yield* unsupported(driver.id, "availability checks");
     if (!supportsStart(driver)) return yield* unsupported(driver.id, "lifecycle.start");
     yield* driver.ensureAvailable(operation.target);
+    const store = yield* EventStore;
+    const scope: EventScope = { runId: store.runId, target: targetName, provider: driver.id };
+    let buildManifest: BuildManifest | undefined = readCurrentBuildManifest(operation);
     if (options.build) {
       if (!supportsRender(driver)) return yield* unsupported(driver.id, "lifecycle.build");
       if (!supportsBuild(driver)) return yield* unsupported(driver.id, "lifecycle.build");
       yield* driver.render(operationInput(operation));
-      yield* driver.build(operationInput(operation));
+      const buildResult = yield* instrumentOperation(
+        store,
+        scope,
+        "build",
+        { rootDir },
+        driver.build(operationInput(operation)),
+      );
+      buildManifest = persistBuildManifest(operation, buildResult);
     }
-    const state = yield* driver.start(operationInput(operation));
+    const manifest =
+      buildManifest ??
+      (yield* new RuntimeError({
+        message: `No build manifest found for target "${targetName}". Run "biodome build ${targetName}" first.`,
+      }));
+    const state = yield* instrumentOperation(
+      store,
+      scope,
+      "start",
+      { rootDir, build: options.build ?? false },
+      driver.start({ ...operationInput(operation), buildManifest: manifest }),
+    );
     writeState(rootDir, targetName, state);
+    const validated = readState(rootDir, targetName, operation.deploymentId, driver.id);
     yield* Effect.logInfo(`Target "${targetName}" is running`);
     if (options.wait) {
       if (!supportsStop(driver)) return yield* unsupported(driver.id, "lifecycle.stop");
@@ -88,7 +174,13 @@ export function upWorkflow(
       yield* Effect.callback<void, never, never>((resume) => {
         process.on("SIGINT", () => resume(Effect.void));
       });
-      yield* driver.stop(operationInput(operation));
+      yield* instrumentOperation(
+        store,
+        scope,
+        "stop",
+        { rootDir },
+        driver.stop({ ...operationInput(operation), state: validated }),
+      );
       removeState(rootDir, targetName);
     }
     return { message: `Target "${targetName}" is running`, waiting: Boolean(options.wait) };
@@ -107,10 +199,22 @@ export function downWorkflow(
       { dryRun: true },
       dependencies,
     );
-    readState(rootDir, targetName, operation.deploymentId, operation.driver.id);
+    const state = readState(rootDir, targetName, operation.deploymentId, operation.driver.id);
     if (!supportsStop(operation.driver))
       return yield* unsupported(operation.driver.id, "lifecycle.stop");
-    yield* operation.driver.stop(operationInput(operation));
+    const store = yield* EventStore;
+    const scope: EventScope = {
+      runId: store.runId,
+      target: targetName,
+      provider: operation.driver.id,
+    };
+    yield* instrumentOperation(
+      store,
+      scope,
+      "stop",
+      { rootDir },
+      operation.driver.stop({ ...operationInput(operation), state }),
+    );
     removeState(rootDir, targetName);
     return { message: `Target "${targetName}" stopped` };
   });
@@ -129,9 +233,33 @@ export function execWorkflow(
   return Effect.gen(function* () {
     const operation = yield* createTargetOperation(rootDir, targetName, {}, dependencies);
     yield* planLoaded(operation, targetName);
-    if (!supportsExec(operation.driver))
-      return yield* unsupported(operation.driver.id, "exec.command");
-    yield* operation.driver.exec({ ...operationInput(operation), command });
+    const store = yield* EventStore;
+    const scope: EventScope = {
+      runId: store.runId,
+      target: targetName,
+      provider: operation.driver.id,
+    };
+    if (supportsJob(operation.driver)) {
+      const input = operationInputWithState(operation);
+      yield* instrumentOperation(
+        store,
+        scope,
+        "job",
+        { command },
+        operation.driver.runJob({ ...input, command }),
+      );
+    } else if (supportsInplaceExec(operation.driver)) {
+      const input = operationInputWithState(operation);
+      yield* instrumentOperation(
+        store,
+        scope,
+        "exec",
+        { command },
+        operation.driver.exec({ ...input, command }),
+      );
+    } else {
+      return yield* unsupported(operation.driver.id, "command execution");
+    }
     return { message: `Command completed on target "${targetName}"` };
   }).pipe(Effect.scoped);
 }
@@ -151,7 +279,19 @@ export function logsWorkflow(
     );
     if (!supportsLogs(operation.driver))
       return yield* unsupported(operation.driver.id, "logs.stream");
-    yield* operation.driver.logs({ ...operationInput(operation), processName });
+    const store = yield* EventStore;
+    const scope: EventScope = {
+      runId: store.runId,
+      target: targetName,
+      provider: operation.driver.id,
+    };
+    yield* instrumentOperation(
+      store,
+      scope,
+      "logs",
+      { processName },
+      operation.driver.logs({ ...operationInput(operation), processName }),
+    );
   }).pipe(Effect.scoped);
 }
 
@@ -169,7 +309,7 @@ export function psWorkflow(
     );
     if (!supportsStatus(operation.driver))
       return yield* unsupported(operation.driver.id, "status.read");
-    const status = yield* operation.driver.status(operationInput(operation));
+    const status = yield* operation.driver.status(operationInputWithState(operation));
     return { status };
   });
 }
@@ -188,17 +328,42 @@ export function statusWorkflow(
     );
     if (!supportsStatus(operation.driver))
       return yield* unsupported(operation.driver.id, "status.read");
-    const status = yield* operation.driver.status(operationInput(operation));
-    if (operation.driver.capabilities.has("process.status") && supportsExec(operation.driver)) {
-      yield* operation.driver.exec({
-        ...operationInput(operation),
-        command: ["supervisorctl", "-c", operation.layout.container.supervisordConfig, "status"],
-      });
+    const input = operationInputWithState(operation);
+    const store = yield* EventStore;
+    const scope: EventScope = {
+      runId: store.runId,
+      target: targetName,
+      provider: operation.driver.id,
+    };
+    const status = yield* instrumentOperation(
+      store,
+      scope,
+      "status",
+      {},
+      operation.driver.status(input),
+    );
+    if (
+      operation.driver.capabilities.has("process.status") &&
+      supportsInplaceExec(operation.driver)
+    ) {
+      yield* instrumentOperation(
+        store,
+        scope,
+        "exec",
+        {
+          command: ["supervisorctl", "-c", operation.layout.container.supervisordConfig, "status"],
+        },
+        operation.driver.exec({
+          ...input,
+          command: ["supervisorctl", "-c", operation.layout.container.supervisordConfig, "status"],
+        }),
+      );
     }
     return {
       status,
       hasProcessStatus:
-        operation.driver.capabilities.has("process.status") && supportsExec(operation.driver),
+        operation.driver.capabilities.has("process.status") &&
+        supportsInplaceExec(operation.driver),
     };
   }).pipe(Effect.scoped);
 }
@@ -216,7 +381,19 @@ export function restartWorkflow(
       if (!supportsRestart(operation.driver)) {
         return yield* unsupported(operation.driver.id, "process.signal");
       }
-      yield* operation.driver.restart({ ...operationInput(operation), processName });
+      const store = yield* EventStore;
+      const scope: EventScope = {
+        runId: store.runId,
+        target: targetName,
+        provider: operation.driver.id,
+      };
+      yield* instrumentOperation(
+        store,
+        scope,
+        "restart",
+        { processName },
+        operation.driver.restart({ ...operationInput(operation), processName }),
+      );
     } else {
       const skipped: string[] = [];
       for (const process of operation.plan.runtime.processes.filter(
@@ -229,10 +406,22 @@ export function restartWorkflow(
           );
           continue;
         }
-        yield* operation.driver.restart({
-          ...operationInput(operation),
-          processName: process.name,
-        });
+        const store = yield* EventStore;
+        const scope: EventScope = {
+          runId: store.runId,
+          target: targetName,
+          provider: operation.driver.id,
+        };
+        yield* instrumentOperation(
+          store,
+          scope,
+          "restart",
+          { processName: process.name },
+          operation.driver.restart({
+            ...operationInput(operation),
+            processName: process.name,
+          }),
+        );
       }
       return { message: `Restart completed on target "${targetName}"`, skipped };
     }

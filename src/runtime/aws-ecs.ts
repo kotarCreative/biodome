@@ -1,5 +1,6 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Effect } from "effect";
 import { ECRClient, GetAuthorizationTokenCommand } from "@aws-sdk/client-ecr";
@@ -25,11 +26,13 @@ import type {
   AvailableDriver,
   ArtifactDriver,
   BuildableDriver,
-  ExecutableDriver,
+  JobDriver,
   LogDriver,
   RenderableDriver,
   RuntimeDriver,
   RuntimeOperationInput,
+  StartInput,
+  JobInput,
   BuildResult,
   DeploymentState,
   CommandResult,
@@ -86,6 +89,24 @@ function isAwsErrorNamed(error: unknown, name: string): boolean {
   return error !== null && typeof error === "object" && "name" in error && error.name === name;
 }
 
+/** Read the immutable OCI image digest emitted by `docker buildx build --push`. */
+export function buildxImageDigest(metadata: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(metadata) as unknown;
+  } catch {
+    throw new RuntimeError({ message: "Docker Buildx returned invalid image metadata" });
+  }
+  const digest =
+    parsed && typeof parsed === "object" && "containerimage.digest" in parsed
+      ? parsed["containerimage.digest"]
+      : undefined;
+  if (typeof digest !== "string" || !/^sha256:[a-f0-9]{64}$/i.test(digest)) {
+    throw new RuntimeError({ message: "Docker Buildx did not return an immutable image digest" });
+  }
+  return digest;
+}
+
 function ensureLogGroup(
   cloudwatch: CloudWatchLogsClient,
   logGroupName: string,
@@ -114,7 +135,7 @@ export function createAwsEcsDriver(
   BuildableDriver &
   StartableDriver &
   StoppableDriver &
-  ExecutableDriver &
+  JobDriver &
   ArtifactDriver &
   StatusDriver &
   LogDriver {
@@ -134,13 +155,17 @@ export function createAwsEcsDriver(
     return `/biodome/${project}/${targetName}`;
   }
 
-  function readStateFile(outputDir: string): { taskArn?: string; taskDefinitionArn?: string } {
-    try {
-      const parsed = JSON.parse(readFileSync(join(outputDir, "state.json"), "utf-8"));
-      return parsed.resourceIds ?? {};
-    } catch {
-      return {};
+  function requireState(
+    input: RuntimeOperationInput,
+    operation: string,
+  ): { taskArn?: string; taskDefinitionArn?: string } {
+    const state = input.state;
+    if (!state) {
+      throw new RuntimeError({
+        message: `The aws-ecs driver cannot ${operation} without validated deployment state`,
+      });
     }
+    return state.resourceIds;
   }
 
   const driver: RuntimeDriver &
@@ -149,7 +174,7 @@ export function createAwsEcsDriver(
     BuildableDriver &
     StartableDriver &
     StoppableDriver &
-    ExecutableDriver &
+    JobDriver &
     ArtifactDriver &
     StatusDriver &
     LogDriver = {
@@ -161,7 +186,7 @@ export function createAwsEcsDriver(
       "lifecycle.stop",
       "status.read",
       "logs.stream",
-      "exec.command",
+      "job.run",
       "artifact.collect",
     ),
 
@@ -265,20 +290,37 @@ export function createAwsEcsDriver(
             }),
         });
 
-        yield* runDockerCmd([
-          "buildx",
-          "build",
-          "--platform",
-          "linux/amd64",
-          "-t",
-          fullImage,
-          "--push",
-          "-f",
-          join(input.outputDir, "Dockerfile"),
-          input.rootDir,
-        ]);
-
-        return { imageRef: fullImage, digest: imageTag };
+        const metadataDir = yield* Effect.try({
+          try: () => mkdtempSync(join(tmpdir(), "biodome-buildx-")),
+          catch: (error) =>
+            new RuntimeError({
+              message: `Failed to create Docker Buildx metadata directory: ${platformErrorMessage(error)}`,
+            }),
+        });
+        const metadataPath = join(metadataDir, "metadata.json");
+        try {
+          yield* runDockerCmd([
+            "buildx",
+            "build",
+            "--platform",
+            "linux/amd64",
+            "-t",
+            fullImage,
+            "--push",
+            "--metadata-file",
+            metadataPath,
+            "-f",
+            join(input.outputDir, "Dockerfile"),
+            input.rootDir,
+          ]);
+          const digest = yield* Effect.try({
+            try: () => buildxImageDigest(readFileSync(metadataPath, "utf-8")),
+            catch: (error) => wrapError(error),
+          });
+          return { imageRef: `${opts.repository}@${digest}`, digest };
+        } finally {
+          rmSync(metadataDir, { recursive: true, force: true });
+        }
       }).pipe(
         Effect.provide(NodeRuntime),
         Effect.scoped,
@@ -286,7 +328,7 @@ export function createAwsEcsDriver(
       );
     },
 
-    start(input: RuntimeOperationInput): Effect.Effect<DeploymentState, RuntimeError, EventStore> {
+    start(input: StartInput): Effect.Effect<DeploymentState, RuntimeError, EventStore> {
       return Effect.gen(function* () {
         const opts = validateAwsEcsOptions(input.target.options);
         const c = getClients(opts);
@@ -304,7 +346,7 @@ export function createAwsEcsDriver(
               runtimeLayout(input.rootDir, input.target.name).container.supervisordConfig,
             ]
           : undefined;
-        const imageRef = imageUri(opts, input.deploymentId);
+        const imageRef = input.buildManifest.imageRef ?? imageUri(opts, input.deploymentId);
 
         yield* ensureLogGroup(c.cloudwatch, lgGroup);
 
@@ -403,8 +445,7 @@ export function createAwsEcsDriver(
       return Effect.gen(function* () {
         const opts = validateAwsEcsOptions(input.target.options);
         const c = getClients(opts);
-        const state = readStateFile(input.outputDir);
-        const { taskArn, taskDefinitionArn } = state;
+        const { taskArn, taskDefinitionArn } = requireState(input, "stop");
 
         if (!taskArn) return;
 
@@ -485,19 +526,13 @@ export function createAwsEcsDriver(
       );
     },
 
-    exec(
-      input: RuntimeOperationInput & {
-        command: string[];
-        timeoutMs?: number;
-        artifactPaths?: string[];
-      },
-    ): Effect.Effect<CommandResult, RuntimeError, EventStore> {
+    runJob(input: JobInput): Effect.Effect<CommandResult, RuntimeError, EventStore> {
       return Effect.gen(function* () {
         const opts = validateAwsEcsOptions(input.target.options);
         const c = getClients(opts);
         const family = familyName(input.deploymentId);
         const lgGroup = logGroupName(input.plan.project, input.target.name);
-        const imageRef = imageUri(opts, input.deploymentId);
+        const imageRef = input.buildManifest.imageRef ?? imageUri(opts, input.deploymentId);
         const startTime = Date.now();
 
         const containerEnv = buildContainerEnvironment(input.plan);
@@ -746,8 +781,7 @@ export function createAwsEcsDriver(
       return Effect.gen(function* () {
         const opts = validateAwsEcsOptions(input.target.options);
         const c = getClients(opts);
-        const state = readStateFile(input.outputDir);
-        const taskArn = state.taskArn;
+        const { taskArn } = requireState(input, "query status");
 
         if (!taskArn) {
           return { state: "unknown" as const, message: "No task ARN in state" };

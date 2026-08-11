@@ -19,6 +19,7 @@ import {
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { runtimeLayout } from "../runtime/layout.js";
+import { RuntimeError } from "./errors.js";
 
 export const EVENT_TYPES = [
   "run.started",
@@ -42,11 +43,15 @@ export const EVENT_TYPES = [
   "runtime.exec.started",
   "runtime.exec.completed",
   "runtime.exec.failed",
+  "runtime.job.started",
+  "runtime.job.completed",
+  "runtime.job.failed",
   "runtime.restart.started",
   "runtime.restart.completed",
   "runtime.restart.failed",
   "runtime.logs.started",
   "runtime.logs.completed",
+  "runtime.logs.failed",
   "runtime.status.started",
   "runtime.status.completed",
   "runtime.status.failed",
@@ -67,12 +72,22 @@ export type EventType = (typeof EVENT_TYPES)[number];
 
 export const EventTypeSchema = Schema.Literals(EVENT_TYPES);
 
+export const EventScopeSchema = Schema.Struct({
+  runId: Schema.String,
+  target: Schema.optional(Schema.String),
+  provider: Schema.optional(Schema.String),
+});
+
+/** Common run/target/provider scope carried by every lifecycle and task event. */
+export type EventScope = typeof EventScopeSchema.Type;
+
 export const SandboxEventSchema = Schema.Struct({
   id: Schema.String,
   runId: Schema.String,
   sequence: Schema.Number,
   timestamp: Schema.String,
   type: EventTypeSchema,
+  scope: EventScopeSchema,
   data: Schema.Unknown,
 });
 
@@ -100,11 +115,15 @@ export interface EventData {
   "runtime.exec.started": { command: string[] };
   "runtime.exec.completed": { command: string[]; durationMs: number };
   "runtime.exec.failed": { command: string[]; durationMs: number; error: string };
+  "runtime.job.started": { command: string[] };
+  "runtime.job.completed": { command: string[]; durationMs: number };
+  "runtime.job.failed": { command: string[]; durationMs: number; error: string };
   "runtime.restart.started": { processName: string };
   "runtime.restart.completed": { processName: string; durationMs: number };
   "runtime.restart.failed": { processName: string; durationMs: number; error: string };
   "runtime.logs.started": { processName?: string };
   "runtime.logs.completed": { processName?: string };
+  "runtime.logs.failed": { processName?: string; durationMs: number; error: string };
   "runtime.status.started": {};
   "runtime.status.completed": { durationMs: number };
   "runtime.status.failed": { durationMs: number; error: string };
@@ -142,6 +161,7 @@ export interface EventStore {
   readonly emit: <T extends EventType>(
     type: T,
     data: EventData[T],
+    scope?: EventScope,
   ) => Effect.Effect<void, never, never>;
   readonly events: () => Effect.Effect<readonly SandboxEvent[]>;
   readonly close: () => Effect.Effect<void>;
@@ -178,6 +198,8 @@ export interface FileEventStoreOptions {
   readonly maxSize?: number;
   readonly maxRotations?: number;
   readonly maxFiles?: number;
+  readonly target?: string;
+  readonly provider?: string;
 }
 
 export function createFileEventStore(options: FileEventStoreOptions): EventStore {
@@ -191,6 +213,12 @@ export function createFileEventStore(options: FileEventStoreOptions): EventStore
   let closed = false;
   let bytes = existsSync(path) ? statSync(path).size : 0;
   let writes = Promise.resolve();
+
+  const defaultScope = (override?: EventScope): EventScope => ({
+    runId,
+    target: override?.target ?? options.target,
+    provider: override?.provider ?? options.provider,
+  });
 
   const ensureDir = () => {
     const dir = dirname(path);
@@ -212,7 +240,7 @@ export function createFileEventStore(options: FileEventStoreOptions): EventStore
     for (const file of files.slice(0, Math.max(0, files.length - maxFiles))) rmSync(file.path);
   };
 
-  const write = (type: EventType, data: EventData[EventType]) => {
+  const write = (type: EventType, data: EventData[EventType], scope: EventScope) => {
     if (closed) {
       throw new Error("EventStore is closed");
     }
@@ -223,6 +251,7 @@ export function createFileEventStore(options: FileEventStoreOptions): EventStore
       sequence,
       timestamp: now().toISOString(),
       type,
+      scope,
       data,
     };
     ensureDir();
@@ -255,9 +284,13 @@ export function createFileEventStore(options: FileEventStoreOptions): EventStore
     prune();
   };
 
-  const emit: EventStore["emit"] = <T extends EventType>(type: T, data: EventData[T]) =>
+  const emit: EventStore["emit"] = <T extends EventType>(
+    type: T,
+    data: EventData[T],
+    scope?: EventScope,
+  ) =>
     Effect.promise(() => {
-      const writeNext = writes.then(() => write(type, data));
+      const writeNext = writes.then(() => write(type, data, defaultScope(scope)));
       writes = writeNext.catch(() => undefined);
       return writeNext;
     }).pipe(Effect.tap(() => Effect.logInfo(`event:${type}`)));
@@ -292,7 +325,6 @@ export const NoOpEventStoreLive = (runId = "noop"): Layer.Layer<EventStore> =>
     events: () => Effect.succeed([]),
     close: () => Effect.void,
   });
-
 export function eventLogPath(rootDir: string, runId: string, targetName?: string): string {
   return join(runtimeLayout(rootDir, targetName).host.logs, `events-${runId}.jsonl`);
 }
@@ -319,7 +351,18 @@ export function readEventFile(path: string): EventReadResult {
   for (const [index, line] of readFileSync(path, "utf-8").split("\n").entries()) {
     if (line.trim().length === 0) continue;
     try {
-      events.push(Schema.decodeSync(SandboxEventSchema)(JSON.parse(line)));
+      const parsed: unknown = JSON.parse(line);
+      // Scope was added after event logs were already persisted. Preserve
+      // readability of legacy records by deriving their minimal scope.
+      const normalized =
+        typeof parsed === "object" &&
+        parsed !== null &&
+        !Array.isArray(parsed) &&
+        !Object.prototype.hasOwnProperty.call(parsed, "scope")
+          ? { ...parsed, scope: { runId: (parsed as { runId?: unknown }).runId } }
+          : parsed;
+      const decoded = Schema.decodeUnknownSync(SandboxEventSchema)(normalized);
+      events.push(decoded);
     } catch (error) {
       diagnostics.push({
         path,
@@ -334,5 +377,66 @@ export function readEventFile(path: string): EventReadResult {
 export function readEventsFromPath(path: string): Effect.Effect<readonly SandboxEvent[]> {
   return Effect.sync(() => {
     return readEventFile(path).events;
+  });
+}
+
+// --- Runtime operation instrumentation ---
+
+export type RuntimeOperationKind =
+  | "build"
+  | "start"
+  | "stop"
+  | "exec"
+  | "job"
+  | "logs"
+  | "status"
+  | "restart";
+
+const runtimeOperationTypes: Readonly<
+  Record<RuntimeOperationKind, readonly [EventType, EventType, EventType]>
+> = {
+  build: ["runtime.build.started", "runtime.build.completed", "runtime.build.failed"],
+  start: ["runtime.start.started", "runtime.start.completed", "runtime.start.failed"],
+  stop: ["runtime.stop.started", "runtime.stop.completed", "runtime.stop.failed"],
+  exec: ["runtime.exec.started", "runtime.exec.completed", "runtime.exec.failed"],
+  job: ["runtime.job.started", "runtime.job.completed", "runtime.job.failed"],
+  logs: ["runtime.logs.started", "runtime.logs.completed", "runtime.logs.failed"],
+  status: ["runtime.status.started", "runtime.status.completed", "runtime.status.failed"],
+  restart: ["runtime.restart.started", "runtime.restart.completed", "runtime.restart.failed"],
+};
+
+/**
+ * Emit started/completed/failed events around a single driver operation at the
+ * orchestration or workflow boundary. Drivers themselves never emit lifecycle
+ * events; this is the single instrumentation point.
+ */
+export function instrumentOperation<A, R>(
+  store: EventStore,
+  scope: EventScope,
+  kind: RuntimeOperationKind,
+  started: EventData[(typeof runtimeOperationTypes)[RuntimeOperationKind][0]],
+  effect: Effect.Effect<A, RuntimeError, R>,
+): Effect.Effect<A, RuntimeError, R> {
+  const [startedType, completedType, failedType] = runtimeOperationTypes[kind];
+  return Effect.gen(function* () {
+    yield* store.emit(startedType, started, scope);
+    const startedAt = Date.now();
+    const result = yield* effect.pipe(
+      Effect.tap(() =>
+        store.emit(completedType, { ...started, durationMs: Date.now() - startedAt }, scope),
+      ),
+      Effect.catch((error) =>
+        Effect.gen(function* () {
+          const message = error instanceof Error ? error.message : String(error);
+          yield* store.emit(
+            failedType,
+            { ...started, durationMs: Date.now() - startedAt, error: message },
+            scope,
+          );
+          return yield* Effect.fail(error);
+        }),
+      ),
+    );
+    return result;
   });
 }

@@ -38,7 +38,20 @@ export function readState(
     });
   }
 
-  const raw = JSON.parse(readFileSync(path, "utf-8")) as DeploymentState;
+  let raw: DeploymentState;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf-8")) as DeploymentState;
+  } catch {
+    throw new ValidationError({
+      message: `State file for target "${targetName}" is corrupt or not valid JSON`,
+    });
+  }
+
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new ValidationError({
+      message: `State file for target "${targetName}" is corrupt or not a JSON object`,
+    });
+  }
 
   if (raw.schemaVersion !== CURRENT_SCHEMA_VERSION) {
     throw new ValidationError({

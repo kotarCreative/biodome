@@ -110,7 +110,9 @@ function devService(plan: Plan, paths: ComposePaths): ComposeService {
       context: paths.buildContext ?? "..",
       dockerfile: paths.dockerfile ?? ".biodome-build/Dockerfile",
     },
-    image: `${plan.project}-dev:latest`,
+    // A build sets this variable to a private staging tag, while start pins it
+    // to the immutable image recorded in the build manifest.
+    image: `\${BIODOME_DEV_IMAGE:-${plan.project}-dev:latest}`,
     container_name: `${plan.deployment?.deploymentId ?? plan.project}-dev`,
     working_dir: "/workspace",
     volumes: [`${paths.workspace ?? ".."}:/workspace`],

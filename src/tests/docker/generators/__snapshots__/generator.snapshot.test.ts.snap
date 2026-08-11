@@ -92,7 +92,7 @@ services:
     build:
       context: ..
       dockerfile: .biodome-build/Dockerfile
-    image: multi-app-dev:latest
+    image: \${BIODOME_DEV_IMAGE:-multi-app-dev:latest}
     container_name: multi-app-dev
     working_dir: /workspace
     volumes:
@@ -170,7 +170,7 @@ services:
     build:
       context: ..
       dockerfile: .biodome-build/Dockerfile
-    image: multi-lang-dev:latest
+    image: \${BIODOME_DEV_IMAGE:-multi-lang-dev:latest}
     container_name: multi-lang-dev
     working_dir: /workspace
     volumes:
@@ -228,7 +228,7 @@ services:
     build:
       context: ..
       dockerfile: .biodome-build/Dockerfile
-    image: bash-app-dev:latest
+    image: \${BIODOME_DEV_IMAGE:-bash-app-dev:latest}
     container_name: bash-app-dev
     working_dir: /workspace
     volumes:
@@ -330,7 +330,7 @@ services:
     build:
       context: ..
       dockerfile: .biodome-build/Dockerfile
-    image: my-app-dev:latest
+    image: \${BIODOME_DEV_IMAGE:-my-app-dev:latest}
     container_name: my-app-dev
     working_dir: /workspace
     volumes:
@@ -470,7 +470,7 @@ services:
     build:
       context: ..
       dockerfile: .biodome-build/Dockerfile
-    image: php-app-dev:latest
+    image: \${BIODOME_DEV_IMAGE:-php-app-dev:latest}
     container_name: php-app-dev
     working_dir: /workspace
     volumes:
@@ -548,7 +548,7 @@ services:
     build:
       context: ..
       dockerfile: .biodome-build/Dockerfile
-    image: py-app-dev:latest
+    image: \${BIODOME_DEV_IMAGE:-py-app-dev:latest}
     container_name: py-app-dev
     working_dir: /workspace
     volumes:

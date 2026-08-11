@@ -22,7 +22,7 @@ export function runtimeDriverMetadataRejectsInvalidSurfaces(): void {
     expect(() =>
       validateRuntimeDriver({
         id: "invalid-contract-driver",
-        capabilities: new Set(["exec.command"]),
+        capabilities: new Set(["exec.inplace"]),
       }),
     ).toThrow(RuntimeError);
   });

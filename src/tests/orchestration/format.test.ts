@@ -15,7 +15,7 @@ describe("formatCompatibilityReport", () => {
         },
       ],
       warnings: [{ kind: "capability", level: "preferred", subject: "snapshot.create" }],
-      supported: ["exec.command", "artifact.collect"],
+      supported: ["exec.inplace", "artifact.collect"],
     });
 
     expect(output).toBe(
@@ -26,7 +26,7 @@ describe("formatCompatibilityReport", () => {
         "  - network.policy: allowlisted egress",
         "Warnings:",
         "  - snapshot.create",
-        "Supported capabilities: artifact.collect, exec.command",
+        "Supported capabilities: artifact.collect, exec.inplace",
       ].join("\n"),
     );
   });

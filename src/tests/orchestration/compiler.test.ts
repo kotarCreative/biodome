@@ -56,7 +56,7 @@ describe("compileExecutionPlan", () => {
       artifacts: [{ path: "review.md", required: false }],
     });
     expect(executionPlan.task.capabilities).toEqual([
-      { capability: "exec.command", level: "required", reason: "agent tasks execute a command" },
+      { capability: "exec.inplace", level: "required", reason: "agent tasks execute a command" },
       {
         capability: "artifact.collect",
         level: "required",
@@ -79,7 +79,7 @@ describe("compileExecutionPlan", () => {
   it("only requires artifact collection for tasks that declare artifacts", () => {
     expect(
       compileExecutionPlan(legacyPlan([])).task.capabilities.map((item) => item.capability),
-    ).toEqual(["exec.command"]);
+    ).toEqual(["exec.inplace"]);
   });
 
   it("requires a selected task and produces stable content digests", () => {

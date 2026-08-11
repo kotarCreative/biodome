@@ -38,6 +38,7 @@ function taskPlan(): Plan {
       artifacts: ["review.md"],
       timeout: "1m",
       cleanup: "always",
+      workspace: { strategy: "clone" },
     },
   };
   return plan;
@@ -51,12 +52,12 @@ function driver(): RuntimeDriver {
       "lifecycle.start",
       "lifecycle.stop",
       "status.read",
-      "exec.command",
+      "exec.inplace",
       "artifact.collect",
     ),
     render: () => Effect.succeed([]),
     ensureAvailable: () => Effect.void,
-    build: () => Effect.succeed({}),
+    build: () => Effect.succeed({ imageRef: "fake:image" }),
     start: () =>
       Effect.succeed({
         driver: "fake",
@@ -102,7 +103,7 @@ describe("orchestrateTask", () => {
     const start = vi.fn(base.start);
     const incompatible: RuntimeDriver = {
       ...base,
-      capabilities: capabilitiesOf("exec.command"),
+      capabilities: capabilitiesOf("exec.inplace"),
       start,
     };
     const outcome = await Effect.runPromise(

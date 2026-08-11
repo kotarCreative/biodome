@@ -90,12 +90,12 @@ describe("runtime driver registry", () => {
     const registry = createDriverRegistry();
     registry.registerDriver("invalid", async () => ({
       id: "invalid",
-      capabilities: capabilitiesOf("exec.command"),
+      capabilities: capabilitiesOf("exec.inplace"),
     }));
 
     await expect(Effect.runPromise(registry.getDriver("invalid"))).rejects.toMatchObject({
       _tag: "RuntimeError",
-      message: expect.stringContaining("declares exec.command but does not implement exec()"),
+      message: expect.stringContaining("declares exec.inplace but does not implement exec()"),
     });
   });
 
@@ -108,7 +108,7 @@ describe("runtime driver registry", () => {
 
     await expect(Effect.runPromise(registry.getDriver("invalid"))).rejects.toMatchObject({
       _tag: "RuntimeError",
-      message: expect.stringContaining("implements exec() without declaring exec.command"),
+      message: expect.stringContaining("implements exec() without declaring exec.inplace"),
     });
   });
 
