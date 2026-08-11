@@ -3,12 +3,10 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildPlan } from "../../builder/index.js";
-import {
-  generateDockerfile,
-  generateCompose,
-  generateSupervisordConf,
-  generateHealthcheckScripts,
-} from "../../docker/generator.js";
+import { generateCompose } from "../../docker/generators/compose.js";
+import { generateDockerfile } from "../../docker/generators/dockerfile.js";
+import { generateHealthcheckScripts } from "../../docker/generators/healthchecks.js";
+import { generateSupervisordConf } from "../../docker/generators/supervisor.js";
 
 function hasDocker(): boolean {
   try {

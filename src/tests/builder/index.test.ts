@@ -10,7 +10,8 @@ import {
   validateFeatures,
   validatePlan,
 } from "../../builder/index.js";
-import { generateDockerfile, generateCompose } from "../../docker/generator.js";
+import { generateCompose } from "../../docker/generators/compose.js";
+import { generateDockerfile } from "../../docker/generators/dockerfile.js";
 
 function createProject(dir: string, files: Record<string, string>): void {
   rmSync(dir, { recursive: true, force: true });

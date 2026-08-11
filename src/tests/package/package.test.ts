@@ -26,7 +26,9 @@ describe("published package", () => {
       | Record<string, { filename: string; files: Array<{ path: string }> }>;
     const { filename, files } = Array.isArray(packed) ? packed[0] : Object.values(packed)[0];
 
-    expect(files.length).toBeLessThan(200);
+    // Guards against accidentally shipping src/tests/docs; dist grows with the
+    // number of generator modules but never approaches the source tree size.
+    expect(files.length).toBeLessThan(230);
     expect(files.map((file) => file.path)).not.toEqual(
       expect.arrayContaining([expect.stringMatching(/^(\.opencode|src|docs\/design|test)/)]),
     );

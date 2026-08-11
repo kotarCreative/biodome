@@ -1,0 +1,71 @@
+import { describe, expect, it } from "vitest";
+import { generateRepoScripts } from "../../../docker/generators/repositories.js";
+import { createPlan } from "../../../core/plan.js";
+
+describe("generateRepoScripts", () => {
+  it("generates a clone script for a new repo", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.repos.push({
+      name: "backend",
+      url: "https://github.com/acme/backend.git",
+      path: "/workspace/repos/backend",
+      branch: "main",
+    });
+
+    const scripts = generateRepoScripts(plan);
+    const script = scripts["backend.sh"];
+    expect(script).toContain("#!/bin/sh");
+    expect(script).toContain("REPO_DIR=/workspace/repos/backend");
+    expect(script).toContain(
+      'git clone --branch main https://github.com/acme/backend.git "$REPO_DIR"',
+    );
+    expect(script).toContain("git pull origin main");
+  });
+
+  it("includes a depth flag when configured", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.repos.push({
+      name: "backend",
+      url: "https://github.com/acme/backend.git",
+      path: "/workspace/repos/backend",
+      branch: "main",
+      depth: 1,
+    });
+
+    const scripts = generateRepoScripts(plan);
+    expect(scripts["backend.sh"]).toContain(
+      "git clone --branch main --depth 1 https://github.com/acme/backend.git",
+    );
+  });
+
+  it("injects a token into an https url", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.repos.push({
+      name: "backend",
+      url: "https://github.com/acme/backend.git",
+      path: "/workspace/repos/backend",
+      branch: "main",
+      credentials: { token: { env: "GITHUB_TOKEN" } },
+    });
+
+    const scripts = generateRepoScripts(plan);
+    expect(scripts["backend.sh"]).toContain('if [ -z "$GITHUB_TOKEN" ]');
+    expect(scripts["backend.sh"]).toContain("https://$GITHUB_TOKEN@github.com/acme/backend.git");
+  });
+
+  it("configures an ssh key for git over ssh", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.repos.push({
+      name: "backend",
+      url: "git@github.com:acme/backend.git",
+      path: "/workspace/repos/backend",
+      branch: "main",
+      credentials: { sshKey: { env: "BACKEND_SSH_KEY" } },
+    });
+
+    const scripts = generateRepoScripts(plan);
+    expect(scripts["backend.sh"]).toContain('if [ -z "$BACKEND_SSH_KEY" ]');
+    expect(scripts["backend.sh"]).toContain("/tmp/biodome-repo-keys/backend");
+    expect(scripts["backend.sh"]).toContain("GIT_SSH_COMMAND");
+  });
+});

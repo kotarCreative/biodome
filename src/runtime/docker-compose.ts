@@ -5,7 +5,7 @@ import { Effect, Stream } from "effect";
 import type { PlatformError } from "effect/PlatformError";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import { NodeRuntime } from "../core/runtime-node.js";
-import { generateCompose } from "../docker/generator.js";
+import { generateCompose } from "../docker/generators/compose.js";
 import { parseServiceStatusOutput } from "../docker/runner.js";
 import type {
   AvailableDriver,

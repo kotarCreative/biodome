@@ -4,17 +4,15 @@ import { fileURLToPath } from "node:url";
 import { Effect } from "effect";
 import { RuntimeError } from "../core/errors.js";
 import type { Plan } from "../core/plan.js";
-import {
-  generateClaudeHarnessFiles,
-  generateCodexHarnessFiles,
-  generateDockerfile,
-  generateDockerignore,
-  generateHarnessFiles,
-  generateHealthcheckScripts,
-  generatePiHarnessFiles,
-  generateRepoScripts,
-  generateSupervisordConf,
-} from "../docker/generator.js";
+import { generateDockerfile } from "../docker/generators/dockerfile.js";
+import { generateDockerignore } from "../docker/generators/dockerignore.js";
+import { generateHealthcheckScripts } from "../docker/generators/healthchecks.js";
+import { generateRepoScripts } from "../docker/generators/repositories.js";
+import { generateSupervisordConf } from "../docker/generators/supervisor.js";
+import { generateClaudeHarnessFiles } from "../docker/generators/harnesses/claude.js";
+import { generateCodexHarnessFiles } from "../docker/generators/harnesses/codex.js";
+import { generateHarnessFiles } from "../docker/generators/harnesses/opencode.js";
+import { generatePiHarnessFiles } from "../docker/generators/harnesses/pi.js";
 import { generatePlanJson } from "../mcp/generator.js";
 import type { RuntimeLayout } from "./layout.js";
 

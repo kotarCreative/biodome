@@ -11,7 +11,7 @@ import type { EventStore } from "../core/events.js";
 import type { Plan, RuntimeTarget } from "../core/plan.js";
 import { runtimeLayout } from "./layout.js";
 import { renderCommonArtifacts, writeArtifacts } from "./artifacts.js";
-import { generateCompose } from "../docker/generator.js";
+import { generateCompose } from "../docker/generators/compose.js";
 import type {
   Artifact,
   BuildResult,

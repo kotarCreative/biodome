@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { join } from "node:path";
 import { buildPlan, buildTaskPlan } from "../../builder/index.js";
 import { compileExecutionPlan } from "../../orchestration/compiler.js";
-import { generateCompose } from "../../docker/generator.js";
+import { generateCompose } from "../../docker/generators/compose.js";
 
 describe("app contract end to end", () => {
   const demo = join(process.cwd(), "examples", "apps-demo");
