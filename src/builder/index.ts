@@ -62,7 +62,9 @@ export const buildPlanEffect = Effect.fnUntraced(function* (
     const port = config.mcp.port ?? 3001;
     const mcpToken = config.mcp.token;
     builder.configureMcp(port, {
-      token: mcpToken && typeof mcpToken === "object" ? mcpToken : undefined,
+      // ConfigSchema rejects a missing or literal token when MCP is enabled, so
+      // at this point the token is always an `{ env: "VAR" }` reference.
+      token: mcpToken as { env: string },
       allowExec: config.mcp.allowExec,
       allowProcessControl: config.mcp.allowProcessControl,
       maxReadBytes: config.mcp.maxReadBytes,

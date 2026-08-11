@@ -6,6 +6,8 @@ describe("generateClaudeHarnessFiles", () => {
   it("generates Claude settings, mcp config, telemetry script, and wrapper", () => {
     const plan = createPlan("test");
     plan.build.mcpPort = 3001;
+    plan.build.mcpConfig.enabled = true;
+    plan.build.mcpConfig.token = { env: "MCP_TOKEN" };
     plan.runtime.claudeHarnesses.push({
       name: "assistant",
       type: "claude",
@@ -28,6 +30,9 @@ describe("generateClaudeHarnessFiles", () => {
 
     const mcp = JSON.parse(files["claude-homes/assistant/.claude.json"]);
     expect(mcp.mcpServers.biodome.url).toBe("http://localhost:3001");
+    expect(mcp.mcpServers.biodome.headers).toEqual({
+      Authorization: "Bearer ${MCP_TOKEN}",
+    });
 
     const telemetry = files["claude-homes/assistant/hooks/telemetry.js"];
     expect(telemetry).toContain("source: 'claude'");

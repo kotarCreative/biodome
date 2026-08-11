@@ -8,7 +8,7 @@ function plan(
   options: {
     readonly allowExec?: boolean;
     readonly allowProcessControl?: boolean;
-    readonly token?: string;
+    readonly token?: { env: string } | null;
     readonly allowedPaths?: readonly string[];
     readonly readOnly?: boolean;
     readonly providers?: boolean;
@@ -36,6 +36,7 @@ function plan(
       },
     ],
     mcp: {
+      enabled: options.token !== null && options.token !== undefined,
       token: options.token ?? null,
       allowExec: options.allowExec ?? false,
       allowProcessControl: options.allowProcessControl ?? false,
@@ -109,7 +110,11 @@ afterEach(async () => {
 
 describe("MCP application", () => {
   it("keeps health constant and unauthenticated", async () => {
-    const app = await createMcpApplication(plan({ token: "secret" }), dependencies(adapter));
+    const app = await createMcpApplication(
+      plan({ token: { env: "MCP_TOKEN" } }),
+      dependencies(adapter),
+      { MCP_TOKEN: "secret" },
+    );
     const server = http.createServer(app.handler);
     servers.push(server);
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -123,7 +128,11 @@ describe("MCP application", () => {
   });
 
   it("rejects malformed and wrong transport credentials", async () => {
-    const app = await createMcpApplication(plan({ token: "secret" }), dependencies(adapter));
+    const app = await createMcpApplication(
+      plan({ token: { env: "MCP_TOKEN" } }),
+      dependencies(adapter),
+      { MCP_TOKEN: "secret" },
+    );
     const server = http.createServer(app.handler);
     servers.push(server);
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -135,6 +144,20 @@ describe("MCP application", () => {
       });
       expect(response.status).toBe(401);
     }
+  });
+
+  it("fails startup when MCP is enabled but the token variable is unset", async () => {
+    await expect(
+      createMcpApplication(plan({ token: { env: "MCP_TOKEN" } }), dependencies(adapter), {}),
+    ).rejects.toThrow("MCP_TOKEN is missing or empty");
+  });
+
+  it("fails startup when MCP is enabled but the token variable is empty", async () => {
+    await expect(
+      createMcpApplication(plan({ token: { env: "MCP_TOKEN" } }), dependencies(adapter), {
+        MCP_TOKEN: "",
+      }),
+    ).rejects.toThrow("MCP_TOKEN is missing or empty");
   });
 
   it("omits disabled tools and rejects direct calls", async () => {

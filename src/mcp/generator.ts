@@ -110,6 +110,7 @@ export function generatePlanJson(plan: Plan): string {
         : null,
     })),
     mcp: {
+      enabled: plan.build.mcpConfig.enabled,
       token: serializeCredential(plan.build.mcpConfig.token),
       allowExec: plan.build.mcpConfig.allowExec,
       allowProcessControl: plan.build.mcpConfig.allowProcessControl,

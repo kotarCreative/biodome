@@ -6,6 +6,9 @@ const SecretSchema = Schema.Union([
   Schema.Struct({ env: Schema.String }),
   Schema.Null,
 ]);
+// The MCP bearer token is always an environment reference (never a literal
+// value) in generated plans. Literal strings are rejected at decode time.
+const McpTokenSchema = Schema.Union([Schema.Struct({ env: Schema.String }), Schema.Null]);
 const StringMapSchema = Schema.Record(Schema.String, Schema.String);
 const CredentialMapSchema = Schema.Record(Schema.String, SecretSchema);
 
@@ -87,7 +90,8 @@ export const McpPlanSchema = Schema.Struct({
   ),
   repos: Schema.Array(Schema.Unknown),
   mcp: Schema.Struct({
-    token: Schema.optional(SecretSchema),
+    enabled: Schema.optional(Schema.Boolean),
+    token: Schema.optional(McpTokenSchema),
     allowExec: Schema.optional(Schema.Boolean),
     allowProcessControl: Schema.optional(Schema.Boolean),
     maxReadBytes: Schema.optional(Schema.Number),

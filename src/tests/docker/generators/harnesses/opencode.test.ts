@@ -9,7 +9,12 @@ describe("generateHarnessFiles (OpenCode)", () => {
       name: "agent",
       type: "opencode",
       port: 3002,
-      mcpServers: { biodome: { url: "http://localhost:3001" } },
+      mcpServers: {
+        biodome: {
+          url: "http://localhost:3001",
+          auth: { header: "Authorization", env: "MCP_TOKEN", value: "Bearer ${MCP_TOKEN}" },
+        },
+      },
       telemetry: { enabled: true, path: "/workspace/.biodome-build/logs/opencode-events.jsonl" },
       config: {},
     });
@@ -25,6 +30,12 @@ describe("generateHarnessFiles (OpenCode)", () => {
     expect(files[configPath]).toContain('"type": "remote"');
     expect(files[configPath]).toContain("http://localhost:3001");
     expect(files[configPath]).toContain("plugins/agent-telemetry.js");
+    const config = JSON.parse(files[configPath]);
+    expect(config.mcp.biodome).toEqual({
+      type: "remote",
+      url: "http://localhost:3001",
+      headers: { Authorization: "Bearer ${MCP_TOKEN}" },
+    });
 
     const plugin = files[pluginPath];
     expect(plugin).toContain("export default async () =>");

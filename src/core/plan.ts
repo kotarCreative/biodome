@@ -3,6 +3,8 @@
 
 import { Schema } from "effect";
 import type { Application, ContributionProvenance } from "../apps/types.js";
+import type { McpClientAuth } from "./mcp-client.js";
+import { McpClientAuthSchema } from "./mcp-client.js";
 
 export interface LanguageRequest {
   name: string;
@@ -12,6 +14,9 @@ export interface LanguageRequest {
 export interface McpConfig {
   enabled: boolean;
   port: number;
+  // Required when `enabled` is true. Always an `{ env: "VAR" }` reference; the
+  // value is resolved from the container environment at startup. Enforced by
+  // the McpConfig schema filters and by McpBuilder.configure.
   token?: SecretValue;
   allowExec: boolean;
   allowProcessControl: boolean;
@@ -49,6 +54,9 @@ export interface RepoCredentials {
 
 export interface AgentHarnessMcpServer {
   url: string;
+  // Authenticated-client metadata for the built-in MCP server. Present only when
+  // MCP is enabled and this entry targets the biodome MCP server.
+  auth?: McpClientAuth;
 }
 
 export interface AgentHarnessTelemetry {
@@ -609,6 +617,7 @@ export const RepoSchema = Schema.Struct({
 
 export const AgentHarnessMcpServerSchema = Schema.Struct({
   url: Schema.String,
+  auth: Schema.optional(McpClientAuthSchema),
 });
 
 export const AgentHarnessTelemetrySchema = Schema.Struct({
@@ -866,6 +875,20 @@ export const EnvVarSchema = Schema.Struct({
   default: Schema.optional(Schema.String),
 });
 
+function mcpTokenRequired(config: {
+  readonly enabled: boolean;
+  readonly token?: unknown;
+}): string | undefined {
+  if (!config.enabled) return undefined;
+  if (config.token === undefined) {
+    return 'MCP requires an environment-backed token when enabled ({ env: "VAR" })';
+  }
+  if (typeof config.token === "string") {
+    return 'MCP token must be an environment variable reference ({ env: "VAR" }), not a literal string';
+  }
+  return undefined;
+}
+
 export const McpConfigSchema = Schema.Struct({
   enabled: Schema.Boolean,
   port: Schema.optional(Schema.Number),
@@ -878,7 +901,7 @@ export const McpConfigSchema = Schema.Struct({
   providerConnectTimeoutMs: Schema.optional(Schema.Number),
   providerRequestTimeoutMs: Schema.optional(Schema.Number),
   providerCatalogConcurrency: Schema.optional(Schema.Number),
-});
+}).pipe(Schema.check(Schema.makeFilter(mcpTokenRequired)));
 
 export const ConfigSchema = Schema.Struct({
   project: Schema.Struct({
@@ -1080,7 +1103,7 @@ export const NormalizedMcpConfigSchema = Schema.Struct({
   providerConnectTimeoutMs: Schema.Number,
   providerRequestTimeoutMs: Schema.Number,
   providerCatalogConcurrency: Schema.Number,
-});
+}).pipe(Schema.check(Schema.makeFilter(mcpTokenRequired)));
 
 export const BuildPlanSchema = Schema.Struct({
   project: Schema.String,

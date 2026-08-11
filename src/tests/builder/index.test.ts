@@ -24,6 +24,34 @@ function createProject(dir: string, files: Record<string, string>): void {
 }
 
 describe("buildPlan", () => {
+  it("rejects enabling MCP without an environment-backed token", async () => {
+    const dir = join("/tmp", "sandbox-test-" + Date.now());
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({
+        project: { name: "mcp-invalid" },
+        mcp: { enabled: true, port: 3100 },
+      }),
+      ".biodome/features/.gitkeep": "",
+    });
+
+    await expect(buildPlan(dir)).rejects.toThrow(
+      "MCP requires an environment-backed token when enabled",
+    );
+  });
+
+  it("rejects a literal MCP token string", async () => {
+    const dir = join("/tmp", "sandbox-test-" + Date.now());
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({
+        project: { name: "mcp-invalid" },
+        mcp: { enabled: true, token: "secret" },
+      }),
+      ".biodome/features/.gitkeep": "",
+    });
+
+    await expect(buildPlan(dir)).rejects.toThrow("not a literal string");
+  });
+
   it("loads config and features", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {
@@ -340,7 +368,7 @@ describe("validateFeatures", () => {
     createProject(dir, {
       ".biodome/config.json": JSON.stringify({
         project: { name: "mcp-app" },
-        mcp: { enabled: true, port: 3100 },
+        mcp: { enabled: true, port: 3100, token: { env: "MCP_TOKEN" } },
       }),
       ".biodome/features/.gitkeep": "",
     });
@@ -371,7 +399,7 @@ describe("validateFeatures", () => {
     createProject(dir, {
       ".biodome/config.json": JSON.stringify({
         project: { name: "mcp-node-app" },
-        mcp: { enabled: true },
+        mcp: { enabled: true, token: { env: "MCP_TOKEN" } },
       }),
       ".biodome/features/node.mjs": `
         export default function node(ctx) {
@@ -414,7 +442,7 @@ describe("buildTargetPlan", () => {
     createProject(dir, {
       ".biodome/config.json": JSON.stringify({
         project: { name: "layout-app" },
-        mcp: { enabled: true },
+        mcp: { enabled: true, token: { env: "MCP_TOKEN" } },
       }),
       ".biodome/features/harnesses.mjs": `
         export default function harnesses(ctx) {

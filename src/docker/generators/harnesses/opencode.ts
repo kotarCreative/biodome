@@ -28,6 +28,9 @@ function opencodeConfig(harness: AgentHarness, llmProviders: LlmProvider[]): str
   const mcp: Record<string, any> = {};
   for (const [name, server] of Object.entries(harness.mcpServers)) {
     mcp[name] = { type: "remote", url: server.url };
+    if (server.auth) {
+      mcp[name].headers = { [server.auth.header]: server.auth.value };
+    }
   }
 
   const provider: Record<string, any> = {};

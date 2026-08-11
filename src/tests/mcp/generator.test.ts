@@ -132,6 +132,18 @@ describe("generatePlanJson", () => {
     expect(json.languages[0].version).toBe("20");
   });
 
+  it("emits the MCP token only as an environment reference", () => {
+    const plan = createPlan("app");
+    plan.build.mcpConfig.enabled = true;
+    plan.build.mcpConfig.port = 3100;
+    plan.build.mcpConfig.token = { env: "MCP_TOKEN" };
+
+    const json = JSON.parse(generatePlanJson(plan));
+    expect(json.mcp.enabled).toBe(true);
+    expect(json.mcp.token).toEqual({ env: "MCP_TOKEN" });
+    expect(JSON.stringify(json)).not.toContain("Bearer");
+  });
+
   it("includes repos and preserves credential env references", () => {
     const plan = createPlan("app");
     plan.runtime.repos.push({

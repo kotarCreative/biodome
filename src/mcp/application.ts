@@ -119,6 +119,13 @@ export async function createMcpApplication(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<McpApplication> {
   const token = resolvePlanSecret(plan.mcp.token, environment);
+  if (plan.mcp.enabled === true && (!token || token.length === 0)) {
+    throw new Error(
+      plan.mcp.token && "env" in plan.mcp.token
+        ? `MCP is enabled but token environment variable ${plan.mcp.token.env} is missing or empty`
+        : "MCP is enabled but no environment-backed token is configured",
+    );
+  }
   const maxReadBytes = plan.mcp.maxReadBytes ?? 1048576;
   const maxWriteBytes = plan.mcp.maxWriteBytes ?? 2097152;
   const maxListEntries = plan.mcp.maxListEntries ?? 100;

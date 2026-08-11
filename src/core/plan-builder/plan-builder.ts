@@ -81,6 +81,7 @@ export class PlanBuilder {
     this.mcp = new McpBuilder(this.plan, layout, {
       addLanguage,
       addProcess,
+      addEnv,
       volumeCredentialEnvironment: () => this.volumes.mcpCredentialEnvironment(),
       providerCredentialEnvironment: () => this.providers.mcpCredentialEnvironment(),
     });
@@ -137,7 +138,7 @@ export class PlanBuilder {
     this.finalized = true;
   }
 
-  configureMcp(port: number, options: McpOptions = {}): void {
+  configureMcp(port: number, options: McpOptions): void {
     this.mutate(() => this.mcp.configure(port, options));
   }
 

@@ -45,7 +45,8 @@ mcpHttpContract("built-in", () =>
       repos: [],
       volumes: [],
       mcp: {
-        token: "contract-token",
+        enabled: true,
+        token: { env: "MCP_CONTRACT_TOKEN" },
         allowExec: false,
         allowProcessControl: false,
         maxReadBytes: 1024,
@@ -54,5 +55,6 @@ mcpHttpContract("built-in", () =>
       },
     }),
     dependencies,
+    { MCP_CONTRACT_TOKEN: "contract-token" },
   ),
 );

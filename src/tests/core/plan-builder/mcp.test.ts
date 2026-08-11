@@ -13,6 +13,7 @@ function makeBuilder(
   const plan = createPlan("test");
   const languages: Array<{ name: string; version?: string }> = [];
   const processes: ProcessSpec[] = [];
+  const envVars: Array<{ key: string }> = [];
   const builder = new McpBuilder(
     plan,
     {
@@ -23,18 +24,19 @@ function makeBuilder(
     {
       addLanguage: (name, languageOptions) => languages.push({ name, ...languageOptions }),
       addProcess: options.addProcess ?? ((spec) => processes.push(spec)),
+      addEnv: (key) => envVars.push({ key }),
       volumeCredentialEnvironment: () => ({ ...options.volumeEnvironment }),
       providerCredentialEnvironment: () => ({ ...options.providerEnvironment }),
     },
   );
-  return { builder, languages, plan, processes };
+  return { builder, languages, plan, processes, envVars };
 }
 
 describe("McpBuilder", () => {
   it("sets MCP defaults, requests Node 20, and creates the isolated daemon", () => {
-    const { builder, languages, plan, processes } = makeBuilder();
+    const { builder, languages, plan, processes, envVars } = makeBuilder();
 
-    builder.configure(3005);
+    builder.configure(3005, { token: { env: "MCP_TOKEN" } });
 
     expect(plan.build.mcpEnabled).toBe(true);
     expect(plan.build.mcpPort).toBe(3005);
@@ -53,10 +55,14 @@ describe("McpBuilder", () => {
         ],
         port: 3005,
         healthCheck: { type: "http", url: "http://localhost:3005/health" },
-        environment: { MCP_EVENTS_LOG: "/workspace/.biodome-build/logs/mcp-events.jsonl" },
+        environment: {
+          MCP_TOKEN: "${MCP_TOKEN}",
+          MCP_EVENTS_LOG: "/workspace/.biodome-build/logs/mcp-events.jsonl",
+        },
         mergeEnv: false,
       },
     ]);
+    expect(envVars).toContainEqual({ key: "MCP_TOKEN" });
     expect(plan.runtime.environment).toEqual({});
   });
 
@@ -90,6 +96,15 @@ describe("McpBuilder", () => {
     });
   });
 
+  it("rejects a missing token when MCP is enabled", () => {
+    const { builder, processes } = makeBuilder();
+
+    expect(() => builder.configure(3001)).toThrow(
+      'MCP token is required when MCP is enabled ({ env: "VAR" })',
+    );
+    expect(processes).toEqual([]);
+  });
+
   it("rejects literal tokens after setting MCP flags", () => {
     const { builder, languages, plan, processes } = makeBuilder();
 
@@ -106,7 +121,7 @@ describe("McpBuilder", () => {
     const { builder, languages, plan } = makeBuilder();
     plan.build.languageRequests.push({ name: "node", options: { version: "22" } });
 
-    builder.configure(3001);
+    builder.configure(3001, { token: { env: "MCP_TOKEN" } });
 
     expect(languages).toEqual([]);
   });
@@ -132,6 +147,23 @@ describe("McpBuilder", () => {
     expect(processes[0].mergeEnv).toBe(false);
   });
 
+  it("rejects a harness that cannot send authorization headers to biodome MCP", () => {
+    const { builder, plan } = makeBuilder();
+    plan.runtime.codexHarnesses.push({
+      name: "legacy",
+      type: "pi",
+      port: 3003,
+      mcpServers: { biodome: { url: "http://localhost:3001" } },
+      model: "gpt-5.6",
+      telemetry: { enabled: true, path: "/workspace/events.jsonl" },
+      config: {},
+    });
+
+    expect(() => builder.configure(3001, { token: { env: "MCP_TOKEN" } })).toThrow(
+      'harness "legacy" (type "pi") cannot send authorization headers',
+    );
+  });
+
   it("propagates process failures after recording MCP and Node contributions", () => {
     const { builder, languages, plan } = makeBuilder({
       addProcess: () => {
@@ -139,7 +171,9 @@ describe("McpBuilder", () => {
       },
     });
 
-    expect(() => builder.configure(3001)).toThrow("duplicate process");
+    expect(() => builder.configure(3001, { token: { env: "MCP_TOKEN" } })).toThrow(
+      "duplicate process",
+    );
     expect(plan.build.mcpEnabled).toBe(true);
     expect(languages).toEqual([{ name: "node", version: "20" }]);
   });

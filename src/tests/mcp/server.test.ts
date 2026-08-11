@@ -27,8 +27,10 @@ describe("MCP startup boundaries", () => {
 });
 
 describe("bearer authentication", () => {
-  it("accepts no token configuration", () =>
-    expect(authenticateBearer(undefined, null)).toBe(true));
+  it("rejects a missing token configuration", () =>
+    expect(authenticateBearer(undefined, null)).toBe(false));
+  it("rejects an empty expected token", () =>
+    expect(authenticateBearer("Bearer secret", "")).toBe(false));
   it("rejects a missing token", () => expect(authenticateBearer(undefined, "secret")).toBe(false));
   it("rejects malformed credentials", () =>
     expect(authenticateBearer("Basic secret", "secret")).toBe(false));

@@ -80,7 +80,7 @@ describe("PlanBuilder", () => {
     builder.context.addPiHarness({ name: "pi", apiKey: { env: "PI_API_KEY" } });
     builder.context.addCodexHarness({ name: "codex", apiKey: { env: "CODEX_API_KEY" } });
     builder.context.addClaudeHarness({ name: "claude", apiKey: { env: "CLAUDE_API_KEY" } });
-    builder.configureMcp(3001);
+    builder.configureMcp(3001, { token: { env: "MCP_TOKEN" } });
     builder.finalize();
 
     const plan = builder.getPlan();

@@ -1,4 +1,5 @@
-import type { ClaudeHarness, Plan } from "../../../core/plan.js";
+import type { ClaudeHarness, McpConfig, Plan } from "../../../core/plan.js";
+import { mcpClientAuthFromToken } from "../../../core/mcp-client.js";
 import { generatedRuntimeDir } from "../shell.js";
 import {
   eventToSnakeCase,
@@ -15,7 +16,7 @@ export function generateClaudeHarnessFiles(plan: Plan): Record<string, string> {
   for (const harness of plan.runtime.claudeHarnesses) {
     const homeDir = `claude-homes/${harness.name}`;
     files[`${homeDir}/.claude/settings.json`] = claudeSettings(harness, plan);
-    files[`${homeDir}/.claude.json`] = claudeMcpConfig(plan.build.mcpPort);
+    files[`${homeDir}/.claude.json`] = claudeMcpConfig(plan.build.mcpPort, plan.build.mcpConfig);
     files[`${homeDir}/hooks/telemetry.js`] = claudeTelemetryScript(harness, plan);
     files[`${homeDir}/claude`] = claudeWrapperScript(harness, plan);
     files[`${homeDir}/task`] = claudeTaskScript(harness, plan);
@@ -55,21 +56,16 @@ function claudeSettings(harness: ClaudeHarness, plan?: Plan): string {
   return JSON.stringify(settings, null, 2) + "\n";
 }
 
-function claudeMcpConfig(mcpPort: number): string {
-  return (
-    JSON.stringify(
-      {
-        mcpServers: {
-          biodome: {
-            type: "http",
-            url: `http://localhost:${mcpPort}`,
-          },
-        },
-      },
-      null,
-      2,
-    ) + "\n"
-  );
+function claudeMcpConfig(mcpPort: number, mcpConfig: McpConfig): string {
+  const biodome: Record<string, unknown> = {
+    type: "http",
+    url: `http://localhost:${mcpPort}`,
+  };
+  if (mcpConfig.enabled && mcpConfig.token && typeof mcpConfig.token === "object") {
+    const auth = mcpClientAuthFromToken(mcpConfig.token);
+    biodome.headers = { [auth.header]: auth.value };
+  }
+  return JSON.stringify({ mcpServers: { biodome } }, null, 2) + "\n";
 }
 
 function claudeTelemetryScript(harness: ClaudeHarness, plan: Plan): string {

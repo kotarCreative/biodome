@@ -10,7 +10,12 @@ describe("generateCodexHarnessFiles", () => {
       name: "coder",
       type: "codex",
       port: 3003,
-      mcpServers: { biodome: { url: "http://localhost:3001" } },
+      mcpServers: {
+        biodome: {
+          url: "http://localhost:3001",
+          auth: { header: "Authorization", env: "MCP_TOKEN", value: "Bearer ${MCP_TOKEN}" },
+        },
+      },
       model: "gpt-5.6",
       telemetry: {
         enabled: true,
@@ -25,6 +30,8 @@ describe("generateCodexHarnessFiles", () => {
     expect(config).toContain('model = "gpt-5.6"');
     expect(config).toContain("[mcp_servers.biodome]");
     expect(config).toContain('url = "http://localhost:3001"');
+    expect(config).toContain('bearer_token_env_var = "MCP_TOKEN"');
+    expect(config).not.toContain("Bearer");
 
     const hooks = JSON.parse(files["codex-homes/coder/.codex/hooks.json"]);
     expect(hooks.hooks.SessionStart).toBeDefined();

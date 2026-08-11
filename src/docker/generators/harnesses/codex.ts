@@ -56,6 +56,11 @@ function codexConfig(harness: CodexHarness): string {
   for (const [name, server] of Object.entries(harness.mcpServers)) {
     lines.push(`[mcp_servers.${name}]`);
     lines.push(`url = ${JSON.stringify(server.url)}`);
+    if (server.auth) {
+      // TOML has no interpolation and Codex does not support a `headers` map;
+      // it sends `Authorization: Bearer <value>` from an env var name.
+      lines.push(`bearer_token_env_var = ${JSON.stringify(server.auth.env)}`);
+    }
   }
 
   for (const [key, value] of Object.entries(tables)) {

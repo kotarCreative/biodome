@@ -40,4 +40,18 @@ describe("EnvironmentBuilder", () => {
       "not safe inside a Docker Compose interpolation default",
     );
   });
+
+  it("ignores identical duplicate declarations", () => {
+    const plan = createPlan("test");
+    const builder = new EnvironmentBuilder(plan);
+    builder.add("OPENAI_API_KEY", { from: { env: "OPENAI_API_KEY" } });
+    builder.add("OPENAI_API_KEY", { from: { env: "OPENAI_API_KEY" } });
+    builder.add("DEBUG", { value: "1" });
+    builder.add("DEBUG", { value: "1" });
+
+    expect(plan.runtime.envVars).toEqual([
+      { key: "OPENAI_API_KEY", scope: "runtime", from: { env: "OPENAI_API_KEY" } },
+      { key: "DEBUG", scope: "runtime", value: "1" },
+    ]);
+  });
 });
