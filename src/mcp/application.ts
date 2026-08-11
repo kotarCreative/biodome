@@ -13,6 +13,7 @@ import { authenticateBearer } from "./auth.js";
 import { createFileMcpEventSink } from "./event-sink.js";
 import type { McpPlan } from "./plan.js";
 import { resolvePlanSecret } from "./plan.js";
+import { filterProviderTools } from "./provider-tools.js";
 import {
   UpstreamRegistry,
   type CatalogEntry,
@@ -127,17 +128,20 @@ export async function createMcpApplication(
     write: maxWriteBytes,
     list: maxListEntries,
   });
-  const tools = [
-    ...createInfoProviderTools(plan, dependencies.providers, maxListEntries, skipped),
-    ...createProcessLogTools(
-      plan,
-      dependencies.processRunner,
-      dependencies.probeService,
-      plan.mcp.allowExec === true,
-      plan.mcp.allowProcessControl === true,
-    ),
-    ...volumeTools.tools,
-  ];
+  const tools = filterProviderTools(
+    [
+      ...createInfoProviderTools(plan, dependencies.providers, maxListEntries, skipped),
+      ...createProcessLogTools(
+        plan,
+        dependencies.processRunner,
+        dependencies.probeService,
+        plan.mcp.allowExec === true,
+        plan.mcp.allowProcessControl === true,
+      ),
+      ...volumeTools.tools,
+    ],
+    plan.providers,
+  );
   const toolMap = new Map(tools.map((tool) => [tool.name, tool]));
   const invoke = async (name: string, arguments_: ToolArguments = {}) => {
     const tool = toolMap.get(name);

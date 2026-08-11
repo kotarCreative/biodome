@@ -103,8 +103,10 @@ describe("app package manager", () => {
 
   it("does not create project package state for incompatible preflight metadata", async () => {
     const project = root();
+    let preflightDir = "";
     const runner: NpmRunner = {
       run(_args, cwd) {
+        preflightDir = cwd;
         writeInstalledManifest(cwd, { type: "not-a-recipe", apiVersion: 1 });
       },
     };
@@ -115,6 +117,8 @@ describe("app package manager", () => {
 
     expect(existsSync(join(project, ".biodome"))).toBe(false);
     expect(existsSync(join(project, ".gitignore"))).toBe(false);
+    expect(existsSync(join(project, "node_modules"))).toBe(false);
+    expect(existsSync(preflightDir)).toBe(false);
   });
 
   it("preserves existing project files when preflight metadata is incompatible", async () => {

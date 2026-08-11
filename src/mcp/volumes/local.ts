@@ -5,6 +5,8 @@ import {
   FileInfo,
   VolumeConfig,
   VolumeAccessError,
+  decodeCursor,
+  encodeCursor,
   rejectOversized,
 } from "./adapter.js";
 
@@ -50,9 +52,17 @@ export function createLocalAdapter(config: VolumeConfig): VolumeAdapter {
   return {
     async list(path, options) {
       const dirPath = await resolveExistingPath(config, path || ".");
-      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+      const entries = (await fs.readdir(dirPath, { withFileTypes: true })).sort((left, right) =>
+        left.name.localeCompare(right.name),
+      );
+      const cursor = decodeCursor(options.cursor);
+      const offset = cursor === undefined ? 0 : Number(cursor);
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset > entries.length) {
+        throw new VolumeAccessError("Invalid list cursor");
+      }
       const files: FileInfo[] = [];
-      for (const entry of entries.slice(0, options.limit)) {
+      const page = entries.slice(offset, offset + options.limit);
+      for (const entry of page) {
         const entryPath = join(path || "", entry.name).replace(/\\/g, "/");
         files.push({
           name: entry.name,
@@ -60,7 +70,8 @@ export function createLocalAdapter(config: VolumeConfig): VolumeAdapter {
           isDirectory: entry.isDirectory(),
         });
       }
-      return { files };
+      const next = offset + page.length;
+      return { files, nextCursor: next < entries.length ? encodeCursor(String(next)) : undefined };
     },
 
     async read(path, options) {

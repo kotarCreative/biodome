@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { capabilitiesOf } from "../../../core/capabilities.js";
@@ -6,7 +9,14 @@ import { NoOpEventStoreLive } from "../../../core/events.js";
 import { createPlan } from "../../../core/plan.js";
 import type { RuntimeDriver } from "../../../runtime/driver.js";
 import { createTargetOperation } from "../../../cli/target-operation.js";
-import { buildWorkflow, execWorkflow, upWorkflow } from "../../../cli/workflows/target.js";
+import {
+  buildWorkflow,
+  downWorkflow,
+  execWorkflow,
+  restartWorkflow,
+  upWorkflow,
+} from "../../../cli/workflows/target.js";
+import { writeState } from "../../../runtime/state.js";
 
 function driver(
   capabilities = capabilitiesOf(
@@ -42,6 +52,7 @@ function dependencies(runtimeDriver = driver()) {
     deploymentId: "deployment",
   };
   return {
+    plan,
     buildTargetPlan: vi.fn(() => Effect.succeed(plan)),
     getDriver: vi.fn(() => Effect.succeed(runtimeDriver)),
   };
@@ -101,5 +112,59 @@ describe("target workflows", () => {
         ),
       ),
     ).rejects.toBeInstanceOf(RuntimeError);
+  });
+
+  it("validates deployment state before stopping", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "biodome-down-"));
+    try {
+      const stop = vi.fn(() => Effect.void);
+      const runtimeDriver = driver();
+      runtimeDriver.stop = stop;
+      const deps = dependencies(runtimeDriver);
+      await expect(Effect.runPromise(downWorkflow(rootDir, "local", deps))).rejects.toThrow(
+        "No deployment state found",
+      );
+      expect(stop).not.toHaveBeenCalled();
+
+      writeState(rootDir, "local", {
+        driver: "fake",
+        deploymentId: "deployment",
+        resourceIds: {},
+        createdAt: "",
+      });
+      await expect(Effect.runPromise(downWorkflow(rootDir, "local", deps))).resolves.toEqual({
+        message: 'Target "local" stopped',
+      });
+      expect(stop).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("restarts every daemon or reports them as skipped when unsupported", async () => {
+    const restarted: string[] = [];
+    const runtimeDriver = driver(
+      capabilitiesOf("lifecycle.build", "lifecycle.start", "lifecycle.stop", "process.signal"),
+    ) as RuntimeDriver & {
+      restart: (input: { processName: string }) => ReturnType<typeof Effect.void>;
+    };
+    runtimeDriver.restart = ({ processName }) =>
+      Effect.sync(() => {
+        restarted.push(processName);
+      });
+    const deps = dependencies(runtimeDriver);
+    deps.plan.runtime.processes.push(
+      { name: "web", command: ["web"], ports: [], environment: {}, mode: "daemon" },
+      { name: "worker", command: ["worker"], ports: [], environment: {}, mode: "daemon" },
+      { name: "setup", command: ["setup"], ports: [], environment: {}, mode: "oneshot" },
+    );
+
+    const result = await Effect.runPromise(
+      restartWorkflow("/project", "local", undefined, deps).pipe(
+        Effect.provide(NoOpEventStoreLive("test")),
+      ),
+    );
+    expect(result.skipped).toEqual([]);
+    expect(restarted).toEqual(["web", "worker"]);
   });
 });

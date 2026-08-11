@@ -87,12 +87,6 @@ export function executeTask(
         }),
       );
     }
-    if (task.artifacts.length > 0 && !supportsArtifacts(driver)) {
-      return yield* Effect.fail(
-        new RuntimeError({ message: `Driver "${driver.id}" does not support artifact collection` }),
-      );
-    }
-
     const timeoutSeconds = parseDuration(task.timeout);
     const timeoutMs = timeoutSeconds * 1000;
     const store = yield* EventStore;

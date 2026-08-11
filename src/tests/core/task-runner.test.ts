@@ -278,6 +278,18 @@ describe("executeTask", () => {
     );
   });
 
+  it("fails before runtime calls when required lifecycle capabilities are missing", async () => {
+    const render = vi.fn().mockReturnValue(Effect.succeed([]));
+    const driver = createFakeDriver({
+      capabilities: capabilitiesOf("exec.command", "artifact.collect"),
+      render,
+    });
+    await expect(Effect.runPromise(runTask(driver, planWithTask()))).rejects.toThrow(
+      /does not support lifecycle.build and lifecycle.start/,
+    );
+    expect(render).not.toHaveBeenCalled();
+  });
+
   it("runs an OpenCode task via its generated task wrapper", async () => {
     const execFn = vi.fn().mockReturnValue(
       Effect.succeed<CommandResult>({

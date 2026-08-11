@@ -11,6 +11,7 @@ function plan(
     readonly token?: string;
     readonly allowedPaths?: readonly string[];
     readonly readOnly?: boolean;
+    readonly providers?: boolean;
   } = {},
 ) {
   return decodeMcpPlan({
@@ -19,7 +20,7 @@ function plan(
     services: [],
     processes: [],
     endpoints: [],
-    providers: [],
+    providers: options.providers ? [{ name: "issues", type: "github" }] : [],
     environment: {},
     envVars: [],
     repos: [],
@@ -169,6 +170,36 @@ describe("MCP application", () => {
       "restart",
       "worker",
     ]);
+    await app.close();
+  });
+
+  it("does not advertise provider tools when the plan declares no providers", async () => {
+    const app = await createMcpApplication(plan(), dependencies(adapter));
+    expect(app.tools.map((tool) => tool.name)).not.toEqual(
+      expect.arrayContaining([
+        "get_providers",
+        "provider_search",
+        "provider_describe",
+        "provider_execute",
+      ]),
+    );
+    await expect(app.invoke("provider_search", { query: "issue" })).rejects.toMatchObject({
+      code: -32601,
+    });
+    await app.close();
+  });
+
+  it("advertises provider tools when the plan declares a provider", async () => {
+    const app = await createMcpApplication(plan({ providers: true }), dependencies(adapter));
+    expect(app.tools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining([
+        "get_providers",
+        "provider_search",
+        "provider_describe",
+        "provider_execute",
+      ]),
+    );
+    expect(resultText(await app.invoke("get_providers"))).toContain('"name": "issues"');
     await app.close();
   });
 
