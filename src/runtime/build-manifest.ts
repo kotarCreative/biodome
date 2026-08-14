@@ -19,6 +19,7 @@ import { ValidationError } from "../core/errors.js";
 import { targetBuildDir } from "./output.js";
 
 export const BUILD_MANIFEST_VERSION = 1;
+const IMMUTABLE_DIGEST = /^(?:sha256:)?[a-f0-9]{64}$/i;
 
 export interface BuildManifest {
   readonly schemaVersion: typeof BUILD_MANIFEST_VERSION;
@@ -79,9 +80,18 @@ export function directoryDigest(dir: string): string {
 
 /** Build an immutable manifest, requiring a durable content identity. */
 export function createBuildManifest(input: CreateBuildManifestInput): BuildManifest {
-  if (!input.digest) {
+  if (!input.digest || !IMMUTABLE_DIGEST.test(input.digest)) {
     throw new ValidationError({
-      message: "Build manifest requires an immutable content digest",
+      message: "Build manifest requires a SHA-256 immutable content digest",
+    });
+  }
+  if (
+    input.imageRef &&
+    input.digest.startsWith("sha256:") &&
+    !matchesDigest(input.imageRef, input.digest)
+  ) {
+    throw new ValidationError({
+      message: "Build manifest image reference must identify its immutable content digest",
     });
   }
   return {
@@ -175,7 +185,7 @@ export function readBuildManifest(
   if (raw.deploymentId !== expectedDeploymentId) {
     throw manifestMismatch("deployment ID", expectedDeploymentId, String(raw.deploymentId));
   }
-  if (typeof raw.digest !== "string" || raw.digest.length === 0) {
+  if (typeof raw.digest !== "string" || !IMMUTABLE_DIGEST.test(raw.digest)) {
     throw new ValidationError({
       message: `Build manifest for target "${targetName}" is missing an immutable content digest`,
     });
@@ -188,6 +198,15 @@ export function readBuildManifest(
   if (!isBuildManifest(raw)) {
     throw new ValidationError({
       message: `Build manifest for target "${targetName}" is missing required fields`,
+    });
+  }
+  if (
+    raw.imageRef &&
+    raw.digest.startsWith("sha256:") &&
+    !matchesDigest(raw.imageRef, raw.digest)
+  ) {
+    throw new ValidationError({
+      message: `Build manifest for target "${targetName}" image reference does not match its digest`,
     });
   }
   return raw;
@@ -232,4 +251,8 @@ function isBuildManifest(
     isRecord(value.provider) &&
     Object.values(value.provider).every((item) => typeof item === "string")
   );
+}
+
+function matchesDigest(imageRef: string, digest: string): boolean {
+  return imageRef === digest || imageRef.endsWith(`@${digest}`);
 }

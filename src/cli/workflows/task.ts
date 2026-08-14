@@ -31,6 +31,13 @@ export function runTaskWorkflow(rootDir: string, targetName: string, taskName: s
     const plan = yield* buildTaskPlanEffect(rootDir, targetName, taskName);
     const deployment = plan.deployment!;
     const driver = yield* getDriver(deployment.target.driver);
+    const executionPlan = compileExecutionPlan(plan);
+    const compatibility = validateCompatibility(executionPlan, providerProfile(driver));
+    if (!compatibility.compatible) {
+      return yield* new RuntimeError({
+        message: `Target "${targetName}" does not satisfy task requirements: ${formatCompatibilityReport(compatibility)}`,
+      });
+    }
     if (!supportsAvailability(driver)) {
       return yield* new RuntimeError({
         message: `Driver "${driver.id}" does not support availability checks`,

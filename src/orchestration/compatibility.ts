@@ -20,9 +20,12 @@ export interface ProviderProfile {
   id: string;
   capabilities: Capabilities;
   maxResources?: ResourceBounds;
+  supportsTaskResources?: boolean;
   workspaceStrategies?: readonly WorkspaceStrategy[];
   serviceKinds?: readonly string[];
+  processServiceKinds?: readonly string[];
   networkModes?: readonly NetworkMode[];
+  networkAllowlist?: boolean;
   secretExposures?: readonly SecretExposure[];
   artifactTransports?: readonly ArtifactTransport[];
 }
@@ -85,6 +88,24 @@ function resourceIssues(
   });
 }
 
+function taskResourceIssues(
+  requested: ResourceBounds | undefined,
+  provider: ProviderProfile,
+): CompatibilityIssue[] {
+  if (!requested) return [];
+  if (provider.supportsTaskResources === false) {
+    return Object.entries(requested)
+      .filter(([, value]) => value !== undefined)
+      .map(([key]) => ({
+        kind: "resource" as const,
+        level: "required" as const,
+        subject: key,
+        reason: "provider does not enforce portable task resource requirements",
+      }));
+  }
+  return resourceIssues(requested, provider.maxResources);
+}
+
 function workspaceIssues(
   workspace: ExecutionPlan["task"]["workspace"],
   provider: ProviderProfile,
@@ -105,35 +126,50 @@ function serviceIssues(
   services: ExecutionPlan["services"],
   provider: ProviderProfile,
 ): CompatibilityIssue[] {
-  if (!provider.serviceKinds) return [];
-  return services.flatMap((service) =>
-    provider.serviceKinds!.includes(service.kind)
-      ? []
-      : [
-          {
-            kind: "service" as const,
-            level: "required" as const,
-            subject: `service "${service.name}"`,
-            reason: `kind "${service.kind}" is not supported by this provider`,
-          },
-        ],
-  );
+  return services.flatMap((service) => {
+    const supportedKinds =
+      service.runtime === "process" ? provider.processServiceKinds : provider.serviceKinds;
+    // Container services are passed directly to Docker Compose and therefore
+    // have no finite provider-owned kind list. Process services do.
+    if (!supportedKinds && service.runtime === "container") return [];
+    // A provider that does not publish a process-service list retains the
+    // historical default of running them in the dev image.
+    if (!supportedKinds && service.runtime === "process") return [];
+    if (supportedKinds?.includes(service.kind)) return [];
+    return [
+      {
+        kind: "service" as const,
+        level: "required" as const,
+        subject: `service "${service.name}"`,
+        reason: `kind "${service.kind}" is not supported by this provider`,
+      },
+    ];
+  });
 }
 
 function networkIssues(
   network: ExecutionPlan["task"]["network"],
   provider: ProviderProfile,
 ): CompatibilityIssue[] {
-  if (!provider.networkModes || !network) return [];
-  if (provider.networkModes.includes(network.mode)) return [];
-  return [
-    {
+  if (!network) return [];
+  const issues: CompatibilityIssue[] = [];
+  if (provider.networkModes && !provider.networkModes.includes(network.mode)) {
+    issues.push({
       kind: "network",
       level: "required",
       subject: `network mode "${network.mode}"`,
       reason: `provider supports ${provider.networkModes.join(", ")}`,
-    },
-  ];
+    });
+  }
+  if (network.allow.length > 0 && provider.networkAllowlist === false) {
+    issues.push({
+      kind: "network",
+      level: "required",
+      subject: "network allowlist",
+      reason: "provider does not enforce destination allowlists",
+    });
+  }
+  return issues;
 }
 
 function secretIssues(
@@ -194,7 +230,7 @@ export function validateCompatibility(
     .map(capabilityIssue);
   const issues = [
     ...unsupported,
-    ...resourceIssues(plan.task.resources, provider.maxResources),
+    ...taskResourceIssues(plan.task.resources, provider),
     ...workspaceIssues(plan.task.workspace, provider),
     ...serviceIssues(plan.services, provider),
     ...networkIssues(plan.task.network, provider),
@@ -234,19 +270,21 @@ export function preflightTargetCompatibility(
   const options = target?.options ?? {};
   const issues: CompatibilityIssue[] = [];
 
-  if (provider.serviceKinds) {
-    for (const service of plan.runtime.services.filter(
-      (service) => service.runtime !== "process",
-    )) {
-      if (!provider.serviceKinds.includes(service.type)) {
-        issues.push({
-          kind: "service",
-          level: "required",
-          subject: `service "${service.name}"`,
-          reason: `kind "${service.type}" is not supported by this provider`,
-        });
-      }
-    }
+  for (const service of plan.runtime.services) {
+    const runtime = service.runtime ?? "container";
+    const supportedKinds =
+      runtime === "process" ? provider.processServiceKinds : provider.serviceKinds;
+    if (!supportedKinds && runtime === "container") continue;
+    if (supportedKinds?.includes(service.type)) continue;
+    // A provider that does not publish a process-service list retains the
+    // historical default of running them in the dev image.
+    if (!supportedKinds && runtime === "process") continue;
+    issues.push({
+      kind: "service",
+      level: "required",
+      subject: `service "${service.name}"`,
+      reason: `kind "${service.type}" is not supported by this provider`,
+    });
   }
 
   const strategy = optionString(options, "workspaceMode", "strategy");

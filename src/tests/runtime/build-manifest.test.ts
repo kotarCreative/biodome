@@ -14,7 +14,7 @@ function manifest() {
     target: "local",
     driver: "docker-compose",
     deploymentId: "deployment-1",
-    digest: "sha256:immutable",
+    digest: `sha256:${"a".repeat(64)}`,
     contentId: "content-1",
   });
 }
@@ -38,7 +38,9 @@ describe("build manifests", () => {
       const value = manifest();
       writeBuildManifest(rootDir, "local", value);
       const path = join(rootDir, ".biodome-build", "targets", "local", "manifest.json");
-      expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({ digest: "sha256:immutable" });
+      expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({
+        digest: `sha256:${"a".repeat(64)}`,
+      });
       expect(readBuildManifest(rootDir, "local", "deployment-1", "docker-compose")).toEqual(value);
       expect(() => readBuildManifest(rootDir, "local", "other", "docker-compose")).toThrow(
         /deployment ID mismatch/,
@@ -49,6 +51,29 @@ describe("build manifests", () => {
     } finally {
       rmSync(rootDir, { recursive: true, force: true });
     }
+  });
+
+  it("rejects mutable or mismatched image identities", () => {
+    const digest = `sha256:${"a".repeat(64)}`;
+    expect(() =>
+      createBuildManifest({
+        target: "local",
+        driver: "docker-compose",
+        deploymentId: "deployment-1",
+        digest: "latest",
+        contentId: "content-1",
+      }),
+    ).toThrow(/SHA-256/);
+    expect(() =>
+      createBuildManifest({
+        target: "local",
+        driver: "docker-compose",
+        deploymentId: "deployment-1",
+        imageRef: "demo:latest",
+        digest,
+        contentId: "content-1",
+      }),
+    ).toThrow(/image reference/);
   });
 
   it("excludes manifests and mutable runtime output from content IDs", () => {

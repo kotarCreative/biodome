@@ -8,6 +8,7 @@ import {
   dockerSandboxDriver,
 } from "../../runtime/docker-sandbox.js";
 import { createPlan } from "../../core/plan.js";
+import { Effect } from "effect";
 
 describe("Docker Sandboxes argument builders", () => {
   it("creates a named shell sandbox for the project workspace", () => {
@@ -132,5 +133,21 @@ describe("Docker Sandbox capabilities", () => {
   it("advertises process signaling but not unenforced network policy", () => {
     expect(dockerSandboxDriver.capabilities.has("process.signal")).toBe(true);
     expect(dockerSandboxDriver.capabilities.has("network.policy")).toBe(false);
+  });
+
+  it("requires a validated sandbox identity for stateful operations", async () => {
+    const plan = createPlan("test");
+    const target = { name: "local", driver: "docker-sandbox" as const, options: {} };
+    await expect(
+      Effect.runPromise(
+        dockerSandboxDriver.status({
+          rootDir: "/project",
+          outputDir: "/project/.biodome-build/targets/local",
+          plan,
+          target,
+          deploymentId: "deployment",
+        }),
+      ),
+    ).rejects.toThrow(/requires validated deployment state/);
   });
 });

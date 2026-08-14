@@ -39,7 +39,7 @@ function driver(
         driver: "fake",
         deploymentId: "deployment",
         resourceIds: {},
-        createdAt: "",
+        createdAt: new Date().toISOString(),
       }),
     stop: () => Effect.void,
     exec: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "", durationMs: 0 }),
@@ -102,6 +102,37 @@ describe("target workflows", () => {
     }
   });
 
+  it("rejects unsupported local target requirements before availability checks", async () => {
+    const runtimeDriver: RuntimeDriver = { ...driver(), id: "docker-compose" };
+    const ensureAvailable = vi.fn(() => Effect.void);
+    runtimeDriver.ensureAvailable = ensureAvailable;
+    const deps = dependencies(runtimeDriver);
+    deps.plan.deployment!.target.driver = "docker-compose";
+    deps.plan.runtime.services.push({
+      name: "redis",
+      type: "redis",
+      runtime: "process",
+      image: "redis:7",
+      containerName: "redis",
+      environment: {},
+      ports: [],
+      volumes: [],
+      networks: [],
+    });
+
+    const rootDir = mkdtempSync(join(tmpdir(), "biodome-preflight-"));
+    try {
+      await expect(
+        Effect.runPromise(
+          buildWorkflow(rootDir, "local", deps).pipe(Effect.provide(NoOpEventStoreLive("test"))),
+        ),
+      ).rejects.toThrow(/incompatible with provider/);
+      expect(ensureAvailable).not.toHaveBeenCalled();
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("up builds when requested and preserves exec capability errors", async () => {
     const runtimeDriver = driver();
     const build = vi.fn(() => Effect.succeed({ imageRef: "fake:image" }));
@@ -137,7 +168,7 @@ describe("target workflows", () => {
         driver: "fake",
         deploymentId: "deployment",
         resourceIds: {},
-        createdAt: "",
+        createdAt: new Date().toISOString(),
       });
       await expect(
         Effect.runPromise(
@@ -150,7 +181,7 @@ describe("target workflows", () => {
     }
   });
 
-  it("reads logs without requiring stopped deployment state or a build manifest", async () => {
+  it("requires validated deployment state before reading logs", async () => {
     const logs = vi.fn(() => Effect.void);
     const runtimeDriver = driver(
       capabilitiesOf("lifecycle.build", "lifecycle.start", "lifecycle.stop", "logs.stream"),
@@ -163,10 +194,8 @@ describe("target workflows", () => {
           Effect.provide(NoOpEventStoreLive("test")),
         ),
       ),
-    ).resolves.toBeUndefined();
-    expect(logs).toHaveBeenCalledOnce();
-    expect(logs.mock.calls[0][0]).not.toHaveProperty("state");
-    expect(logs.mock.calls[0][0]).not.toHaveProperty("buildManifest");
+    ).rejects.toThrow("No deployment state found");
+    expect(logs).not.toHaveBeenCalled();
   });
 
   it("restarts every daemon or reports them as skipped when unsupported", async () => {
@@ -187,13 +216,24 @@ describe("target workflows", () => {
       { name: "setup", command: ["setup"], ports: [], environment: {}, mode: "oneshot" },
     );
 
-    const result = await Effect.runPromise(
-      restartWorkflow("/project", "local", undefined, deps).pipe(
-        Effect.provide(NoOpEventStoreLive("test")),
-      ),
-    );
-    expect(result.skipped).toEqual([]);
-    expect(restarted).toEqual(["web", "worker"]);
+    const rootDir = mkdtempSync(join(tmpdir(), "biodome-restart-"));
+    try {
+      writeState(rootDir, "local", {
+        driver: "fake",
+        deploymentId: "deployment",
+        resourceIds: {},
+        createdAt: new Date().toISOString(),
+      });
+      const result = await Effect.runPromise(
+        restartWorkflow(rootDir, "local", undefined, deps).pipe(
+          Effect.provide(NoOpEventStoreLive("test")),
+        ),
+      );
+      expect(result.skipped).toEqual([]);
+      expect(restarted).toEqual(["web", "worker"]);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
   });
 
   it("rejects unsupported target services during validation before driver operations", async () => {

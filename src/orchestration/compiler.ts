@@ -81,6 +81,7 @@ export function compileExecutionPlan(plan: Plan): ExecutionPlan {
     services: plan.runtime.services.map((service) => ({
       name: service.name,
       kind: service.type,
+      runtime: service.runtime ?? "container",
       image: service.image,
       persistence: service.volumes.length > 0 ? "workspace" : "task",
     })),

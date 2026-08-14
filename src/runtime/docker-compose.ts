@@ -46,12 +46,11 @@ function stagingImageRef(input: RuntimeOperationInput): string {
   return `${input.plan.project}-dev:${input.deploymentId}-build`;
 }
 
-export function imageRefFromLocalDigest(project: string, digest: string): string {
-  const value = digest.replace(/^sha256:/, "");
-  if (!/^[a-f0-9]{64}$/i.test(value)) {
+export function imageRefFromLocalDigest(digest: string): string {
+  if (!/^sha256:[a-f0-9]{64}$/i.test(digest)) {
     throw new RuntimeError({ message: `Docker returned an invalid image digest: ${digest}` });
   }
-  return `${project}-dev:${value}`;
+  return digest;
 }
 
 function platformErrorMessage(error: unknown): string {
@@ -232,8 +231,7 @@ export const dockerComposeDriver: RuntimeDriver &
             message: `Failed to inspect Docker image ${stagingImage}: ${platformErrorMessage(error)}`,
           }),
       });
-      const imageRef = imageRefFromLocalDigest(input.plan.project, digest);
-      yield* runDockerCmd(["image", "tag", stagingImage, imageRef], input.outputDir);
+      const imageRef = imageRefFromLocalDigest(digest);
       return { imageRef, digest };
     });
   },

@@ -38,7 +38,7 @@ export function readState(
     });
   }
 
-  let raw: DeploymentState;
+  let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(path, "utf-8")) as DeploymentState;
   } catch {
@@ -47,9 +47,9 @@ export function readState(
     });
   }
 
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+  if (!isDeploymentState(raw)) {
     throw new ValidationError({
-      message: `State file for target "${targetName}" is corrupt or not a JSON object`,
+      message: `State file for target "${targetName}" is corrupt or missing required fields`,
     });
   }
 
@@ -78,6 +78,23 @@ export function readState(
   }
 
   return raw;
+}
+
+function isDeploymentState(value: unknown): value is DeploymentState {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const state = value as Record<string, unknown>;
+  return (
+    typeof state.schemaVersion === "number" &&
+    typeof state.target === "string" &&
+    typeof state.driver === "string" &&
+    typeof state.deploymentId === "string" &&
+    typeof state.createdAt === "string" &&
+    Number.isFinite(Date.parse(state.createdAt)) &&
+    typeof state.resourceIds === "object" &&
+    state.resourceIds !== null &&
+    !Array.isArray(state.resourceIds) &&
+    Object.values(state.resourceIds).every((id) => typeof id === "string")
+  );
 }
 
 export function writeState(

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { capabilitiesOf } from "../../core/capabilities.js";
 import type { ExecutionPlan } from "../../orchestration/execution-plan.js";
 import { validateCompatibility } from "../../orchestration/compatibility.js";
+import { providerProfile } from "../../orchestration/compiler.js";
+import { dockerComposeDriver } from "../../runtime/docker-compose.js";
 import { dockerSandboxDriver } from "../../runtime/docker-sandbox.js";
 
 function plan(requirements: ExecutionPlan["task"]["capabilities"]): ExecutionPlan {
@@ -92,5 +94,45 @@ describe("validateCompatibility", () => {
         reason: "requested 4, provider maximum 2",
       },
     ]);
+  });
+
+  it("rejects local requirements that Docker drivers do not enforce", () => {
+    const executionPlan = plan([]);
+    executionPlan.task.workspace = { strategy: "upload" };
+    executionPlan.task.resources = { cpu: 1 };
+    executionPlan.task.network.allow = ["api.example.test:443"];
+    executionPlan.services.push({
+      name: "redis",
+      kind: "redis",
+      runtime: "process",
+      persistence: "task",
+    });
+
+    const report = validateCompatibility(executionPlan, providerProfile(dockerComposeDriver));
+
+    expect(report.compatible).toBe(false);
+    expect(report.missing).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "workspace", subject: 'workspace strategy "upload"' }),
+        expect.objectContaining({ kind: "resource", subject: "cpu" }),
+        expect.objectContaining({ kind: "network", subject: "network allowlist" }),
+        expect.objectContaining({ kind: "service", subject: 'service "redis"' }),
+      ]),
+    );
+  });
+
+  it("accepts the generated PostgreSQL process service locally", () => {
+    const executionPlan = plan([]);
+    executionPlan.task.network.allow = [];
+    executionPlan.services.push({
+      name: "postgres",
+      kind: "postgres",
+      runtime: "process",
+      persistence: "task",
+    });
+
+    expect(
+      validateCompatibility(executionPlan, providerProfile(dockerSandboxDriver)).compatible,
+    ).toBe(true);
   });
 });

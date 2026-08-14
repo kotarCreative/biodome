@@ -94,6 +94,11 @@ export const SandboxEventSchema = Schema.Struct({
 
 export type SandboxEvent = typeof SandboxEventSchema.Type;
 
+export interface CommandMetadata {
+  executable: string;
+  argumentCount: number;
+}
+
 export interface EventData {
   "run.started": { command: string; cwd: string };
   "run.completed": { command: string; durationMs: number };
@@ -113,12 +118,12 @@ export interface EventData {
   "runtime.stop.started": { rootDir?: string };
   "runtime.stop.completed": { rootDir?: string; durationMs: number };
   "runtime.stop.failed": { rootDir?: string; durationMs: number; error: string };
-  "runtime.exec.started": { command: string[] };
-  "runtime.exec.completed": { command: string[]; durationMs: number };
-  "runtime.exec.failed": { command: string[]; durationMs: number; error: string };
-  "runtime.job.started": { command: string[] };
-  "runtime.job.completed": { command: string[]; durationMs: number };
-  "runtime.job.failed": { command: string[]; durationMs: number; error: string };
+  "runtime.exec.started": CommandMetadata;
+  "runtime.exec.completed": CommandMetadata & { durationMs: number };
+  "runtime.exec.failed": CommandMetadata & { durationMs: number; error: string };
+  "runtime.job.started": CommandMetadata;
+  "runtime.job.completed": CommandMetadata & { durationMs: number };
+  "runtime.job.failed": CommandMetadata & { durationMs: number; error: string };
   "runtime.restart.started": { processName: string };
   "runtime.restart.completed": { processName: string; durationMs: number };
   "runtime.restart.failed": { processName: string; durationMs: number; error: string };
@@ -440,4 +445,9 @@ export function instrumentOperation<A, R>(
     );
     return result;
   });
+}
+
+/** Preserve useful command telemetry without persisting prompts or arguments. */
+export function commandMetadata(command: readonly string[]): CommandMetadata {
+  return { executable: command[0] ?? "", argumentCount: Math.max(0, command.length - 1) };
 }

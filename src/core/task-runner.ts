@@ -15,7 +15,7 @@ import {
   writeBuildManifest,
   readBuildManifest,
 } from "../runtime/build-manifest.js";
-import { EventStore, instrumentOperation, type EventScope } from "./events.js";
+import { EventStore, commandMetadata, instrumentOperation, type EventScope } from "./events.js";
 import { RuntimeError, ValidationError } from "./errors.js";
 import {
   supportsArtifacts,
@@ -123,12 +123,16 @@ export function executeTask(
       provider: driver.id,
     };
 
-    yield* store.emit("task.started", {
-      target: targetName,
-      driver: driver.id,
-      task: task.name,
-      harness: task.harness,
-    });
+    yield* store.emit(
+      "task.started",
+      {
+        target: targetName,
+        driver: driver.id,
+        task: task.name,
+        harness: task.harness,
+      },
+      scope,
+    );
 
     const stateFilePath = statePath(rootDir, targetName);
 
@@ -219,7 +223,7 @@ export function executeTask(
           store,
           scope,
           "job",
-          { command },
+          commandMetadata(command),
           driverOps.runJob({ ...commandInput, command, timeoutMs, artifactPaths }),
         );
       }
@@ -228,7 +232,7 @@ export function executeTask(
           store,
           scope,
           "exec",
-          { command },
+          commandMetadata(command),
           driverOps.exec({ ...commandInput, command, timeoutMs, artifactPaths }),
         );
       }
@@ -244,14 +248,18 @@ export function executeTask(
     const durationMs = Date.now() - startTime;
 
     if (execResult.timedOut) {
-      yield* store.emit("task.failed", {
-        target: targetName,
-        driver: driver.id,
-        task: task.name,
-        harness: task.harness,
-        durationMs,
-        error: `timed out after ${task.timeout}`,
-      });
+      yield* store.emit(
+        "task.failed",
+        {
+          target: targetName,
+          driver: driver.id,
+          task: task.name,
+          harness: task.harness,
+          durationMs,
+          error: `timed out after ${task.timeout}`,
+        },
+        scope,
+      );
       return yield* Effect.fail(
         new RuntimeError({
           message: `Task "${task.name}" timed out after ${task.timeout}`,
@@ -260,15 +268,19 @@ export function executeTask(
     }
 
     if (execResult.exitCode !== 0) {
-      yield* store.emit("task.failed", {
-        target: targetName,
-        driver: driver.id,
-        task: task.name,
-        harness: task.harness,
-        durationMs,
-        exitCode: execResult.exitCode,
-        error: `exit code ${execResult.exitCode}`,
-      });
+      yield* store.emit(
+        "task.failed",
+        {
+          target: targetName,
+          driver: driver.id,
+          task: task.name,
+          harness: task.harness,
+          durationMs,
+          exitCode: execResult.exitCode,
+          error: `exit code ${execResult.exitCode}`,
+        },
+        scope,
+      );
       return yield* Effect.fail(
         new RuntimeError({
           message: `Task "${task.name}" failed with exit code ${execResult.exitCode}`,
@@ -282,15 +294,19 @@ export function executeTask(
         const reason = validation.timedOut
           ? `validation timed out: ${validationCommand.join(" ")}`
           : `validation failed with exit code ${validation.exitCode}: ${validationCommand.join(" ")}`;
-        yield* store.emit("task.failed", {
-          target: targetName,
-          driver: driver.id,
-          task: task.name,
-          harness: task.harness,
-          durationMs: Date.now() - startTime,
-          exitCode: validation.exitCode,
-          error: reason,
-        });
+        yield* store.emit(
+          "task.failed",
+          {
+            target: targetName,
+            driver: driver.id,
+            task: task.name,
+            harness: task.harness,
+            durationMs: Date.now() - startTime,
+            exitCode: validation.exitCode,
+            error: reason,
+          },
+          scope,
+        );
         return yield* Effect.fail(new RuntimeError({ message: reason }));
       }
     }
@@ -315,15 +331,19 @@ export function executeTask(
       }));
     }
 
-    yield* store.emit("task.completed", {
-      target: targetName,
-      driver: driver.id,
-      task: task.name,
-      harness: task.harness,
-      durationMs,
-      exitCode: execResult.exitCode,
-      artifacts: taskArtifacts,
-    });
+    yield* store.emit(
+      "task.completed",
+      {
+        target: targetName,
+        driver: driver.id,
+        task: task.name,
+        harness: task.harness,
+        durationMs,
+        exitCode: execResult.exitCode,
+        artifacts: taskArtifacts,
+      },
+      scope,
+    );
 
     return { exitCode: execResult.exitCode, outputDir, artifacts: taskArtifacts, durationMs };
   });
@@ -332,20 +352,19 @@ export function executeTask(
     const input = { rootDir, outputDir, plan, target, deploymentId, executionPlan };
     const store = yield* EventStore;
     const scope: EventScope = { runId: store.runId, target: targetName, provider: driver.id };
-    if (supportsStop(driver)) {
-      let validatedState: DeploymentState | undefined;
+    if (supportsStop(driver) && existsSync(statePath(rootDir, targetName))) {
       try {
-        validatedState = readState(rootDir, targetName, deploymentId, driver.id);
-      } catch {
-        validatedState = undefined;
-      }
-      if (validatedState) {
+        const validatedState = readState(rootDir, targetName, deploymentId, driver.id);
         yield* instrumentOperation(
           store,
           scope,
           "stop",
           { rootDir },
           driver.stop({ ...input, state: validatedState }),
+        );
+      } catch (readError) {
+        yield* Effect.logWarning(
+          `Failed to read deployment state during cleanup: ${readError instanceof Error ? readError.message : String(readError)}`,
         );
       }
     }

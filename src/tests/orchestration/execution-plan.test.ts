@@ -28,7 +28,15 @@ const document = {
     artifacts: [{ path: "review.md", required: true }],
     validationCommands: [["npm", "test"]],
   },
-  services: [{ name: "postgres", kind: "postgres", version: "17", persistence: "task" }],
+  services: [
+    {
+      name: "postgres",
+      kind: "postgres",
+      runtime: "container",
+      version: "17",
+      persistence: "task",
+    },
+  ],
   processes: [{ name: "api", command: ["npm", "run", "dev"], mode: "daemon" }],
 };
 

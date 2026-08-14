@@ -1,6 +1,11 @@
 import { Effect } from "effect";
 import { RuntimeError } from "../../core/errors.js";
-import { EventStore, instrumentOperation, type EventScope } from "../../core/events.js";
+import {
+  EventStore,
+  commandMetadata,
+  instrumentOperation,
+  type EventScope,
+} from "../../core/events.js";
 import {
   supportsAvailability,
   supportsBuild,
@@ -26,6 +31,8 @@ import {
   type TargetOperationDependencies,
   operationInput,
 } from "../target-operation.js";
+import { providerProfile } from "../../orchestration/compiler.js";
+import { preflightTargetCompatibility } from "../../orchestration/compatibility.js";
 
 /** Pass validated deployment state and the durable build manifest to an operation. */
 function operationInputWithState(operation: TargetOperation) {
@@ -42,6 +49,18 @@ function operationInputWithState(operation: TargetOperation) {
     operation.driver.id,
   );
   return { ...operationInput(operation), state, buildManifest };
+}
+
+function operationInputWithValidatedState(operation: TargetOperation) {
+  return {
+    ...operationInput(operation),
+    state: readState(
+      operation.rootDir,
+      operation.target.name,
+      operation.deploymentId,
+      operation.driver.id,
+    ),
+  };
 }
 
 function persistBuildManifest(
@@ -96,6 +115,24 @@ function planLoaded(
   });
 }
 
+function ensureTargetCompatible(
+  operation: TargetOperation,
+): Effect.Effect<void, RuntimeError, never> {
+  const compatibility = preflightTargetCompatibility(
+    operation.plan,
+    providerProfile(operation.driver),
+  );
+  if (compatibility.compatible) return Effect.void;
+  const details = compatibility.missing
+    .map((issue) => `${issue.subject}${issue.reason ? ` (${issue.reason})` : ""}`)
+    .join(", ");
+  return Effect.fail(
+    new RuntimeError({
+      message: `Target "${operation.target.name}" is incompatible with provider "${operation.driver.id}": ${details}`,
+    }),
+  );
+}
+
 export function buildWorkflow(
   rootDir: string,
   targetName: string,
@@ -104,6 +141,7 @@ export function buildWorkflow(
   return Effect.gen(function* () {
     const operation = yield* createTargetOperation(rootDir, targetName, {}, dependencies);
     yield* planLoaded(operation, targetName);
+    yield* ensureTargetCompatible(operation);
     const { driver } = operation;
     if (!supportsAvailability(driver)) return yield* unsupported(driver.id, "availability checks");
     if (!supportsRender(driver)) return yield* unsupported(driver.id, "lifecycle.build");
@@ -133,6 +171,7 @@ export function upWorkflow(
   return Effect.gen(function* () {
     const operation = yield* createTargetOperation(rootDir, targetName, {}, dependencies);
     yield* planLoaded(operation, targetName);
+    yield* ensureTargetCompatible(operation);
     const { driver } = operation;
     if (!supportsAvailability(driver)) return yield* unsupported(driver.id, "availability checks");
     if (!supportsStart(driver)) return yield* unsupported(driver.id, "lifecycle.start");
@@ -245,7 +284,7 @@ export function execWorkflow(
         store,
         scope,
         "job",
-        { command },
+        commandMetadata(command),
         operation.driver.runJob({ ...input, command }),
       );
     } else if (supportsInplaceExec(operation.driver)) {
@@ -254,7 +293,7 @@ export function execWorkflow(
         store,
         scope,
         "exec",
-        { command },
+        commandMetadata(command),
         operation.driver.exec({ ...input, command }),
       );
     } else {
@@ -290,7 +329,7 @@ export function logsWorkflow(
       scope,
       "logs",
       { processName },
-      operation.driver.logs({ ...operationInput(operation), processName }),
+      operation.driver.logs({ ...operationInputWithValidatedState(operation), processName }),
     );
   }).pipe(Effect.scoped);
 }
@@ -309,7 +348,19 @@ export function psWorkflow(
     );
     if (!supportsStatus(operation.driver))
       return yield* unsupported(operation.driver.id, "status.read");
-    const status = yield* operation.driver.status(operationInputWithState(operation));
+    const store = yield* EventStore;
+    const scope: EventScope = {
+      runId: store.runId,
+      target: targetName,
+      provider: operation.driver.id,
+    };
+    const status = yield* instrumentOperation(
+      store,
+      scope,
+      "status",
+      {},
+      operation.driver.status(operationInputWithValidatedState(operation)),
+    );
     return { status };
   });
 }
@@ -351,7 +402,12 @@ export function statusWorkflow(
         scope,
         "exec",
         {
-          command: ["supervisorctl", "-c", operation.layout.container.supervisordConfig, "status"],
+          ...commandMetadata([
+            "supervisorctl",
+            "-c",
+            operation.layout.container.supervisordConfig,
+            "status",
+          ]),
         },
         operation.driver.exec({
           ...input,
@@ -392,10 +448,11 @@ export function restartWorkflow(
         scope,
         "restart",
         { processName },
-        operation.driver.restart({ ...operationInput(operation), processName }),
+        operation.driver.restart({ ...operationInputWithValidatedState(operation), processName }),
       );
     } else {
       const skipped: string[] = [];
+      const input = operationInputWithValidatedState(operation);
       for (const process of operation.plan.runtime.processes.filter(
         (item) => item.mode === "daemon",
       )) {
@@ -417,10 +474,7 @@ export function restartWorkflow(
           scope,
           "restart",
           { processName: process.name },
-          operation.driver.restart({
-            ...operationInput(operation),
-            processName: process.name,
-          }),
+          operation.driver.restart({ ...input, processName: process.name }),
         );
       }
       return { message: `Restart completed on target "${targetName}"`, skipped };

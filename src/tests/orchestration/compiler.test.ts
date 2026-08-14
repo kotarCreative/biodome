@@ -64,7 +64,13 @@ describe("compileExecutionPlan", () => {
       },
     ]);
     expect(executionPlan.services).toEqual([
-      { name: "postgres", kind: "postgres", image: "postgres:17", persistence: "workspace" },
+      {
+        name: "postgres",
+        kind: "postgres",
+        runtime: "container",
+        image: "postgres:17",
+        persistence: "workspace",
+      },
     ]);
     expect(executionPlan.processes).toEqual([
       {

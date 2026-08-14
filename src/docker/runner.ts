@@ -6,7 +6,7 @@ import { capabilitiesOf } from "../core/capabilities.js";
 import { NodeRuntime } from "../core/runtime-node.js";
 import type { SandboxRuntime } from "../core/runtime.js";
 import { RuntimeError } from "../core/errors.js";
-import { EventStore, type EventData } from "../core/events.js";
+import { EventStore, commandMetadata, type EventData } from "../core/events.js";
 
 const COMPOSE_FILE = ".biodome-build/docker-compose.yaml";
 
@@ -299,11 +299,11 @@ export class DockerRuntime implements SandboxRuntime {
   exec(command: string[]): Effect.Effect<void, RuntimeError, EventStore> {
     return withTiming({
       startType: "runtime.exec.started",
-      startData: { command },
+      startData: commandMetadata(command),
       completeType: "runtime.exec.completed",
-      completeData: (durationMs) => ({ command, durationMs }),
+      completeData: (durationMs) => ({ ...commandMetadata(command), durationMs }),
       failType: "runtime.exec.failed",
-      failData: (durationMs, error) => ({ command, durationMs, error }),
+      failData: (durationMs, error) => ({ ...commandMetadata(command), durationMs, error }),
       effect: execDocker({
         project: this.project,
         args: ["exec", `${this.project}-dev`, ...command],

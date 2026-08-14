@@ -56,6 +56,7 @@ export interface ArtifactRequirement {
 export interface ServiceRequirement {
   name: string;
   kind: string;
+  runtime: "container" | "process";
   version?: string;
   image?: string;
   persistence: "task" | "workspace" | "external";
@@ -133,6 +134,7 @@ const CapabilityRequirementSchema = Schema.Struct({
 const ServiceRequirementSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
   kind: Schema.String.check(Schema.isMinLength(1)),
+  runtime: Schema.Literals(["container", "process"]),
   version: Schema.optional(Schema.String),
   image: Schema.optional(Schema.String),
   persistence: Schema.Literals(["task", "workspace", "external"]),

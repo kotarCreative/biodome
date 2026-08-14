@@ -93,7 +93,14 @@ export function inferSbxAgent(plan: Plan): DockerSandboxOptions["agent"] {
 
 function resolvedDockerSandboxOptions(input: RuntimeOperationInput): DockerSandboxOptions {
   const options = dockerSandboxOptions(input.target);
-  return { ...options, agent: options.agent ?? inferSbxAgent(input.plan) };
+  const workspace = input.executionPlan?.task.workspace.strategy;
+  return {
+    ...options,
+    // Task execution must use the workspace strategy that compatibility
+    // validated, rather than an independent target option.
+    clone: workspace ? workspace === "clone" : options.clone,
+    agent: options.agent ?? inferSbxAgent(input.plan),
+  };
 }
 
 /** Build the non-interactive `sbx create` invocation for a Biodome deployment. */
@@ -228,9 +235,14 @@ function artifactPath(input: RuntimeOperationInput, artifact: string): string {
 }
 
 function sandboxId(input: RuntimeOperationInput): string {
-  return (
-    input.state?.resourceIds.sandbox ?? input.buildManifest?.provider.sandbox ?? input.deploymentId
-  );
+  const id = input.state?.resourceIds.sandbox;
+  if (!id) {
+    throw new RuntimeError({
+      message:
+        "Docker Sandbox operation requires validated deployment state with a sandbox identity",
+    });
+  }
+  return id;
 }
 
 function buildSandboxId(input: RuntimeOperationInput): string {
@@ -245,12 +257,11 @@ function stagingImageRef(input: RuntimeOperationInput): string {
   return `${input.plan.project}-dev:${input.deploymentId}-build`;
 }
 
-function imageRefFromDigest(project: string, digest: string): string {
-  const value = digest.replace(/^sha256:/, "");
-  if (!/^[a-f0-9]{64}$/i.test(value)) {
+function imageRefFromDigest(digest: string): string {
+  if (!/^sha256:[a-f0-9]{64}$/i.test(digest)) {
     throw new RuntimeError({ message: `Docker returned an invalid image digest: ${digest}` });
   }
-  return `${project}-dev:${value}`;
+  return digest;
 }
 
 function runSbxCapture(args: string[], cwd?: string): Effect.Effect<string, RuntimeError, never> {
@@ -422,11 +433,7 @@ export const dockerSandboxDriver: RuntimeDriver &
         ["exec", id, "docker", "image", "inspect", "--format", "{{.Id}}", stagingImage],
         input.rootDir,
       );
-      const imageRef = imageRefFromDigest(input.plan.project, digest);
-      yield* runSbxCmd(
-        ["exec", id, "docker", "image", "tag", stagingImage, imageRef],
-        input.rootDir,
-      );
+      const imageRef = imageRefFromDigest(digest);
       return { imageRef, digest, provider: { sandbox: id } };
     });
   },
@@ -547,12 +554,13 @@ export const dockerSandboxDriver: RuntimeDriver &
   status(input: RuntimeOperationInput): Effect.Effect<StatusResult, RuntimeError, EventStore> {
     return Effect.try({
       try: () => {
+        const id = sandboxId(input);
         const output = execFileSync("sbx", ["ls", "--json"], {
           cwd: input.rootDir,
           encoding: "utf-8",
           stdio: ["pipe", "pipe", "pipe"],
         });
-        return parseSbxListOutput(output, sandboxId(input));
+        return parseSbxListOutput(output, id);
       },
       catch: (error) =>
         new RuntimeError({

@@ -109,6 +109,24 @@ describe("Deployment state", () => {
 
       expect(() => readState(rootDir, "test-target", "abc-123", "docker-compose")).toThrow();
     });
+
+    it("rejects malformed state fields before a driver can use them", () => {
+      writeFileSync(
+        statePath(rootDir, "test-target"),
+        JSON.stringify({
+          schemaVersion: 1,
+          target: "test-target",
+          driver: "docker-compose",
+          deploymentId: "abc-123",
+          createdAt: "not-a-date",
+          resourceIds: { project: 123 },
+        }),
+      );
+
+      expect(() => readState(rootDir, "test-target", "abc-123", "docker-compose")).toThrow(
+        /missing required fields/,
+      );
+    });
   });
 
   describe("removeState", () => {
