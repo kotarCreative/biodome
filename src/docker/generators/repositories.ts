@@ -12,29 +12,38 @@ export function generateRepoScripts(plan: Plan): Record<string, string> {
 function repoSyncScript(repo: Repo, plan: Plan): string {
   const lines: string[] = ["#!/bin/sh", `# Auto-generated repo sync for ${repo.name}`, "set -e"];
 
-  let cloneUrl = repo.url;
   const tokenRef = repo.credentials?.token;
   const sshKeyRef = repo.credentials?.sshKey;
+  const knownHosts = repo.credentials?.knownHosts;
 
-  if (tokenRef && typeof tokenRef === "object") {
+  if (tokenRef) {
     lines.push(
       `if [ -z "$${tokenRef.env}" ]; then echo "Repo ${repo.name}: ${tokenRef.env} is not set"; exit 1; fi`,
     );
-    // Rewrite https://host/path.git -> https://$TOKEN@host/path.git
-    cloneUrl = cloneUrl.replace(/^https:\/\//, `https://$${tokenRef.env}@`);
+    lines.push("mkdir -p /tmp/biodome-repo-helpers");
+    const askpassPath = `/tmp/biodome-repo-helpers/${repo.name}-askpass.sh`;
+    lines.push(`cat > ${shellQuote(askpassPath)} << 'ASKPASS_EOF'`);
+    lines.push("#!/bin/sh");
+    lines.push(`echo "\$${tokenRef.env}"`);
+    lines.push("ASKPASS_EOF");
+    lines.push(`chmod 700 ${shellQuote(askpassPath)}`);
+    lines.push(`export GIT_ASKPASS=${shellQuote(askpassPath)}`);
+    lines.push("export GIT_TERMINAL_PROMPT=0");
   }
 
-  if (sshKeyRef && typeof sshKeyRef === "object") {
+  if (sshKeyRef) {
     lines.push(
       `if [ -z "$${sshKeyRef.env}" ]; then echo "Repo ${repo.name}: ${sshKeyRef.env} is not set"; exit 1; fi`,
     );
     lines.push("mkdir -p /tmp/biodome-repo-keys");
     lines.push(`printf '%s' "$${sshKeyRef.env}" > /tmp/biodome-repo-keys/${repo.name}`);
     lines.push(`chmod 600 /tmp/biodome-repo-keys/${repo.name}`);
-    lines.push("touch /tmp/biodome-repo-keys/known_hosts");
+    lines.push("cat > /tmp/biodome-repo-keys/known_hosts << 'KNOWN_HOSTS_EOF'");
+    lines.push(knownHosts ?? "");
+    lines.push("KNOWN_HOSTS_EOF");
     lines.push("chmod 600 /tmp/biodome-repo-keys/known_hosts");
     lines.push(
-      `export GIT_SSH_COMMAND='ssh -i /tmp/biodome-repo-keys/${repo.name} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/biodome-repo-keys/known_hosts'`,
+      `export GIT_SSH_COMMAND='ssh -i /tmp/biodome-repo-keys/${repo.name} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/tmp/biodome-repo-keys/known_hosts'`,
     );
   }
 
@@ -47,10 +56,18 @@ function repoSyncScript(repo: Repo, plan: Plan): string {
   lines.push("else");
   lines.push('  mkdir -p "$(dirname "$REPO_DIR")"');
   const depthFlag = repo.depth !== undefined ? ` --depth ${repo.depth}` : "";
-  lines.push(`  git clone --branch ${shellQuote(repo.branch)}${depthFlag} ${cloneUrl} "$REPO_DIR"`);
+  lines.push(
+    `  git clone --branch ${shellQuote(repo.branch)}${depthFlag} ${shellQuote(repo.url)} "$REPO_DIR"`,
+  );
   lines.push("fi");
   lines.push('cd "$REPO_DIR"');
   lines.push(...repositoryDependencyCommands(plan));
+
+  if (tokenRef) {
+    lines.push(`rm -f ${shellQuote(`/tmp/biodome-repo-helpers/${repo.name}-askpass.sh`)}`);
+    // Leave the remote URL credential-free. git clone leaves the origin URL as
+    // provided, which contains no token because we use GIT_ASKPASS.
+  }
 
   return lines.join("\n") + "\n";
 }

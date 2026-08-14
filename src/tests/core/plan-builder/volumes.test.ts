@@ -164,7 +164,6 @@ describe("VolumeBuilder", () => {
       proxy: true,
       credentials: {
         accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
-        secretAccessKey: "literal-secret",
       },
     });
     builder.addS3({

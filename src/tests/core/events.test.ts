@@ -125,6 +125,24 @@ describe("createFileEventStore", () => {
     expect(existsSync(join(dir, "events-run-2.jsonl"))).toBe(true);
     expect(existsSync(path)).toBe(true);
   });
+
+  it("redacts secrets from event payloads before writing", async () => {
+    const path = join(dir, "events.jsonl");
+    const store = createFileEventStore({ runId: "run-1", path });
+
+    await Effect.runPromise(
+      store.emit("hook.failed", {
+        name: "repo-sync",
+        point: "start.pre",
+        durationMs: 10,
+        error: "clone failed: https://user:pass@example.com/repo.git",
+      }),
+    );
+
+    const line = readFileSync(path, "utf-8").trim();
+    expect(line).not.toContain("user:pass");
+    expect(line).toContain("https://***REDACTED***@example.com/repo.git");
+  });
 });
 
 describe("NoOpEventStoreLive", () => {

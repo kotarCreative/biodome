@@ -77,15 +77,6 @@ export class ProviderBuilder {
     if (this.plan.runtime.providers.some((provider) => provider.name === validated.name)) {
       throw new ValidationError({ message: `Duplicate provider name: ${validated.name}` });
     }
-    if (validated.credentials) {
-      for (const [key, value] of Object.entries(validated.credentials)) {
-        if (typeof value === "string") {
-          throw new ValidationError({
-            message: `Provider ${validated.name}: credentials.${key} must be an environment reference ({ env: "VAR" }), not a literal string`,
-          });
-        }
-      }
-    }
 
     const provider: Provider = {
       name: validated.name,

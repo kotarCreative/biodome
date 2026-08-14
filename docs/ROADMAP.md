@@ -10,16 +10,21 @@
 - [x] Task preflight capability checks
 - [x] Provider-neutral execution plans and durable run records
 - [x] Initial ECS task execution and S3 artifact collection
+- [x] Mandatory MCP authentication (Plan 01)
+- [x] Typed secret handling and repository sync (Plan 02)
+
+## Partially complete
+
+- [~] Provider-neutral runtime execution contracts (Plan 03) — durable `BuildManifest`, state validation, and scoped events are implemented; provider-profile support and the in-place exec / one-shot job split need finalization.
+- [~] Bounded MCP I/O (Plan 06) — configurable command limits and a spawn-based runner are implemented; telemetry queue hardening and upstream abort propagation remain.
+- [~] Event observability (Plan 07) — bounded, target-scoped event logs and CLI queries are implemented; lifecycle-event equivalence across all drivers and redaction defaults need finalization.
 
 ## Upcoming
 
-- [ ] Mandatory MCP authentication and typed secret handling
-- [ ] Complete provider-neutral runtime execution contracts
-- [ ] Non-root local container and process isolation
-- [ ] AWS ECS production hardening and integration proof
-- [ ] Bounded MCP I/O and complete event observability
-- [ ] Security release documentation and automation
-- [ ] Stable package and startup performance budgets
+- [ ] Non-root local container and process isolation (Plan 04)
+- [ ] AWS ECS production hardening and integration proof (Plan 05)
+- [ ] Security release documentation and automation (Plan 08)
+- [ ] Stable package and startup performance budgets (Plan 09)
 
 See [the active design plans](design/README.md) for dependencies, acceptance criteria,
 and verification commands.

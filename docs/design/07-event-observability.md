@@ -1,6 +1,6 @@
 # Plan 07: Finish Event Observability
 
-Status: proposed. Priority: P1. Dependencies: Plans 03 and 06.
+Status: partial. Priority: P1. Dependencies: Plans 03 and 06.
 
 ## Objective
 

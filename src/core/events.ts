@@ -20,6 +20,7 @@ import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { runtimeLayout } from "../runtime/layout.js";
 import { RuntimeError } from "./errors.js";
+import { redactSecrets } from "./secrets.js";
 
 export const EVENT_TYPES = [
   "run.started",
@@ -252,7 +253,7 @@ export function createFileEventStore(options: FileEventStoreOptions): EventStore
       timestamp: now().toISOString(),
       type,
       scope,
-      data,
+      data: redactSecrets(data),
     };
     ensureDir();
     const line = JSON.stringify(event) + "\n";

@@ -5,6 +5,10 @@ import { Schema } from "effect";
 import type { Application, ContributionProvenance } from "../apps/types.js";
 import type { McpClientAuth } from "./mcp-client.js";
 import { McpClientAuthSchema } from "./mcp-client.js";
+import type { SecretReference } from "./secrets.js";
+import { SecretReferenceSchema } from "./secrets.js";
+
+export type { SecretReference } from "./secrets.js";
 
 export interface LanguageRequest {
   name: string;
@@ -17,7 +21,7 @@ export interface McpConfig {
   // Required when `enabled` is true. Always an `{ env: "VAR" }` reference; the
   // value is resolved from the container environment at startup. Enforced by
   // the McpConfig schema filters and by McpBuilder.configure.
-  token?: SecretValue;
+  token?: SecretReference;
   allowExec: boolean;
   allowProcessControl: boolean;
   commandTimeoutMs: number;
@@ -51,8 +55,11 @@ export interface Repo {
 }
 
 export interface RepoCredentials {
-  token?: SecretValue;
-  sshKey?: SecretValue;
+  token?: SecretReference;
+  sshKey?: SecretReference;
+  // Required when using ssh. Pinned known-host material; SSH sync refuses to
+  // trust an unknown host without it.
+  knownHosts?: string;
 }
 
 export interface AgentHarnessMcpServer {
@@ -81,7 +88,8 @@ export interface LlmProvider {
   name: string;
   npm?: string;
   displayName?: string;
-  options: Record<string, SecretValue | string | number | boolean | undefined>;
+  // Options may be literal config values or env references for sensitive fields.
+  options: Record<string, string | number | boolean | SecretReference | undefined>;
   models: Record<string, { name?: string }>;
 }
 
@@ -90,7 +98,7 @@ export interface PiHarness {
   type: "pi";
   provider?: string;
   model?: string;
-  apiKey?: SecretValue;
+  apiKey?: SecretReference;
   tools?: string[];
   extensions?: string[];
   skills?: string[];
@@ -106,7 +114,7 @@ export interface CodexHarness {
   type: "codex";
   port: number;
   mcpServers: Record<string, AgentHarnessMcpServer>;
-  apiKey?: SecretValue;
+  apiKey?: SecretReference;
   model?: string;
   telemetry: AgentHarnessTelemetry;
   config: Record<string, unknown>;
@@ -115,7 +123,7 @@ export interface CodexHarness {
 export interface ClaudeHarness {
   name: string;
   type: "claude";
-  apiKey?: SecretValue;
+  apiKey?: SecretReference;
   model?: string;
   tools?: string[];
   permissions?: string;
@@ -197,10 +205,11 @@ export interface EnvVar {
   default?: string;
 }
 
-// A SecretValue is either a plain literal string or a reference to an
-// environment variable resolved at runtime. Env references are never baked into
-// plan.json, keeping secrets out of on-disk artifacts.
-export type SecretValue = string | { env: string };
+// A SecretValue is either a plain literal string or a typed secret reference.
+// Credential-bearing fields should use `SecretReference` directly so that
+// literal strings are rejected; this type remains available for non-credential
+// configuration that may be supplied literally or via an env reference.
+export type SecretValue = string | SecretReference;
 
 // A user-declared, agent-discoverable resource — e.g. a custom API a feature
 // stands up. Captures how to reach it (url/port) plus optional credentials and
@@ -210,7 +219,7 @@ export interface Endpoint {
   description?: string;
   url?: string;
   port?: number;
-  credentials?: Record<string, SecretValue>;
+  credentials?: Record<string, SecretReference>;
   metadata?: Record<string, string>;
 }
 
@@ -227,7 +236,7 @@ export interface Provider {
   authHeader?: string;
   authScheme?: string;
   authCredential?: string;
-  credentials?: Record<string, SecretValue>;
+  credentials?: Record<string, SecretReference>;
   metadata?: Record<string, string>;
 }
 
@@ -301,7 +310,7 @@ export interface Volume {
   share?: string;
   url?: string;
   vendor?: string;
-  credentials?: Record<string, SecretValue>;
+  credentials?: Record<string, SecretReference>;
   options?: Record<string, string>;
   // MCP proxy mode: when true, the volume is not mounted in the dev container.
   // The MCP server exposes file-access tools and uses provider SDKs/adapters.
@@ -592,20 +601,12 @@ const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 // A credential value is either a plain string or an { env: "VAR" } reference
 // that resolves from the container's environment at runtime.
-export const SecretValueSchema = Schema.Union([
-  Schema.String,
-  Schema.Struct({
-    env: Schema.String.check(Schema.isMinLength(1)).check(
-      Schema.makeFilter((value) =>
-        ENV_VAR_NAME_PATTERN.test(value) ? undefined : "must be a valid environment variable name",
-      ),
-    ),
-  }),
-]);
+export const SecretValueSchema = Schema.Union([Schema.String, SecretReferenceSchema]);
 
 export const RepoCredentialsSchema = Schema.Struct({
-  token: Schema.optional(SecretValueSchema),
-  sshKey: Schema.optional(SecretValueSchema),
+  token: Schema.optional(SecretReferenceSchema),
+  sshKey: Schema.optional(SecretReferenceSchema),
+  knownHosts: Schema.optional(Schema.String),
 });
 
 export const RepoSpecSchema = Schema.Struct({
@@ -664,7 +665,7 @@ export const PiHarnessSpecSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
   provider: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
-  apiKey: Schema.optional(SecretValueSchema),
+  apiKey: Schema.optional(SecretReferenceSchema),
   tools: Schema.optional(Schema.Array(Schema.String)),
   extensions: Schema.optional(Schema.Array(Schema.String)),
   skills: Schema.optional(Schema.Array(Schema.String)),
@@ -686,7 +687,7 @@ export const PiHarnessSchema = Schema.Struct({
   type: Schema.Literals(["pi"]),
   provider: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
-  apiKey: Schema.optional(SecretValueSchema),
+  apiKey: Schema.optional(SecretReferenceSchema),
   tools: Schema.optional(Schema.Array(Schema.String)),
   extensions: Schema.optional(Schema.Array(Schema.String)),
   skills: Schema.optional(Schema.Array(Schema.String)),
@@ -701,7 +702,7 @@ export const CodexHarnessSpecSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
   port: Schema.optional(Schema.Number),
   mcpServers: Schema.optional(Schema.Record(Schema.String, AgentHarnessMcpServerSchema)),
-  apiKey: Schema.optional(SecretValueSchema),
+  apiKey: Schema.optional(SecretReferenceSchema),
   model: Schema.optional(Schema.String),
   telemetry: Schema.optional(
     Schema.Struct({
@@ -718,7 +719,7 @@ export const CodexHarnessSchema = Schema.Struct({
   type: Schema.Literals(["codex"]),
   port: Schema.Number,
   mcpServers: Schema.Record(Schema.String, AgentHarnessMcpServerSchema),
-  apiKey: Schema.optional(SecretValueSchema),
+  apiKey: Schema.optional(SecretReferenceSchema),
   model: Schema.optional(Schema.String),
   telemetry: AgentHarnessTelemetrySchema,
   config: Schema.Record(Schema.String, Schema.Unknown),
@@ -726,7 +727,7 @@ export const CodexHarnessSchema = Schema.Struct({
 
 export const ClaudeHarnessSpecSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
-  apiKey: Schema.optional(SecretValueSchema),
+  apiKey: Schema.optional(SecretReferenceSchema),
   model: Schema.optional(Schema.String),
   tools: Schema.optional(Schema.Array(Schema.String)),
   permissions: Schema.optional(Schema.String),
@@ -743,7 +744,7 @@ export const ClaudeHarnessSpecSchema = Schema.Struct({
 export const ClaudeHarnessSchema = Schema.Struct({
   name: Schema.String,
   type: Schema.Literals(["claude"]),
-  apiKey: Schema.optional(SecretValueSchema),
+  apiKey: Schema.optional(SecretReferenceSchema),
   model: Schema.optional(Schema.String),
   tools: Schema.optional(Schema.Array(Schema.String)),
   permissions: Schema.optional(Schema.String),
@@ -755,7 +756,7 @@ const LlmProviderOptionValueSchema = Schema.Union([
   Schema.String,
   Schema.Number,
   Schema.Boolean,
-  SecretValueSchema,
+  SecretReferenceSchema,
   Schema.Undefined,
 ]);
 
@@ -769,7 +770,7 @@ export const LlmProviderSpecSchema = Schema.Struct({
   ),
 });
 
-export const EndpointCredentialsSchema = Schema.Record(Schema.String, SecretValueSchema);
+export const EndpointCredentialsSchema = Schema.Record(Schema.String, SecretReferenceSchema);
 
 export const EndpointSpecSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
@@ -793,7 +794,7 @@ export const ProviderSpecSchema = Schema.Struct({
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 });
 
-export const VolumeCredentialsSchema = Schema.Record(Schema.String, SecretValueSchema);
+export const VolumeCredentialsSchema = Schema.Record(Schema.String, SecretReferenceSchema);
 
 const VolumeSpecFields = {
   name: Schema.String.check(Schema.isMinLength(1)),
@@ -888,14 +889,11 @@ export const EnvVarSchema = Schema.Struct({
 
 function mcpTokenRequired(config: {
   readonly enabled: boolean;
-  readonly token?: unknown;
+  readonly token?: SecretReference;
 }): string | undefined {
   if (!config.enabled) return undefined;
   if (config.token === undefined) {
     return 'MCP requires an environment-backed token when enabled ({ env: "VAR" })';
-  }
-  if (typeof config.token === "string") {
-    return 'MCP token must be an environment variable reference ({ env: "VAR" }), not a literal string';
   }
   return undefined;
 }
@@ -913,7 +911,7 @@ const CommandOutputBytesSchema = Schema.Number.check(Schema.isFinite())
 export const McpConfigSchema = Schema.Struct({
   enabled: Schema.Boolean,
   port: Schema.optional(Schema.Number),
-  token: Schema.optional(SecretValueSchema),
+  token: Schema.optional(SecretReferenceSchema),
   allowExec: Schema.optional(Schema.Boolean),
   allowProcessControl: Schema.optional(Schema.Boolean),
   commandTimeoutMs: Schema.optional(CommandTimeoutSchema),
@@ -1120,7 +1118,7 @@ export const CopyArtifactSchema = Schema.Struct({
 export const NormalizedMcpConfigSchema = Schema.Struct({
   enabled: Schema.Boolean,
   port: Schema.Number,
-  token: Schema.optional(SecretValueSchema),
+  token: Schema.optional(SecretReferenceSchema),
   allowExec: Schema.Boolean,
   allowProcessControl: Schema.Boolean,
   commandTimeoutMs: CommandTimeoutSchema,

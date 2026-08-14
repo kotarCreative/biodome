@@ -3,6 +3,11 @@ import { type Plan, type Repo, RepoSpecSchema } from "../plan.js";
 import type { HookSpec, RepoSpec } from "../feature.js";
 import { ValidationError } from "../errors.js";
 
+// Safe repository name: letters, digits, hyphens, underscores, and dots.
+// Must not start with a dot or hyphen and must not contain path separators or
+// shell metacharacters.
+const REPO_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
+
 export class RepositoryBuilder {
   constructor(
     private readonly plan: Plan,
@@ -13,17 +18,21 @@ export class RepositoryBuilder {
 
   add(spec: RepoSpec): void {
     const validated = Schema.decodeSync(RepoSpecSchema)(spec);
+    if (!REPO_NAME_PATTERN.test(validated.name)) {
+      throw new ValidationError({
+        message: `Repo name "${validated.name}" is invalid; use only letters, digits, hyphens, underscores, and dots, and do not start with "-" or "."`,
+      });
+    }
     if (this.plan.runtime.repos.some((repo) => repo.name === validated.name)) {
       throw new ValidationError({ message: `Duplicate repo name: ${validated.name}` });
     }
-    if (validated.credentials) {
-      for (const [key, value] of Object.entries(validated.credentials)) {
-        if (typeof value === "string") {
-          throw new ValidationError({
-            message: `Repo ${validated.name}: credentials.${key} must be an environment reference ({ env: "VAR" }), not a literal string`,
-          });
-        }
-      }
+
+    this.rejectUrlUserinfo(validated.url, validated.name);
+
+    if (validated.credentials?.sshKey && !validated.credentials.knownHosts) {
+      throw new ValidationError({
+        message: `Repo ${validated.name}: knownHosts is required when using an SSH key`,
+      });
     }
 
     const repo: Repo = {
@@ -42,6 +51,20 @@ export class RepositoryBuilder {
       command: ["sh", `${this.repositoriesPath}/${validated.name}.sh`],
       startOn: "start.pre",
     });
+  }
+
+  private rejectUrlUserinfo(url: string, name: string): void {
+    try {
+      const parsed = new URL(url);
+      if (parsed.username || parsed.password) {
+        throw new ValidationError({
+          message: `Repo ${name}: URL must not contain userinfo (username:password); use credentials.token for HTTPS or credentials.sshKey for SSH`,
+        });
+      }
+    } catch (e) {
+      if (e instanceof ValidationError) throw e;
+      // Invalid URLs are left for git to report; we only reject embedded credentials.
+    }
   }
 
   private normalizePath(path: string | undefined, name: string): string {

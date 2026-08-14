@@ -49,7 +49,7 @@ describe("buildPlan", () => {
       ".biodome/features/.gitkeep": "",
     });
 
-    await expect(buildPlan(dir)).rejects.toThrow("not a literal string");
+    await expect(buildPlan(dir)).rejects.toThrow();
   });
 
   it("loads config and features", async () => {

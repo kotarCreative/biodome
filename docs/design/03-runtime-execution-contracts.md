@@ -1,6 +1,6 @@
 # Plan 03: Complete Runtime Execution Contracts
 
-Status: proposed. Priority: P0. Dependencies: Plan 02.
+Status: partial. Priority: P0. Dependencies: Plan 02.
 
 ## Objective
 

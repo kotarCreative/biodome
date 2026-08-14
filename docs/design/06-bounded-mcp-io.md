@@ -1,6 +1,6 @@
 # Plan 06: Bound MCP I/O and Telemetry
 
-Status: proposed. Priority: P1. Dependencies: Plans 01 and 02.
+Status: partial. Priority: P1. Dependencies: Plans 01 and 02.
 
 ## Objective
 

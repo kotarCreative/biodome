@@ -2,7 +2,7 @@ import {
   Plan,
   Service,
   Port,
-  SecretValue,
+  SecretReference,
   EnvVar,
   Volume,
   Provider,
@@ -19,13 +19,10 @@ function formatPort(p: Port): string {
   return `${label}${p.host}:${p.container}`;
 }
 
-// Env-referenced credentials are shown as `$VAR` (never resolved on the host at
-// build time); literal values are shown as-is.
-function formatSecret(value: SecretValue): string {
-  if (typeof value === "object" && value !== null && "env" in value) {
-    return `$${value.env} (from environment)`;
-  }
-  return value;
+// Credentials are shown as environment-reference metadata only; the value is
+// never resolved or displayed.
+function formatSecret(value: SecretReference): string {
+  return `$${value.env} (from environment)`;
 }
 
 // Describes a declared env var without exposing passthrough values.
@@ -136,24 +133,21 @@ export interface ServiceConnection {
 export function serviceConnection(svc: Service): ServiceConnection | undefined {
   if (svc.type === "postgres") {
     const user = svc.environment.POSTGRES_USER || "postgres";
-    const password = svc.environment.POSTGRES_PASSWORD || "postgres";
     const database = svc.environment.POSTGRES_DB || "postgres";
     const hostPort = svc.ports[0]?.host || 5432;
     return {
       label: "PostgreSQL",
-      internal: `postgresql://${user}:${password}@${svc.runtime === "process" ? "localhost" : svc.name}:5432/${database}`,
-      external: `postgresql://${user}:${password}@localhost:${hostPort}/${database}`,
+      internal: `postgresql://${user}@${svc.runtime === "process" ? "localhost" : svc.name}:5432/${database}`,
+      external: `postgresql://${user}@localhost:${hostPort}/${database}`,
     };
   }
 
   if (svc.type === "redis") {
-    const password = svc.environment.REDIS_PASSWORD;
-    const auth = password ? `:${password}@` : "";
     const hostPort = svc.ports[0]?.host || 6379;
     return {
       label: "Redis",
-      internal: `redis://${auth}${svc.name}:6379/0`,
-      external: `redis://${auth}localhost:${hostPort}/0`,
+      internal: `redis://${svc.name}:6379/0`,
+      external: `redis://localhost:${hostPort}/0`,
     };
   }
 

@@ -276,11 +276,12 @@ interface RepoSpec {
   credentials?: {
     token?: { env: string };
     sshKey?: { env: string };
+    knownHosts?: string;
   };
 }
 ```
 
-`credentials.token` is used with HTTPS URLs; `credentials.sshKey` is used with SSH URLs. Both must be environment references (`{ env: "VAR" }`) — literal credential strings are rejected to keep secrets out of `plan.json` and generated scripts.
+`credentials.token` is used with HTTPS URLs; Git receives it through a temporary `GIT_ASKPASS` helper, so clone and remote URLs remain credential-free. `credentials.sshKey` is used with SSH URLs and requires `credentials.knownHosts`, containing pinned `known_hosts` material for the Git server. SSH uses strict host-key checking. `token` and `sshKey` must be environment references (`{ env: "VAR" }`) — literal credential strings are rejected to keep secrets out of `plan.json` and generated scripts.
 
 ## Agent harness specification
 

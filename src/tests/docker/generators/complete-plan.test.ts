@@ -168,7 +168,7 @@ describe("complete-plan artifact regression", () => {
     // Repository sync script is executable.
     const repo = byPath(files, ".biodome-build/targets/local/repos/backend.sh");
     expect(repo.mode).toBe(0o755);
-    expect(repo.content).toContain("git clone --branch main https://github.com/acme/backend.git");
+    expect(repo.content).toContain("git clone --branch main 'https://github.com/acme/backend.git'");
 
     // Shared telemetry writer is emitted once and referenced by every family.
     const writer = byPath(files, ".biodome-build/targets/local/telemetry/writer.cjs");

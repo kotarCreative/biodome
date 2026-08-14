@@ -1,6 +1,8 @@
 import { type RuntimeDriverId, type TaskSpec } from "./plan.js";
+import type { SecretReference } from "./secrets.js";
 
 export type { TaskSpec };
+export type { SecretReference };
 import type {
   ProcessSpecSchema,
   HookSpecSchema,
@@ -37,7 +39,9 @@ export type CodexHarnessSpec = typeof CodexHarnessSpecSchema.Type;
 export type ClaudeHarnessSpec = typeof ClaudeHarnessSpecSchema.Type;
 export type LlmProviderSpec = typeof LlmProviderSpecSchema.Type;
 
-export type SecretValue = string | { env: string };
+// A non-credential value that may be supplied literally or via an environment
+// reference. Credential-bearing fields should use `SecretReference` directly.
+export type SecretValue = string | SecretReference;
 
 export interface LocalVolumeSpec {
   name: string;
@@ -53,11 +57,11 @@ export interface S3VolumeSpec {
   prefix?: string;
   target: string;
   credentials: {
-    accessKeyId?: SecretValue;
-    secretAccessKey?: SecretValue;
-    region?: SecretValue;
-    sessionToken?: SecretValue;
-    endpoint?: SecretValue;
+    accessKeyId?: SecretReference;
+    secretAccessKey?: SecretReference;
+    region?: SecretReference;
+    sessionToken?: SecretReference;
+    endpoint?: SecretReference;
   };
   proxy?: boolean;
   readOnly?: boolean;
@@ -70,11 +74,11 @@ export interface GcsVolumeSpec {
   prefix?: string;
   target: string;
   credentials: {
-    clientId?: SecretValue;
-    clientSecret?: SecretValue;
-    token?: SecretValue;
-    serviceAccountFile?: SecretValue;
-    projectNumber?: SecretValue;
+    clientId?: SecretReference;
+    clientSecret?: SecretReference;
+    token?: SecretReference;
+    serviceAccountFile?: SecretReference;
+    projectNumber?: SecretReference;
   };
   proxy?: boolean;
   readOnly?: boolean;
@@ -88,8 +92,8 @@ export interface AzureVolumeSpec {
   path?: string;
   target: string;
   credentials: {
-    accountKey?: SecretValue;
-    sasUrl?: SecretValue;
+    accountKey?: SecretReference;
+    sasUrl?: SecretReference;
   };
   proxy?: boolean;
   readOnly?: boolean;
@@ -103,9 +107,9 @@ export interface SftpVolumeSpec {
   path: string;
   target: string;
   credentials: {
-    user?: SecretValue;
-    password?: SecretValue;
-    keyFile?: SecretValue;
+    user?: SecretReference;
+    password?: SecretReference;
+    keyFile?: SecretReference;
   };
   proxy?: boolean;
   readOnly?: boolean;
@@ -118,9 +122,9 @@ export interface SmbVolumeSpec {
   share: string;
   target: string;
   credentials: {
-    user?: SecretValue;
-    password?: SecretValue;
-    domain?: SecretValue;
+    user?: SecretReference;
+    password?: SecretReference;
+    domain?: SecretReference;
   };
   proxy?: boolean;
   readOnly?: boolean;
@@ -133,9 +137,9 @@ export interface WebdavVolumeSpec {
   path?: string;
   target: string;
   credentials?: {
-    user?: SecretValue;
-    password?: SecretValue;
-    bearerToken?: SecretValue;
+    user?: SecretReference;
+    password?: SecretReference;
+    bearerToken?: SecretReference;
   };
   vendor?: string;
   proxy?: boolean;
@@ -147,7 +151,7 @@ export interface DropboxVolumeSpec {
   name: string;
   path: string;
   target: string;
-  credentials: { token?: SecretValue };
+  credentials: { token?: SecretReference };
   proxy?: boolean;
   readOnly?: boolean;
   allowedPaths?: string[];
@@ -158,9 +162,9 @@ export interface GdriveVolumeSpec {
   path: string;
   target: string;
   credentials: {
-    clientId?: SecretValue;
-    clientSecret?: SecretValue;
-    token?: SecretValue;
+    clientId?: SecretReference;
+    clientSecret?: SecretReference;
+    token?: SecretReference;
   };
   proxy?: boolean;
   readOnly?: boolean;
@@ -171,7 +175,7 @@ export interface McpProviderSpec {
   name: string;
   type: string;
   mcpUrl: string;
-  credentials: { token: SecretValue };
+  credentials: { token: SecretReference };
   authHeader?: string;
   authScheme?: string;
   project?: string;
@@ -182,7 +186,7 @@ export interface JiraProviderSpec {
   name: string;
   mcpUrl?: string;
   project?: string;
-  credentials: { token: SecretValue };
+  credentials: { token: SecretReference };
   metadata?: Record<string, string>;
 }
 
@@ -190,28 +194,28 @@ export interface LinearProviderSpec {
   name: string;
   mcpUrl?: string;
   team?: string;
-  credentials: { token: SecretValue };
+  credentials: { token: SecretReference };
   metadata?: Record<string, string>;
 }
 
 export interface SentryProviderSpec {
   name: string;
   mcpUrl?: string;
-  credentials: { token: SecretValue };
+  credentials: { token: SecretReference };
   metadata?: Record<string, string>;
 }
 
 export interface SlackProviderSpec {
   name: string;
   mcpUrl: string;
-  credentials: { token: SecretValue };
+  credentials: { token: SecretReference };
   metadata?: Record<string, string>;
 }
 
 export interface GithubProviderSpec {
   name: string;
   mcpUrl?: string;
-  credentials: { token: SecretValue };
+  credentials: { token: SecretReference };
   metadata?: Record<string, string>;
 }
 

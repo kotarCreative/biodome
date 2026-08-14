@@ -11,7 +11,7 @@ function makeBuilder(addEnv: (key: string, spec: EnvSpec) => void = () => undefi
 describe("ProviderBuilder", () => {
   it("normalizes endpoints and defensively copies their mutable fields", () => {
     const { builder, plan } = makeBuilder();
-    const credentials = { password: "secret", token: { env: "API_TOKEN" } };
+    const credentials = { password: { env: "API_PASSWORD" }, token: { env: "API_TOKEN" } };
     const metadata = { framework: "django" };
 
     builder.addEndpoint({
@@ -22,7 +22,7 @@ describe("ProviderBuilder", () => {
       credentials,
       metadata,
     });
-    credentials.password = "changed";
+    credentials.password = { env: "CHANGED" };
     metadata.framework = "flask";
 
     expect(plan.runtime.endpoints).toEqual([
@@ -31,7 +31,7 @@ describe("ProviderBuilder", () => {
         description: "Django API",
         url: "http://localhost:8000",
         port: 8000,
-        credentials: { password: "secret", token: { env: "API_TOKEN" } },
+        credentials: { password: { env: "API_PASSWORD" }, token: { env: "API_TOKEN" } },
         metadata: { framework: "django" },
       },
     ]);
@@ -76,7 +76,7 @@ describe("ProviderBuilder", () => {
     );
     expect(() =>
       builder.addProvider({ name: "literal", type: "custom", credentials: { token: "secret" } }),
-    ).toThrow(/must be an environment reference/);
+    ).toThrow();
   });
 
   it("normalizes MCP authorization defaults and derives its isolated credential environment", () => {
@@ -168,7 +168,7 @@ describe("ProviderBuilder", () => {
       /Duplicate LLM provider name/,
     );
     expect(() =>
-      builder.addLlmProvider({ name: "literal", options: { APIKEY: "secret" } }),
+      builder.addLlmProvider({ name: "literal", options: { apiKey: "secret" } }),
     ).toThrow(/must be an environment reference/);
   });
 

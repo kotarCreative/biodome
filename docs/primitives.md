@@ -565,9 +565,17 @@ export default function repos(ctx) {
 - `branch` — branch to track. Defaults to `"main"`.
 - `path` — target directory inside the sandbox. Relative paths are resolved under `/workspace`; absolute paths are used as-is. Defaults to `/workspace/repos/<name>`.
 - `depth` — optional shallow clone depth (e.g. `1`).
-- `credentials` — optional authentication. Both values must be environment references (`{ env: "VAR" }`) so secrets never touch `plan.json` or the generated scripts.
-  - `token` — for HTTPS URLs. Injected as `https://$TOKEN@host/...`.
-  - `sshKey` — for SSH URLs. Written to a temporary key file and used via `GIT_SSH_COMMAND`.
+- `credentials` — optional authentication.
+  - `token` — for HTTPS URLs. Must be an environment reference (`{ env: "VAR" }`). Git receives it through a temporary `GIT_ASKPASS` helper; the clone and remote URLs remain credential-free.
+  - `sshKey` — for SSH URLs. Must be an environment reference (`{ env: "VAR" }`). It is written to a temporary key file and used via `GIT_SSH_COMMAND`.
+  - `knownHosts` — required with `sshKey`. A pinned `known_hosts` entry (or entries) for the Git server. SSH uses strict host-key checking and refuses unknown hosts.
+
+```javascript
+credentials: {
+  sshKey: { env: "BACKEND_SSH_KEY" },
+  knownHosts: "github.com ssh-ed25519 <pinned-host-key>",
+}
+```
 
 Each repo generates a sync and setup script at `.biodome-build/repos/<name>.sh` and a `start.pre` hook named `repo-sync-<name>`. `git` and `openssh-client` are automatically installed in the dev image when any repo is declared.
 

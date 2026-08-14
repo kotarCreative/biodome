@@ -31,8 +31,8 @@ describe("formatInfo", () => {
 
     const info = formatInfo(plan);
     expect(info).toContain("Services:");
-    expect(info).toContain("postgresql://app:dev@postgres:5432/myapp");
-    expect(info).toContain("postgresql://app:dev@localhost:5432/myapp");
+    expect(info).toContain("postgresql://app@postgres:5432/myapp");
+    expect(info).toContain("postgresql://app@localhost:5432/myapp");
   });
 
   it("lists endpoints with credentials, showing env refs symbolically", () => {
@@ -43,7 +43,7 @@ describe("formatInfo", () => {
       url: "http://localhost:8000",
       port: 8000,
       credentials: {
-        username: "admin",
+        username: { env: "DJANGO_ADMIN_USERNAME" },
         password: { env: "DJANGO_ADMIN_PASSWORD" },
       },
       metadata: { framework: "django" },
@@ -53,10 +53,9 @@ describe("formatInfo", () => {
     expect(info).toContain("Endpoints:");
     expect(info).toContain("django-api");
     expect(info).toContain("http://localhost:8000");
-    expect(info).toContain("username: admin");
+    expect(info).toContain("username: $DJANGO_ADMIN_USERNAME");
     // Env-referenced secrets are shown as a reference, never resolved on the host.
     expect(info).toContain("$DJANGO_ADMIN_PASSWORD");
-    expect(info).not.toContain("password: DJANGO_ADMIN_PASSWORD ");
     expect(info).toContain("framework: django");
   });
 
@@ -120,7 +119,7 @@ describe("formatAgentsMd", () => {
     expect(md).toContain("# Development Environment");
     expect(md).toContain("node:20-slim");
     expect(md).toContain("### postgres");
-    expect(md).toContain("postgresql://app:dev@postgres:5432/myapp");
+    expect(md).toContain("postgresql://app@postgres:5432/myapp");
     expect(md).toContain("biodome up");
   });
 
@@ -132,7 +131,7 @@ describe("formatAgentsMd", () => {
       url: "http://localhost:8000",
       port: 8000,
       credentials: {
-        username: "admin",
+        username: { env: "DJANGO_API_USERNAME" },
         token: { env: "DJANGO_API_TOKEN" },
       },
     });
@@ -143,8 +142,8 @@ describe("formatAgentsMd", () => {
     expect(md).toContain("Django REST API");
     expect(md).toContain("- URL: `http://localhost:8000`");
     expect(md).toContain("- Port: `8000`");
-    expect(md).toContain("username: `admin`");
-    expect(md).toContain("$DJANGO_API_TOKEN");
+    expect(md).toContain("username: `$DJANGO_API_USERNAME (from environment)`");
+    expect(md).toContain("token: `$DJANGO_API_TOKEN (from environment)`");
   });
 
   it("documents providers with URLs, projects, and credentials", () => {

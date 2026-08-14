@@ -1,6 +1,6 @@
 # Plan 01: Enforce MCP Authentication
 
-Status: proposed. Priority: P0. Dependencies: none.
+Status: complete. Priority: P0. Dependencies: none.
 
 ## Objective
 

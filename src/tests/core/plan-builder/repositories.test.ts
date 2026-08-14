@@ -46,6 +46,34 @@ describe("RepositoryBuilder", () => {
         url: "https://example.com/private.git",
         credentials: { token: "secret" },
       }),
-    ).toThrow(/must be an environment reference/);
+    ).toThrow();
+  });
+
+  it("rejects unsafe repo names", () => {
+    const { builder } = makeBuilder();
+    expect(() => builder.add({ name: "../escape", url: "https://example.com/a.git" })).toThrow(
+      /Repo name.*is invalid/,
+    );
+    expect(() => builder.add({ name: "-bad", url: "https://example.com/a.git" })).toThrow(
+      /Repo name.*is invalid/,
+    );
+  });
+
+  it("rejects URLs with embedded userinfo", () => {
+    const { builder } = makeBuilder();
+    expect(() => builder.add({ name: "bad", url: "https://user:pass@example.com/a.git" })).toThrow(
+      /must not contain userinfo/,
+    );
+  });
+
+  it("requires pinned known hosts for SSH keys", () => {
+    const { builder } = makeBuilder();
+    expect(() =>
+      builder.add({
+        name: "ssh-repo",
+        url: "git@example.com:a.git",
+        credentials: { sshKey: { env: "SSH_KEY" } },
+      }),
+    ).toThrow(/knownHosts is required when using an SSH key/);
   });
 });

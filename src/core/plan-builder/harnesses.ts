@@ -108,8 +108,6 @@ export class HarnessBuilder {
     if (this.plan.runtime.piHarnesses.some((harness) => harness.name === validated.name)) {
       throw new ValidationError({ message: `Duplicate Pi harness name: ${validated.name}` });
     }
-    this.rejectLiteralApiKey("Pi", validated.name, validated.apiKey);
-
     const harness: PiHarness = {
       name: validated.name,
       type: "pi",
@@ -140,8 +138,6 @@ export class HarnessBuilder {
     if (this.plan.runtime.codexHarnesses.some((harness) => harness.name === validated.name)) {
       throw new ValidationError({ message: `Duplicate Codex harness name: ${validated.name}` });
     }
-    this.rejectLiteralApiKey("Codex", validated.name, validated.apiKey);
-
     const port = validated.port ?? 3003;
     validatePort(port, `Codex harness ${validated.name}: port`);
     const harness: CodexHarness = {
@@ -181,8 +177,6 @@ export class HarnessBuilder {
     if (this.plan.runtime.claudeHarnesses.some((harness) => harness.name === validated.name)) {
       throw new ValidationError({ message: `Duplicate Claude harness name: ${validated.name}` });
     }
-    this.rejectLiteralApiKey("Claude", validated.name, validated.apiKey);
-
     const harness: ClaudeHarness = {
       name: validated.name,
       type: "claude",
@@ -204,20 +198,8 @@ export class HarnessBuilder {
     this.addApiKeyEnv(harness.apiKey);
   }
 
-  private rejectLiteralApiKey(
-    family: "Pi" | "Codex" | "Claude",
-    name: string,
-    apiKey: string | { env: string } | undefined,
-  ): void {
-    if (typeof apiKey === "string") {
-      throw new ValidationError({
-        message: `${family} harness ${name}: apiKey must be an environment reference ({ env: "VAR" }), not a literal string`,
-      });
-    }
-  }
-
-  private addApiKeyEnv(apiKey: string | { env: string } | undefined): void {
-    if (apiKey && typeof apiKey === "object" && "env" in apiKey) {
+  private addApiKeyEnv(apiKey: { env: string } | undefined): void {
+    if (apiKey) {
       this.dependencies.addEnv(apiKey.env, { from: { env: apiKey.env } });
     }
   }

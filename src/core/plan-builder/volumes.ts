@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { type Plan, type SecretValue, type Volume, VolumeSpecSchema } from "../plan.js";
+import { type Plan, type SecretReference, type Volume, VolumeSpecSchema } from "../plan.js";
 import type {
   AzureVolumeSpec,
   DropboxVolumeSpec,
@@ -280,9 +280,9 @@ export class VolumeBuilder {
   }
 
   private normalizeCredentials(
-    credentials: Record<string, SecretValue | undefined>,
-  ): Record<string, SecretValue> {
-    const result: Record<string, SecretValue> = {};
+    credentials: Record<string, SecretReference | undefined>,
+  ): Record<string, SecretReference> {
+    const result: Record<string, SecretReference> = {};
     for (const [key, value] of Object.entries(credentials)) {
       if (value !== undefined) result[key] = value;
     }
