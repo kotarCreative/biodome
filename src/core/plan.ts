@@ -20,6 +20,9 @@ export interface McpConfig {
   token?: SecretValue;
   allowExec: boolean;
   allowProcessControl: boolean;
+  commandTimeoutMs: number;
+  commandStdoutMaxBytes: number;
+  commandStderrMaxBytes: number;
   maxReadBytes: number;
   maxWriteBytes: number;
   maxListEntries: number;
@@ -399,6 +402,9 @@ export function createPlan(project: string): Plan {
         port: 3001,
         allowExec: false,
         allowProcessControl: false,
+        commandTimeoutMs: 30000,
+        commandStdoutMaxBytes: 1048576,
+        commandStderrMaxBytes: 1048576,
         maxReadBytes: 1048576,
         maxWriteBytes: 2097152,
         maxListEntries: 100,
@@ -894,12 +900,25 @@ function mcpTokenRequired(config: {
   return undefined;
 }
 
+const CommandTimeoutSchema = Schema.Number.check(Schema.isFinite())
+  .check(Schema.isInt())
+  .check(Schema.isGreaterThan(0))
+  .check(Schema.isLessThanOrEqualTo(300000));
+
+const CommandOutputBytesSchema = Schema.Number.check(Schema.isFinite())
+  .check(Schema.isInt())
+  .check(Schema.isGreaterThan(0))
+  .check(Schema.isLessThanOrEqualTo(10485760));
+
 export const McpConfigSchema = Schema.Struct({
   enabled: Schema.Boolean,
   port: Schema.optional(Schema.Number),
   token: Schema.optional(SecretValueSchema),
   allowExec: Schema.optional(Schema.Boolean),
   allowProcessControl: Schema.optional(Schema.Boolean),
+  commandTimeoutMs: Schema.optional(CommandTimeoutSchema),
+  commandStdoutMaxBytes: Schema.optional(CommandOutputBytesSchema),
+  commandStderrMaxBytes: Schema.optional(CommandOutputBytesSchema),
   maxReadBytes: Schema.optional(Schema.Number),
   maxWriteBytes: Schema.optional(Schema.Number),
   maxListEntries: Schema.optional(Schema.Number),
@@ -1104,6 +1123,9 @@ export const NormalizedMcpConfigSchema = Schema.Struct({
   token: Schema.optional(SecretValueSchema),
   allowExec: Schema.Boolean,
   allowProcessControl: Schema.Boolean,
+  commandTimeoutMs: CommandTimeoutSchema,
+  commandStdoutMaxBytes: CommandOutputBytesSchema,
+  commandStderrMaxBytes: CommandOutputBytesSchema,
   maxReadBytes: Schema.Number,
   maxWriteBytes: Schema.Number,
   maxListEntries: Schema.Number,

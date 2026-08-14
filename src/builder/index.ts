@@ -31,6 +31,9 @@ export interface McpConfig {
   token?: { env: string } | string;
   allowExec?: boolean;
   allowProcessControl?: boolean;
+  commandTimeoutMs?: number;
+  commandStdoutMaxBytes?: number;
+  commandStderrMaxBytes?: number;
   maxReadBytes?: number;
   maxWriteBytes?: number;
   maxListEntries?: number;
@@ -63,6 +66,9 @@ export const buildPlanEffect = Effect.fnUntraced(function* (
       token: mcpToken as { env: string },
       allowExec: config.mcp.allowExec,
       allowProcessControl: config.mcp.allowProcessControl,
+      commandTimeoutMs: config.mcp.commandTimeoutMs,
+      commandStdoutMaxBytes: config.mcp.commandStdoutMaxBytes,
+      commandStderrMaxBytes: config.mcp.commandStderrMaxBytes,
       maxReadBytes: config.mcp.maxReadBytes,
       maxWriteBytes: config.mcp.maxWriteBytes,
       maxListEntries: config.mcp.maxListEntries,

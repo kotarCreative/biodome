@@ -1,33 +1,20 @@
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { McpPlan } from "../plan.js";
+import { CommandExecutionError, type ProcessRunner } from "../command-runner.js";
 import { text, type ToolArguments, type ToolDefinition } from "./types.js";
 
-export interface ProcessRunner {
-  exec(
-    command: string,
-    options: { readonly timeout: number; readonly cwd: string },
-  ): Promise<{ readonly stdout: string; readonly stderr?: string }>;
-  execFile(
-    file: string,
-    arguments_: readonly string[],
-  ): Promise<{ readonly stdout: string; readonly stderr: string }>;
-}
+export type { ProcessRunner } from "../command-runner.js";
 export interface ServiceProbe {
   (host: string, port: number): Promise<boolean>;
 }
 const validName = (name: string) => /^[A-Za-z0-9_.-]+$/.test(name) && name !== "." && name !== "..";
-function output(error: unknown): { readonly stdout?: string; readonly stderr?: string } {
-  return error instanceof Error
-    ? (error as Error & { readonly stdout?: string; readonly stderr?: string })
-    : {};
-}
-
 export function createProcessLogTools(
   plan: McpPlan,
   runner: ProcessRunner,
   probe: ServiceProbe,
   allowExec: boolean,
   allowProcessControl: boolean,
+  commandTimeoutMs: number,
 ): readonly ToolDefinition[] {
   const status = async () => {
     try {
@@ -38,12 +25,14 @@ export function createProcessLogTools(
       ]);
       return text(result.stdout || "(no output)");
     } catch (error) {
-      const result = output(error);
-      return text(
-        result.stderr
-          ? `${result.stdout || "(no output)"}\nstderr: ${result.stderr}`
-          : result.stdout || "(no output)",
-      );
+      if (error instanceof CommandExecutionError) {
+        return text(
+          error.stderr
+            ? `${error.stdout || "(no output)"}\nstderr: ${error.stderr}`
+            : error.stdout || "(no output)",
+        );
+      }
+      return text(error instanceof Error ? error.message : "Command failed");
     }
   };
   return [
@@ -89,8 +78,14 @@ export function createProcessLogTools(
         const file = `/tmp/${name}.log`;
         try {
           return text((await runner.execFile("tail", ["-n", String(lines), file])).stdout);
-        } catch {
-          return text(`(no log available: ${file})`);
+        } catch (error) {
+          const details =
+            error instanceof CommandExecutionError
+              ? error.stderr || error.stdout || error.message
+              : error instanceof Error
+                ? error.message
+                : "Command failed";
+          return text(`(no log available: ${file}) - ${details}`);
         }
       },
     },
@@ -129,7 +124,11 @@ export function createProcessLogTools(
               } catch (error) {
                 throw new McpError(
                   ErrorCode.InternalError,
-                  output(error).stderr || "restart exited with code 1",
+                  error instanceof CommandExecutionError
+                    ? error.stderr || error.stdout || error.message
+                    : error instanceof Error
+                      ? error.message
+                      : "restart exited with code 1",
                 );
               }
             },
@@ -151,15 +150,24 @@ export function createProcessLogTools(
               const command = typeof args.command === "string" ? args.command : "";
               if (!command) throw new McpError(ErrorCode.InvalidParams, "command is required");
               try {
+                const userTimeoutMs =
+                  typeof args.timeout === "number" && Number.isFinite(args.timeout)
+                    ? Math.min(Math.max(1, args.timeout * 1000), commandTimeoutMs)
+                    : commandTimeoutMs;
                 const result = await runner.exec(command, {
-                  timeout:
-                    (typeof args.timeout === "number" ? Math.min(args.timeout, 120) : 30) * 1000,
+                  timeoutMs: userTimeoutMs,
                   cwd: "/workspace",
                 });
                 return text(result.stdout || "(completed with no output)");
               } catch (error) {
-                const result = output(error);
-                return text(result.stdout || result.stderr || String(error), true);
+                return text(
+                  error instanceof CommandExecutionError
+                    ? error.stdout || error.stderr || error.message
+                    : error instanceof Error
+                      ? error.message
+                      : "Command failed",
+                  true,
+                );
               }
             },
           },

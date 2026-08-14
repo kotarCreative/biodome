@@ -12,6 +12,7 @@ function plan(
     readonly allowedPaths?: readonly string[];
     readonly readOnly?: boolean;
     readonly providers?: boolean;
+    readonly commandTimeoutMs?: number;
   } = {},
 ) {
   return decodeMcpPlan({
@@ -40,6 +41,7 @@ function plan(
       token: options.token ?? null,
       allowExec: options.allowExec ?? false,
       allowProcessControl: options.allowProcessControl ?? false,
+      commandTimeoutMs: options.commandTimeoutMs,
       maxReadBytes: 1024,
       maxWriteBytes: 1024,
       maxListEntries: 100,
@@ -193,6 +195,21 @@ describe("MCP application", () => {
       "restart",
       "worker",
     ]);
+    await app.close();
+  });
+
+  it("caps exec_command timeout at the configured command limit", async () => {
+    const processRunner = {
+      exec: vi.fn(async () => ({ stdout: "command output", stderr: "" })),
+      execFile: vi.fn(async () => ({ stdout: "file output", stderr: "" })),
+    };
+    const app = await createMcpApplication(plan({ allowExec: true, commandTimeoutMs: 5000 }), {
+      ...dependencies(adapter),
+      processRunner,
+    });
+
+    await app.invoke("exec_command", { command: "pwd", timeout: 30 });
+    expect(processRunner.exec).toHaveBeenCalledWith("pwd", { cwd: "/workspace", timeoutMs: 5000 });
     await app.close();
   });
 

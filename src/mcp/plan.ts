@@ -11,6 +11,14 @@ const SecretSchema = Schema.Union([
 const McpTokenSchema = Schema.Union([Schema.Struct({ env: Schema.String }), Schema.Null]);
 const StringMapSchema = Schema.Record(Schema.String, Schema.String);
 const CredentialMapSchema = Schema.Record(Schema.String, SecretSchema);
+const CommandTimeoutSchema = Schema.Number.check(Schema.isFinite())
+  .check(Schema.isInt())
+  .check(Schema.isGreaterThan(0))
+  .check(Schema.isLessThanOrEqualTo(300000));
+const CommandOutputBytesSchema = Schema.Number.check(Schema.isFinite())
+  .check(Schema.isInt())
+  .check(Schema.isGreaterThan(0))
+  .check(Schema.isLessThanOrEqualTo(10485760));
 
 export const McpPlanSchema = Schema.Struct({
   project: Schema.String,
@@ -94,6 +102,9 @@ export const McpPlanSchema = Schema.Struct({
     token: Schema.optional(McpTokenSchema),
     allowExec: Schema.optional(Schema.Boolean),
     allowProcessControl: Schema.optional(Schema.Boolean),
+    commandTimeoutMs: Schema.optional(CommandTimeoutSchema),
+    commandStdoutMaxBytes: Schema.optional(CommandOutputBytesSchema),
+    commandStderrMaxBytes: Schema.optional(CommandOutputBytesSchema),
     maxReadBytes: Schema.optional(Schema.Number),
     maxWriteBytes: Schema.optional(Schema.Number),
     maxListEntries: Schema.optional(Schema.Number),

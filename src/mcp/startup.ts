@@ -26,11 +26,19 @@ export async function startMcpServer(
   const plan = decodeMcpPlan(JSON.parse(await fs.readFile(planPath, "utf8")) as unknown);
   const application = await createMcpApplication(
     plan,
-    createDefaultDependencies(buildUpstreams(plan, process.env).providers, {
-      connectTimeoutMs: plan.mcp.providerConnectTimeoutMs,
-      requestTimeoutMs: plan.mcp.providerRequestTimeoutMs,
-      catalogConcurrency: plan.mcp.providerCatalogConcurrency,
-    }),
+    createDefaultDependencies(
+      buildUpstreams(plan, process.env).providers,
+      {
+        connectTimeoutMs: plan.mcp.providerConnectTimeoutMs,
+        requestTimeoutMs: plan.mcp.providerRequestTimeoutMs,
+        catalogConcurrency: plan.mcp.providerCatalogConcurrency,
+      },
+      {
+        timeoutMs: plan.mcp.commandTimeoutMs,
+        stdoutMaxBytes: plan.mcp.commandStdoutMaxBytes,
+        stderrMaxBytes: plan.mcp.commandStderrMaxBytes,
+      },
+    ),
   );
   const server = http.createServer(application.handler);
   listenOnLoopback(server, port);

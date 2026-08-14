@@ -11,6 +11,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { authenticateBearer } from "./auth.js";
 import { createFileMcpEventSink } from "./event-sink.js";
+import { createProcessRunner, type ProcessRunner } from "./command-runner.js";
 import type { McpPlan } from "./plan.js";
 import { resolvePlanSecret } from "./plan.js";
 import { filterProviderTools } from "./provider-tools.js";
@@ -23,11 +24,7 @@ import {
 import type { VolumeConfig } from "./volumes/adapter.js";
 import { VolumeAccessError } from "./volumes/adapter.js";
 import { createInfoProviderTools } from "./tools/info-provider.js";
-import {
-  createProcessLogTools,
-  type ProcessRunner,
-  type ServiceProbe,
-} from "./tools/process-logs.js";
+import { createProcessLogTools, type ServiceProbe } from "./tools/process-logs.js";
 import { createVolumeTools, type VolumeAdapterFactory } from "./tools/volumes.js";
 import type { TextResult, ToolArguments, ToolDefinition } from "./tools/types.js";
 
@@ -144,6 +141,7 @@ export async function createMcpApplication(
         dependencies.probeService,
         plan.mcp.allowExec === true,
         plan.mcp.allowProcessControl === true,
+        plan.mcp.commandTimeoutMs ?? 30000,
       ),
       ...volumeTools.tools,
     ],
@@ -218,19 +216,17 @@ export function createDefaultDependencies(
     readonly requestTimeoutMs?: number;
     readonly catalogConcurrency?: number;
   } = {},
+  commandLimits: {
+    readonly timeoutMs?: number;
+    readonly stdoutMaxBytes?: number;
+    readonly stderrMaxBytes?: number;
+  } = {},
 ): McpApplicationDependencies {
-  const runner: ProcessRunner = {
-    async exec(command, options) {
-      const { exec } = await import("node:child_process");
-      const { promisify } = await import("node:util");
-      return promisify(exec)(command, options);
-    },
-    async execFile(file, arguments_) {
-      const { execFile } = await import("node:child_process");
-      const { promisify } = await import("node:util");
-      return promisify(execFile)(file, [...arguments_]);
-    },
-  };
+  const runner: ProcessRunner = createProcessRunner({
+    timeoutMs: commandLimits.timeoutMs ?? 30000,
+    stdoutMaxBytes: commandLimits.stdoutMaxBytes ?? 1048576,
+    stderrMaxBytes: commandLimits.stderrMaxBytes ?? 1048576,
+  });
   return {
     volumeAdapters: {
       async create(config) {

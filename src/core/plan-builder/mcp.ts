@@ -8,6 +8,9 @@ export interface McpOptions {
   token?: { env: string };
   allowExec?: boolean;
   allowProcessControl?: boolean;
+  commandTimeoutMs?: number;
+  commandStdoutMaxBytes?: number;
+  commandStderrMaxBytes?: number;
   maxReadBytes?: number;
   maxWriteBytes?: number;
   maxListEntries?: number;
@@ -71,6 +74,15 @@ export class McpBuilder {
     if (options.allowExec !== undefined) this.plan.build.mcpConfig.allowExec = options.allowExec;
     if (options.allowProcessControl !== undefined) {
       this.plan.build.mcpConfig.allowProcessControl = options.allowProcessControl;
+    }
+    if (options.commandTimeoutMs !== undefined) {
+      this.plan.build.mcpConfig.commandTimeoutMs = options.commandTimeoutMs;
+    }
+    if (options.commandStdoutMaxBytes !== undefined) {
+      this.plan.build.mcpConfig.commandStdoutMaxBytes = options.commandStdoutMaxBytes;
+    }
+    if (options.commandStderrMaxBytes !== undefined) {
+      this.plan.build.mcpConfig.commandStderrMaxBytes = options.commandStderrMaxBytes;
     }
     if (options.maxReadBytes !== undefined)
       this.plan.build.mcpConfig.maxReadBytes = options.maxReadBytes;
