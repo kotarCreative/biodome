@@ -13,6 +13,10 @@
     "./app": {
       "types": "./dist/apps/index.d.ts",
       "import": "./dist/apps/index.js"
+    },
+    "./recipes/computer-use": {
+      "types": "./dist/recipes/computer-use.d.ts",
+      "import": "./dist/recipes/computer-use.js"
     }
   },
   "bin": {

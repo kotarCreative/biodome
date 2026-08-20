@@ -42,6 +42,19 @@ and `service(name)` create frozen serializable references; they do not look up a
 project while a module is imported. See [Applications and recipes](apps.md) for
 implicit app entrypoints and the scoped builder API.
 
+The built-in computer-use recipe and its manual-QA task helper use a dedicated
+subpath:
+
+```typescript
+import {
+  computerUse,
+  manualQaTask,
+  COMPUTER_USE_ARTIFACTS,
+} from "@kotarcreative/biodome/recipes/computer-use";
+```
+
+See [Computer-use recipe](recipes/computer-use.md).
+
 ## Context methods
 
 ### `addProcess(spec)`
@@ -75,7 +88,10 @@ Install a package.
 
 Install a CLI tool or system package. Well-known tools use custom install scripts; unknown names are installed via apt.
 
-- `name`: `"gh"`, `"kubectl"`, `"terraform"`, `"psql"`, `"redis-cli"`, `"docker"`, or any apt package name
+- `name`: `"gh"`, `"kubectl"`, `"terraform"`, `"psql"`, `"redis-cli"`, `"docker"`, `"agent-browser"`, or any apt package name
+
+The built-in `agent-browser` handler currently accepts version `0.34.0` and
+rejects other versions because its release binaries are checksum-pinned.
 
 ### `addService(name, options)`
 

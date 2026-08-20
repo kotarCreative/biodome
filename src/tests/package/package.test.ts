@@ -50,6 +50,7 @@ describe("published package", () => {
       exports: {
         ".": { import: string; types: string };
         "./app": { import: string; types: string };
+        "./recipes/computer-use": { import: string; types: string };
       };
       main: string;
       types: string;
@@ -60,6 +61,8 @@ describe("published package", () => {
       installedPackage.exports["."].types,
       installedPackage.exports["./app"].import,
       installedPackage.exports["./app"].types,
+      installedPackage.exports["./recipes/computer-use"].import,
+      installedPackage.exports["./recipes/computer-use"].types,
       installedPackage.main,
       installedPackage.types,
       installedPackage.bin.biodome,
@@ -103,6 +106,21 @@ describe("published package", () => {
       { cwd: projectDir, encoding: "utf8" },
     ).trim();
     expect(appExportedNames).toContain("defineAppRecipe");
+
+    const recipeExportedNames = execFileSync(
+      "node",
+      [
+        "--input-type=module",
+        "-e",
+        'import("@kotarcreative/biodome/recipes/computer-use").then((module) => console.log(Object.keys(module).sort().join(",")))',
+      ],
+      { cwd: projectDir, encoding: "utf8" },
+    ).trim();
+    expect(recipeExportedNames.split(",")).toEqual([
+      "COMPUTER_USE_ARTIFACTS",
+      "computerUse",
+      "manualQaTask",
+    ]);
 
     execFileSync("node", [join(installedDir, installedPackage.bin.biodome), "--help"], {
       cwd: projectDir,

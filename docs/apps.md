@@ -122,6 +122,17 @@ App modules and recipe packages are trusted host-side JavaScript, just like
 features. Review and pin them as normal development dependencies; they are not
 sandboxed during plan construction.
 
+## Built-in recipes
+
+Biodome also publishes focused recipes from dedicated package subpaths. The
+[computer-use recipe](recipes/computer-use.md) installs agent-oriented browser
+automation and provides a companion manual-QA task with screenshots, video,
+trace, network, accessibility, console, and report artifacts.
+
+```javascript
+import { computerUse } from "@kotarcreative/biodome/recipes/computer-use";
+```
+
 ## References and dependencies
 
 Use serializable references instead of hard-coded provider topology:

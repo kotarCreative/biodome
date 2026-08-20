@@ -69,13 +69,13 @@ export class BuildBuilder implements BuildContext {
     this.addLanguageSnippet(`RUN ${command}`);
   }
 
-  addTool(name: string, _options: ToolOptions = {}): void {
+  addTool(name: string, options: ToolOptions = {}): void {
     if (!name || typeof name !== "string") {
       throw new ValidationError({ message: "Tool requires a non-empty string name" });
     }
     const handler = toolHandlers[name];
     if (handler) {
-      handler(this);
+      handler(this, options);
     } else {
       this.addAptPackage(name);
     }

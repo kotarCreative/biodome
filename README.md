@@ -47,6 +47,7 @@ Every lifecycle command captures a structured event stream by default. Target-sc
 - [Overview](docs/index.md)
 - [File layout](docs/file-layout.md)
 - [Applications and recipes](docs/apps.md)
+- [Computer-use recipe](docs/recipes/computer-use.md)
 - [Primitives](docs/primitives.md)
 - [Processes and hooks](docs/processes.md)
 - [API reference](docs/api.md)

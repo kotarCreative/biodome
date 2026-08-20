@@ -114,6 +114,43 @@ describe("BuildBuilder", () => {
     expect(() => builder.addTool("")).toThrow("Tool requires a non-empty string name");
   });
 
+  it("installs a pinned agent-browser binary and its browser dependencies", () => {
+    const { builder, plan } = makeBuilder();
+    builder.addTool("agent-browser", { version: "0.34.0" });
+
+    expect(plan.build.aptPackages).toEqual([]);
+    expect(plan.build.languageSnippets[0]).toContain("releases/download/v0.34.0/$asset");
+    expect(plan.build.languageSnippets[0]).toContain("sha256sum -c -");
+    expect(plan.build.languageSnippets[0]).toContain("agent-browser-linux-arm64");
+    expect(plan.build.languageSnippets[0]).toContain("agent-browser-linux-musl-arm64");
+    expect(plan.build.languageSnippets[0]).toContain("apt-get install");
+    expect(plan.build.languageSnippets[0]).toContain("apk add");
+    expect(plan.build.languageSnippets[0]).toContain("chromium");
+    expect(plan.build.languageSnippets[0]).toContain("ffmpeg");
+    expect(plan.build.languageSnippets[0]).toContain("xvfb-run");
+    expect(plan.build.languageSnippets[0]).toContain("ID=ubuntu");
+    expect(plan.build.languageSnippets[1]).toBe("RUN agent-browser --version");
+  });
+
+  it("supports agent-browser on the Alpine Go base image", () => {
+    const { builder, plan } = makeBuilder();
+    builder.addLanguage("go", { version: "1.22" });
+    builder.addTool("agent-browser");
+    builder.finalize();
+
+    expect(plan.build.baseImage).toBe("golang:1.22-alpine");
+    expect(plan.build.languageSnippets[0]).toContain('libc="musl"');
+    expect(plan.build.languageSnippets[0]).toContain("agent-browser-linux-musl-x64");
+  });
+
+  it("rejects unverified agent-browser versions", () => {
+    const { builder } = makeBuilder();
+
+    expect(() => builder.addTool("agent-browser", { version: "latest" })).toThrow(
+      "agent-browser version latest is not supported; use 0.34.0",
+    );
+  });
+
   it("deduplicates idempotent contributions while retaining append-only ones", () => {
     const { builder, plan } = makeBuilder();
     builder.addAptPackage("git");

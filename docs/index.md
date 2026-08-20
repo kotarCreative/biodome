@@ -54,6 +54,7 @@ Queries return at most 100 events by default and accept up to 1,000 with `--limi
 
 - [File layout](file-layout.md)
 - [Applications and app recipes](apps.md)
+- [Computer-use recipe](recipes/computer-use.md)
 - [Primitives](primitives.md)
 - [Processes and hooks](processes.md)
 - [API reference](api.md)
