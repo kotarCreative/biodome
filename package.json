@@ -47,6 +47,12 @@
     "containers",
     "dev-server"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kotarCreative/biodome.git"
+  },
+  "homepage": "https://github.com/kotarCreative/biodome#readme",
+  "bugs": "https://github.com/kotarCreative/biodome/issues",
   "license": "MIT",
   "engines": {
     "node": ">=22"

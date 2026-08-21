@@ -122,7 +122,7 @@ describe("published package", () => {
       "manualQaTask",
     ]);
 
-    execFileSync("node", [join(installedDir, installedPackage.bin.biodome), "--help"], {
+    execFileSync(join(installedDir, installedPackage.bin.biodome), ["--help"], {
       cwd: projectDir,
       stdio: "pipe",
     });
