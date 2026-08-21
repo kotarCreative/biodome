@@ -54,4 +54,27 @@ describe("EnvironmentBuilder", () => {
       { key: "DEBUG", scope: "runtime", value: "1" },
     ]);
   });
+
+  it("normalizes AWS secret ARN references and treats them as passthrough", () => {
+    const plan = createPlan("test");
+    const builder = new EnvironmentBuilder(plan);
+
+    const secretArn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:pg-AbCdEf";
+    builder.add("POSTGRES_PASSWORD", { from: { secretArn } });
+    // Identical re-declaration is ignored like any other duplicate.
+    builder.add("POSTGRES_PASSWORD", { from: { secretArn } });
+
+    expect(plan.runtime.envVars).toEqual([
+      { key: "POSTGRES_PASSWORD", scope: "runtime", from: { secretArn } },
+    ]);
+  });
+
+  it("rejects malformed AWS secret ARN references", () => {
+    const builder = new EnvironmentBuilder(createPlan("test"));
+    expect(() =>
+      builder.add("API_TOKEN", {
+        from: { secretArn: "arn:aws:s3:::not-a-secret" } as never,
+      }),
+    ).toThrow(/Secrets Manager or SSM Parameter Store ARN/);
+  });
 });

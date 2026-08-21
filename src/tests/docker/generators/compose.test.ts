@@ -77,6 +77,21 @@ describe("generateCompose", () => {
     expect(compose).toContain("${API_KEY}");
   });
 
+  it("resolves AWS secret ARN references from a host variable of the same key", () => {
+    const plan = createPlan("my-app");
+    const secretArn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:pg-AbCdEf";
+    plan.runtime.envVars.push({ key: "POSTGRES_PASSWORD", scope: "runtime", from: { secretArn } });
+
+    const compose = generateCompose(plan);
+    // Locally there is no ECS secret injection, so the value must come from the
+    // host environment under its own key, failing loudly when absent.
+    expect(compose).toContain(
+      "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required by POSTGRES_PASSWORD}",
+    );
+    // The ARN identifies the source but never a secret value.
+    expect(compose).not.toContain("secretArn");
+  });
+
   it("keeps build-scoped passthrough vars out of the runtime compose env", () => {
     const plan = createPlan("my-app");
     plan.runtime.envVars.push({

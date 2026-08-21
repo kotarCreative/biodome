@@ -1,4 +1,4 @@
-import type { SecretReference } from "./secrets.js";
+import type { SecretArnReference, SecretReference } from "./secrets.js";
 import { Service } from "./plan.js";
 import { ServiceOptions } from "./feature.js";
 
@@ -8,7 +8,9 @@ export const POSTGRES_PASSWORD_ENV_VAR = "POSTGRES_PASSWORD";
 
 // The declared credential for a service: users[0].password, falling back to
 // the top-level options.password.
-export function servicePassword(options: ServiceOptions): string | SecretReference | undefined {
+export function servicePassword(
+  options: ServiceOptions,
+): string | SecretReference | SecretArnReference | undefined {
   return options.users?.[0]?.password ?? options.password;
 }
 

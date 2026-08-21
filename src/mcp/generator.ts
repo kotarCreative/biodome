@@ -1,5 +1,6 @@
 import { Plan, Volume, SecretValue } from "../core/plan.js";
 import { serviceConnection } from "../core/info.js";
+import { isSecretArnReference } from "../core/secrets.js";
 
 function serializeCredential(value: SecretValue | undefined): string | { env: string } | null {
   if (value === undefined) return null;
@@ -85,12 +86,17 @@ export function generatePlanJson(plan: Plan): string {
     })),
     // `environment` holds only literal values. Passthrough vars are described
     // structurally below as references, so their secret values never touch disk.
+    // Secret-ARN-backed vars surface the ARN itself (an identifier, not a secret).
     environment: plan.runtime.environment,
     envVars: plan.runtime.envVars.map((envVar) => ({
       key: envVar.key,
       scope: envVar.scope,
       source: envVar.from ? "passthrough" : "literal",
-      from: envVar.from ? envVar.from.env : null,
+      from: envVar.from
+        ? isSecretArnReference(envVar.from)
+          ? envVar.from.secretArn
+          : envVar.from.env
+        : null,
       required: envVar.required ?? false,
       hasDefault: envVar.default !== undefined,
     })),

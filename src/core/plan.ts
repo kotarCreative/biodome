@@ -6,7 +6,7 @@ import type { Application, ContributionProvenance } from "../apps/types.js";
 import type { McpClientAuth } from "./mcp-client.js";
 import { McpClientAuthSchema } from "./mcp-client.js";
 import type { SecretReference } from "./secrets.js";
-import { SecretReferenceSchema } from "./secrets.js";
+import { SecretArnReferenceSchema, SecretReferenceSchema } from "./secrets.js";
 
 export type { SecretReference } from "./secrets.js";
 
@@ -198,8 +198,9 @@ export interface EnvVar {
   scope: EnvScope;
   // Present when the value is a literal (non-secret config).
   value?: string;
-  // Present when the value is passed through from the host environment.
-  from?: { env: string };
+  // Present when the value comes from outside the plan: either a host
+  // environment passthrough ({ env }) or an AWS secret ARN ({ secretArn }).
+  from?: { env: string } | { secretArn: string };
   // Only meaningful for passthrough vars.
   required?: boolean;
   default?: string;
@@ -671,9 +672,18 @@ export const ToolOptionsSchema = Schema.Struct({
 // in plan.json); references keep the secret out of the plan entirely.
 export const SecretValueSchema = Schema.Union([Schema.String, SecretReferenceSchema]);
 
+// Service credentials additionally accept AWS secret ARN references so ECS
+// deployments can inject them natively. Deliberately scoped to services only;
+// other SecretValue sites keep literal/env-only semantics.
+const ServicePasswordValueSchema = Schema.Union([
+  Schema.String,
+  SecretReferenceSchema,
+  SecretArnReferenceSchema,
+]);
+
 export const ServiceUserSchema = Schema.Struct({
   name: Schema.String,
-  password: SecretValueSchema,
+  password: ServicePasswordValueSchema,
 });
 
 export const ServiceDatabaseSchema = Schema.Struct({
@@ -685,7 +695,7 @@ export const ServiceOptionsSchema = Schema.Struct({
   environment: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   databases: Schema.optional(Schema.Array(ServiceDatabaseSchema)),
   users: Schema.optional(Schema.Array(ServiceUserSchema)),
-  password: Schema.optional(SecretValueSchema),
+  password: Schema.optional(ServicePasswordValueSchema),
 });
 
 const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -935,14 +945,18 @@ export const VolumeSpecSchema = Schema.Union([
 export const EnvScopeSchema = Schema.Literals(["build", "runtime", "both"]);
 
 // Input spec for addEnv. Exactly one of `value` (literal) or `from` (host
-// passthrough) must be provided; addEnv enforces that XOR at runtime.
-const EnvReferenceSchema = Schema.Struct({
-  env: Schema.String.check(Schema.isMinLength(1)).check(
-    Schema.makeFilter((value) =>
-      ENV_VAR_NAME_PATTERN.test(value) ? undefined : "must be a valid environment variable name",
+// passthrough, or an AWS secret ARN reference) must be provided; addEnv
+// enforces that XOR at runtime.
+const EnvReferenceSchema = Schema.Union([
+  Schema.Struct({
+    env: Schema.String.check(Schema.isMinLength(1)).check(
+      Schema.makeFilter((value) =>
+        ENV_VAR_NAME_PATTERN.test(value) ? undefined : "must be a valid environment variable name",
+      ),
     ),
-  ),
-});
+  }),
+  SecretArnReferenceSchema,
+]);
 
 export const EnvSpecSchema = Schema.Struct({
   value: Schema.optional(Schema.String),
@@ -966,11 +980,15 @@ export const EnvSpecSchema = Schema.Struct({
 );
 
 // Normalized EnvVar as stored on the plan (round-trippable in plan.json).
+// `from` is either a host-environment passthrough ({ env }) or an AWS secret
+// ARN reference ({ secretArn }); drivers decide how each kind is resolved.
 export const EnvVarSchema = Schema.Struct({
   key: Schema.String.check(Schema.isMinLength(1)),
   scope: EnvScopeSchema,
   value: Schema.optional(Schema.String),
-  from: Schema.optional(Schema.Struct({ env: Schema.String })),
+  from: Schema.optional(
+    Schema.Union([Schema.Struct({ env: Schema.String }), SecretArnReferenceSchema]),
+  ),
   required: Schema.optional(Schema.Boolean),
   default: Schema.optional(Schema.String),
 });

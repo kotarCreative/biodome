@@ -342,7 +342,9 @@ export default function env(ctx) {
 The spec accepts exactly one of:
 
 - `value` — a literal string. Stored in the plan and baked into the image `ENV` layer / compose file.
-- `from` — `{ env: "VAR_NAME" }`, passed through from the host environment via compose interpolation. The value is never persisted.
+- `from` — one of:
+  - `{ env: "VAR_NAME" }`, passed through from the host environment via compose interpolation. The value is never persisted.
+  - `{ secretArn: "arn:aws:secretsmanager|ssm:..." }`, an AWS-managed secret (Secrets Manager secret or SSM Parameter Store parameter). The `aws-ecs` target injects it natively at task launch via the ECS `secrets` field, so the value is never stored in the task definition; local Compose targets resolve it from a host variable named after the key and fail loudly when it is unset.
 
 Plus:
 
@@ -355,6 +357,10 @@ Keys must match `[A-Za-z_][A-Za-z0-9_]*`, and each key may only be declared once
 ### Literal vs passthrough
 
 Use `value` for non-secret configuration you're happy to see in the built image and `plan.json`. Use `from` for anything sensitive (API keys, database URLs, tokens): passthrough variables are emitted as `${VAR}` interpolations in the generated compose file and resolved from the host shell / `.env` at `up` time, so the secret never lands in a committed artifact.
+
+### AWS-managed secrets
+
+For `aws-ecs` deployments, prefer `{ secretArn }` over literals: ECS injects the value from Secrets Manager or SSM Parameter Store when the task starts, so nothing sensitive persists in the task definition (or its revision history). The execution role needs `secretsmanager:GetSecretValue` (and `kms:Decrypt` when the secret uses a customer-managed KMS key) or `ssm:GetParameter*` on the referenced ARN. Service credentials such as the Postgres password accept the same reference (`addService("postgres", { password: { secretArn } })`) and are injected under their container environment name automatically.
 
 ## `addVolume(spec)`
 

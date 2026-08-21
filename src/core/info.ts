@@ -13,6 +13,7 @@ import {
   ClaudeHarness,
   LlmProvider,
 } from "./plan.js";
+import { isSecretArnReference } from "./secrets.js";
 
 function formatPort(p: Port): string {
   const label = p.name ? `${p.name}: ` : "";
@@ -29,7 +30,10 @@ function formatSecret(value: SecretReference): string {
 function formatEnvVar(envVar: EnvVar): string {
   const scope = envVar.scope === "runtime" ? "" : ` [${envVar.scope}]`;
   if (envVar.from) {
-    const parts = [`from $${envVar.from.env}`];
+    const source = isSecretArnReference(envVar.from)
+      ? `from AWS secret ${envVar.from.secretArn}`
+      : `from $${envVar.from.env}`;
+    const parts = [source];
     if (envVar.required) parts.push("required");
     if (envVar.default !== undefined) parts.push(`default "${envVar.default}"`);
     return `${envVar.key} = ${parts.join(", ")}${scope}`;

@@ -1,5 +1,6 @@
 import { stringify } from "yaml";
 import { identitiesOf, type Plan } from "../../core/plan.js";
+import { isSecretArnReference } from "../../core/secrets.js";
 import { formatDuration, generatedRuntimeDir, parseDuration } from "./shell.js";
 
 interface ComposeService {
@@ -144,16 +145,19 @@ function devService(plan: Plan, paths: ComposePaths): ComposeService {
 
   // Passthrough env vars are resolved from the host at `up` time via compose
   // interpolation (${VAR}), so their values are never written into the image or
-  // plan.json. This is the safe path for secrets.
+  // plan.json. This is the safe path for secrets. AWS secret ARN references
+  // have no local analog, so they interpolate from a host variable named after
+  // the key itself; the aws-ecs driver injects them natively instead.
   for (const envVar of plan.runtime.envVars) {
     if (!envVar.from) continue;
     if (envVar.scope === "build") continue;
-    const ref = envVar.from.env;
+    const ref = isSecretArnReference(envVar.from) ? envVar.key : envVar.from.env;
     if (envVar.default !== undefined) {
       // Fall back to the default when the host var is unset or empty.
       environment[envVar.key] = `\${${ref}:-${envVar.default}}`;
-    } else if (envVar.required) {
-      // Fail `docker compose` loudly when a required var is missing.
+    } else if (isSecretArnReference(envVar.from) || envVar.required) {
+      // Fail `docker compose` loudly when unset. Secret-ARN-backed values are
+      // always required locally: silently-empty credentials are never right.
       environment[envVar.key] = `\${${ref}:?${ref} is required by ${envVar.key}}`;
     } else {
       environment[envVar.key] = `\${${ref}}`;

@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { EnvSpecSchema, type EnvVar, type Plan } from "../plan.js";
 import type { EnvSpec } from "../feature.js";
 import { ValidationError } from "../errors.js";
+import { isSecretArnReference, type SecretArnReference, type SecretReference } from "../secrets.js";
 
 const envKeyPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const safeDefault = /^[^:${}?\x00-\x1f\x7f]+$/; // oxlint-disable-line no-control-regex
@@ -9,7 +10,18 @@ const safeDefault = /^[^:${}?\x00-\x1f\x7f]+$/; // oxlint-disable-line no-contro
 function sameEnvVar(a: EnvVar, b: EnvVar): boolean {
   if (a.key !== b.key || a.scope !== b.scope) return false;
   if (a.value !== undefined || b.value !== undefined) return a.value === b.value;
-  return a.from?.env === b.from?.env && a.required === b.required && a.default === b.default;
+  if (!sameFrom(a.from, b.from)) return false;
+  return a.required === b.required && a.default === b.default;
+}
+
+function sameFrom(
+  a: SecretReference | SecretArnReference | undefined,
+  b: SecretReference | SecretArnReference | undefined,
+): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  if ("env" in a && "env" in b) return a.env === b.env;
+  if ("secretArn" in a && "secretArn" in b) return a.secretArn === b.secretArn;
+  return false;
 }
 
 export class EnvironmentBuilder {
@@ -27,9 +39,17 @@ export class EnvironmentBuilder {
       });
     }
     const scope = env.scope ?? "runtime";
+    // AWS secret ARN references are normalized verbatim; the plan carries the
+    // ARN (an identifier, not a secret) and drivers decide how to inject it.
+    const from =
+      hasValue || env.from === undefined
+        ? undefined
+        : isSecretArnReference(env.from)
+          ? { secretArn: env.from.secretArn }
+          : { env: env.from.env };
     const normalized: EnvVar = hasValue
       ? { key, scope, value: env.value }
-      : { key, scope, from: { env: env.from!.env }, required: env.required, default: env.default };
+      : { key, scope, from, required: env.required, default: env.default };
     const existing = this.plan.runtime.envVars.find((current) => current.key === key);
     if (existing) {
       if (sameEnvVar(existing, normalized)) return;

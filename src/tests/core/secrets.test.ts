@@ -1,13 +1,49 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import {
+  isSecretArnReference,
   redactQueryTokens,
   redactSecrets,
   redactString,
+  SecretArnReferenceSchema,
   SecretReferenceSchema,
   secretEnv,
   secretShellExpansion,
 } from "../../core/secrets.js";
+
+describe("SecretArnReferenceSchema", () => {
+  const validArns = [
+    "arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/api-token-AbCdEf",
+    "arn:aws:ssm:eu-west-1:123456789012:parameter/biodome/pg-password",
+    "arn:aws-us-gov:secretsmanager:us-gov-west-1:123456789012:secret:gov-secret",
+  ];
+  const invalidArns = [
+    "arn:aws:s3:::my-bucket",
+    "arn:aws:secretsmanager:bad region:123456789012:secret:x",
+    "api-token",
+    "https://secretsmanager.aws/secret",
+    "",
+    "arn:aws:ssm:us-east-1:notanaccount:parameter/x",
+  ];
+
+  it("accepts Secrets Manager and SSM parameter ARNs", () => {
+    for (const secretArn of validArns) {
+      expect(Schema.decodeUnknownSync(SecretArnReferenceSchema)({ secretArn })).toEqual({
+        secretArn,
+      });
+      expect(isSecretArnReference({ secretArn })).toBe(true);
+    }
+  });
+
+  it("rejects non-AWS or malformed references", () => {
+    for (const secretArn of invalidArns) {
+      expect(() => Schema.decodeUnknownSync(SecretArnReferenceSchema)({ secretArn })).toThrow();
+    }
+    expect(isSecretArnReference("api-token")).toBe(false);
+    expect(isSecretArnReference({ env: "API_TOKEN" })).toBe(false);
+    expect(isSecretArnReference(undefined)).toBe(false);
+  });
+});
 
 describe("SecretReferenceSchema", () => {
   it("accepts an environment reference", () => {

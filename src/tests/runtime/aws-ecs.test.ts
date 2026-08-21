@@ -244,7 +244,34 @@ describe("createAwsEcsDriver", () => {
             target: sampleTarget,
           }),
         ),
-      ).toThrow(/does not support host-env passthrough yet.*API_TOKEN/s);
+      ).toThrow(/cannot resolve these environment variables.*API_TOKEN.*secretArn/s);
+    });
+
+    it("renders plans whose env vars use AWS secret ARN references", () => {
+      const driver = createAwsEcsDriver(makeClients());
+      const planWithArnRef: Plan = {
+        ...samplePlan,
+        runtime: {
+          ...samplePlan.runtime,
+          envVars: [
+            {
+              key: "API_TOKEN",
+              scope: "runtime",
+              from: { secretArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:api-token" },
+            },
+          ],
+        },
+      };
+      expect(() =>
+        Effect.runSync(
+          driver.render({
+            rootDir: "/tmp/root",
+            outputDir: "/tmp/output",
+            plan: planWithArnRef,
+            target: sampleTarget,
+          }),
+        ),
+      ).not.toThrow();
     });
 
     it("renders plans with process-hosted services", () => {
@@ -322,6 +349,56 @@ describe("createAwsEcsDriver", () => {
         `123456789012.dkr.ecr.us-east-1.amazonaws.com/test-repo@sha256:${"a".repeat(64)}`,
       );
       expect(container.command).toBeUndefined();
+    });
+
+    it("registers AWS secret ARN references as native secrets, not plaintext env", async () => {
+      const ecsSend = vi
+        .fn()
+        .mockResolvedValueOnce({
+          taskDefinition: { taskDefinitionArn: "arn:aws:ecs:...:task-def/test-deploy:1" },
+        })
+        .mockResolvedValueOnce({ tasks: [{ taskArn: "arn:aws:ecs:...:task/abc123" }] });
+      const driver = createAwsEcsDriver(makeClients({ ecsSend }));
+      const input = makeInput();
+      const arnPlan: Plan = {
+        ...input.plan,
+        runtime: {
+          ...input.plan.runtime,
+          environment: { ...input.plan.runtime.environment, LOG_LEVEL: "debug" },
+          envVars: [
+            ...input.plan.runtime.envVars,
+            {
+              key: "POSTGRES_PASSWORD",
+              scope: "runtime",
+              from: { secretArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:pg-1" },
+            },
+            {
+              key: "API_TOKEN",
+              scope: "runtime",
+              from: { secretArn: "arn:aws:ssm:us-east-1:123456789012:parameter/api/token" },
+            },
+          ],
+        },
+      };
+
+      await run(driver.start({ ...input, plan: arnPlan }));
+
+      const container = ecsSend.mock.calls[0][0].input.containerDefinitions[0];
+      // Literals stay in the plaintext environment map...
+      expect(container.environment).toEqual(
+        expect.arrayContaining([{ name: "LOG_LEVEL", value: "debug" }]),
+      );
+      expect(container.environment).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: "POSTGRES_PASSWORD" })]),
+      );
+      // ...while ARN references are injected natively by ECS.
+      expect(container.secrets).toEqual([
+        {
+          name: "POSTGRES_PASSWORD",
+          valueFrom: "arn:aws:secretsmanager:us-east-1:123456789012:secret:pg-1",
+        },
+        { name: "API_TOKEN", valueFrom: "arn:aws:ssm:us-east-1:123456789012:parameter/api/token" },
+      ]);
     });
 
     it("continues when the log group already exists", async () => {

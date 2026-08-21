@@ -11,6 +11,7 @@ import {
   type WorkspaceRequirement,
 } from "./execution-plan.js";
 import { DRIVER_SUPPORT } from "./support.js";
+import { isSecretArnReference } from "../core/secrets.js";
 import type { ProviderProfile, WorkspaceStrategy } from "./compatibility.js";
 
 /** Compile the legacy plan into the portable contract used by orchestration. */
@@ -163,7 +164,9 @@ function compileSecrets(plan: Plan): SecretRequirement[] {
   };
 
   for (const envVar of plan.runtime.envVars) {
-    if (!envVar.from) continue;
+    // AWS secret ARN references are injected by the target (e.g. native ECS
+    // `secrets`), so they impose no requirement on the host environment.
+    if (!envVar.from || isSecretArnReference(envVar.from)) continue;
     add(
       envVar.from.env,
       `environment variable ${envVar.key} passed through from the host`,

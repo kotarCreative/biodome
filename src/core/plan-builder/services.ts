@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { type Plan, type Service, ServiceOptionsSchema } from "../plan.js";
 import type { EnvSpec, ProcessSpec, ServiceOptions } from "../feature.js";
 import { ValidationError } from "../errors.js";
+import { isSecretArnReference } from "../secrets.js";
 import {
   POSTGRES_PASSWORD_ENV_VAR,
   SUPPORTED_SERVICE_TYPES,
@@ -69,12 +70,15 @@ export class ServiceBuilder {
       });
       // The init script reads the role password from the container environment,
       // so declare it as a runtime env var: literals are injected verbatim,
-      // while { env } references become required host passthroughs that fail
-      // `docker compose` loudly when unset. The value never touches disk.
+      // { env } references become required host passthroughs that fail
+      // `docker compose` loudly when unset, and { secretArn } references are
+      // injected natively by the aws-ecs driver. The value never touches disk.
       const password = servicePassword(validated);
       if (password !== undefined) {
         if (typeof password === "string") {
           this.addEnv(POSTGRES_PASSWORD_ENV_VAR, { value: password });
+        } else if (isSecretArnReference(password)) {
+          this.addEnv(POSTGRES_PASSWORD_ENV_VAR, { from: { secretArn: password.secretArn } });
         } else {
           this.addEnv(POSTGRES_PASSWORD_ENV_VAR, {
             from: { env: password.env },

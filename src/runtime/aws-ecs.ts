@@ -46,6 +46,7 @@ import type {
 import type { RuntimeTarget } from "../core/plan.js";
 import type { Plan } from "../core/plan.js";
 import { RuntimeError } from "../core/errors.js";
+import { isSecretArnReference } from "../core/secrets.js";
 import { capabilitiesOf } from "../core/capabilities.js";
 import type { EventStore } from "../core/events.js";
 import { runtimeLayout } from "./layout.js";
@@ -166,16 +167,33 @@ function stopEcsTask(ecs: ECSClient, cluster: string, taskArn: string, reason: s
   }).pipe(Effect.asVoid);
 }
 
+/** Host-env passthrough references, which have no host to resolve from on ECS. */
 function passthroughEnvKeys(plan: Plan): string[] {
   return plan.runtime.envVars
-    .filter((envVar) => envVar.from !== undefined)
+    .filter((envVar) => envVar.from !== undefined && !isSecretArnReference(envVar.from))
     .map((envVar) => envVar.key);
 }
 
 function passthroughEnvError(keys: string[]): RuntimeError {
   return new RuntimeError({
-    message: `The aws-ecs target does not support host-env passthrough yet, so these environment variables cannot be resolved from the host: ${keys.join(", ")}. Provide literal values for them instead.`,
+    message: `The aws-ecs target cannot resolve these environment variables from the host: ${keys.join(", ")}. Use { secretArn } references (Secrets Manager or SSM Parameter Store) for secret values on this target.`,
   });
+}
+
+/**
+ * AWS secret ARN references become native `secrets` entries so values are
+ * injected by ECS at task launch and never persist in the task definition.
+ * Service credentials declared as ARNs (e.g. the Postgres password) were
+ * normalized into runtime env vars by the plan builder, so this single pass
+ * covers them.
+ */
+function awsSecretEntries(plan: Plan): Array<{ name: string; valueFrom: string }> {
+  const secrets: Array<{ name: string; valueFrom: string }> = [];
+  for (const envVar of plan.runtime.envVars) {
+    if (!envVar.from || !isSecretArnReference(envVar.from)) continue;
+    secrets.push({ name: envVar.key, valueFrom: envVar.from.secretArn });
+  }
+  return secrets;
 }
 
 /** Read the immutable OCI image digest emitted by `docker buildx build --push`. */
@@ -423,12 +441,8 @@ export function createAwsEcsDriver(
         const family = familyName(input.deploymentId);
         const lgGroup = logGroupName(input.plan.project, input.target.name);
 
-        const passthroughKeys = passthroughEnvKeys(input.plan);
-        if (passthroughKeys.length > 0) {
-          return yield* passthroughEnvError(passthroughKeys);
-        }
-
         const containerEnv = buildContainerEnvironment(input.plan);
+        const secrets = awsSecretEntries(input.plan);
         const hasDaemonProcesses = input.plan.runtime.processes.some(
           (process) => process.mode === "daemon",
         );
@@ -461,6 +475,7 @@ export function createAwsEcsDriver(
                     essential: true,
                     command: defaultCommand,
                     environment: containerEnv.map((e) => ({ name: e.name, value: e.value })),
+                    secrets: secrets.length > 0 ? secrets : undefined,
                     logConfiguration: {
                       logDriver: "awslogs",
                       options: {
@@ -618,12 +633,8 @@ export function createAwsEcsDriver(
           lastStatus: string;
         } = { lastStatus: "PENDING" };
 
-        const passthroughKeys = passthroughEnvKeys(input.plan);
-        if (passthroughKeys.length > 0) {
-          return yield* passthroughEnvError(passthroughKeys);
-        }
-
         const containerEnv = buildContainerEnvironment(input.plan);
+        const secrets = awsSecretEntries(input.plan);
         let bucket: string | undefined;
         let taskRoleArn: string | undefined;
         if (input.artifactPaths && input.artifactPaths.length > 0) {
@@ -677,6 +688,7 @@ export function createAwsEcsDriver(
                       essential: true,
                       command: input.command,
                       environment: containerEnv.map((e) => ({ name: e.name, value: e.value })),
+                      secrets: secrets.length > 0 ? secrets : undefined,
                       logConfiguration: {
                         logDriver: "awslogs",
                         options: {

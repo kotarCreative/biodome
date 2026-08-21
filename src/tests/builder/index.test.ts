@@ -97,6 +97,30 @@ describe("buildPlan", () => {
     expect(plan.runtime.services[0].name).toBe("redis");
   });
 
+  it("turns an AWS secret ARN service password into a passthrough env var", async () => {
+    const dir = join("/tmp", "sandbox-test-" + Date.now());
+    const secretArn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:pg-AbCdEf";
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({ project: { name: "arn-app" } }),
+      ".biodome/services.mjs": `
+        export default function services(ctx) {
+          ctx.addService("postgres", {
+            port: 5432,
+            password: { secretArn: "${secretArn}" },
+          });
+        }
+      `,
+    });
+
+    const plan = await buildPlan(dir);
+    expect(plan.runtime.envVars).toEqual([
+      { key: "POSTGRES_PASSWORD", scope: "runtime", from: { secretArn } },
+    ]);
+    // The credential value never lands in the literal environment.
+    expect(plan.runtime.environment.POSTGRES_PASSWORD).toBeUndefined();
+    expect(JSON.stringify(plan)).not.toContain('POSTGRES_PASSWORD":');
+  });
+
   it("executes arbitrary commands in features", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {

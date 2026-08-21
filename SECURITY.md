@@ -22,7 +22,9 @@ interest:
 - Generated shell scripts, supervisord configs, and Compose files
   (injection via plan values).
 - Secret handling: env references vs literals, redaction in events, logs,
-  plans, and MCP tool output.
+  plans, and MCP tool output. AWS secret ARN references (`{ secretArn }`) are
+  injected by the target (native ECS `secrets` field) rather than stored in
+  task definitions.
 - MCP server auth, request bounds, volume adapters (S3/GCS/Azure/local),
   and command execution limits.
 - Third-party app-recipe loading (`biodome app add`).

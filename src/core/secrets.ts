@@ -23,6 +23,36 @@ export const SecretReferenceSchema = Schema.Struct({
   ),
 });
 
+// A typed reference to an AWS-managed secret: a Secrets Manager secret ARN or
+// an SSM Parameter Store parameter ARN (full ARN required, so the region and
+// account are explicit). Only sites that explicitly opt in accept this kind;
+// targets without native AWS secret injection reject it with guidance.
+export interface SecretArnReference {
+  readonly secretArn: string;
+}
+
+const SECRET_ARN_PATTERN =
+  /^arn:(?:aws|aws-cn|aws-us-gov|aws-iso(?:-[a-z]+)?):(secretsmanager|ssm):[a-z0-9-]+:[0-9]{12}:.+$/;
+
+export const SecretArnReferenceSchema = Schema.Struct({
+  secretArn: Schema.String.check(Schema.isMinLength(1)).check(
+    Schema.makeFilter((value) =>
+      SECRET_ARN_PATTERN.test(value)
+        ? undefined
+        : "must be a Secrets Manager or SSM Parameter Store ARN",
+    ),
+  ),
+});
+
+export function isSecretArnReference(value: unknown): value is SecretArnReference {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "secretArn" in value &&
+    typeof (value as Record<string, unknown>).secretArn === "string"
+  );
+}
+
 export type SecretReferenceEncoded = typeof SecretReferenceSchema.Encoded;
 export type SecretReferenceDecoded = typeof SecretReferenceSchema.Type;
 
