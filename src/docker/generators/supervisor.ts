@@ -11,8 +11,11 @@ import {
 } from "./shell.js";
 
 function quoteSupervisordEnv(value: string): string {
-  // supervisord needs literal % doubled, and double quotes escaped.
-  return `"${value.replace(/%/g, "%%").replace(/"/g, '\\"')}"`;
+  // supervisord needs literal % doubled, and double quotes escaped. Newlines
+  // are flattened: an INI value cannot span lines, and a raw newline would
+  // start a new config directive (builders reject them upstream; this is the
+  // generator-level backstop).
+  return `"${value.replace(/\r\n?/g, " ").replace(/%/g, "%%").replace(/"/g, '\\"')}"`;
 }
 
 function supervisordEnvValue(value: string): string {
@@ -85,7 +88,8 @@ export function generateSupervisordConf(plan: Plan): string {
     const cmd = proc.command.map(shellQuote).join(" ");
     lines.push(`command=${cmd}`);
     if (proc.workingDir) {
-      lines.push(`directory=${proc.workingDir}`);
+      // Quoted like env values so spaces and % never break the INI directive.
+      lines.push(`directory=${quoteSupervisordEnv(proc.workingDir)}`);
     }
     // User workloads, MCP, and mount helpers each run as their generated
     // non-root identity. Health monitors are biodome infrastructure that must

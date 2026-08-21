@@ -3,6 +3,7 @@ import { EnvSpecSchema, type EnvVar, type Plan } from "../plan.js";
 import type { EnvSpec } from "../feature.js";
 import { ValidationError } from "../errors.js";
 import { isSecretArnReference, type SecretArnReference, type SecretReference } from "../secrets.js";
+import { assertNoControlChars } from "../validation.js";
 
 const envKeyPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const safeDefault = /^[^:${}?\x00-\x1f\x7f]+$/; // oxlint-disable-line no-control-regex
@@ -38,6 +39,11 @@ export class EnvironmentBuilder {
     }
     const env = Schema.decodeSync(EnvSpecSchema)(spec);
     const hasValue = env.value !== undefined;
+    if (hasValue) {
+      // Literal values render verbatim in the Dockerfile ENV block; newlines
+      // would inject additional instructions.
+      assertNoControlChars(env.value, `Env ${key} value`);
+    }
     if (!hasValue && env.default !== undefined && !safeDefault.test(env.default)) {
       throw new ValidationError({
         message: `Env ${key}: default contains characters that are not safe inside a Docker Compose interpolation default`,

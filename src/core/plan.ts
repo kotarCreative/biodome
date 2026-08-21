@@ -7,6 +7,7 @@ import type { McpClientAuth } from "./mcp-client.js";
 import { McpClientAuthSchema } from "./mcp-client.js";
 import type { SecretReference } from "./secrets.js";
 import { SecretArnReferenceSchema, SecretReferenceSchema } from "./secrets.js";
+import { KNOWN_HOSTS_HEREDOC_DELIMITER } from "./validation.js";
 
 export type { SecretReference } from "./secrets.js";
 
@@ -703,7 +704,17 @@ const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 export const RepoCredentialsSchema = Schema.Struct({
   token: Schema.optional(SecretReferenceSchema),
   sshKey: Schema.optional(SecretReferenceSchema),
-  knownHosts: Schema.optional(Schema.String),
+  // Rendered into a heredoc in the generated sync script; the reserved
+  // delimiter line would terminate the block early and inject commands.
+  knownHosts: Schema.optional(
+    Schema.String.check(
+      Schema.makeFilter((value) =>
+        value.split("\n").includes(KNOWN_HOSTS_HEREDOC_DELIMITER)
+          ? `must not contain the reserved heredoc delimiter line ${KNOWN_HOSTS_HEREDOC_DELIMITER}`
+          : undefined,
+      ),
+    ),
+  ),
 });
 
 export const RepoSpecSchema = Schema.Struct({
@@ -1055,11 +1066,24 @@ export const ProcessHealthCheckSchema = Schema.Struct({
   startPeriod: Schema.optional(Schema.String),
 });
 
+// Environment values render verbatim into Dockerfile ENV blocks, compose
+// files, and supervisord configs, so persisted plans reject control
+// characters that could smuggle additional lines or directives.
+const EnvValueRecord = Schema.Record(
+  Schema.String,
+  Schema.String.check(
+    Schema.makeFilter((value) =>
+      // oxlint-disable-next-line no-control-regex -- intentional: rejecting control chars
+      /[\u0000-\u001F\u007F]/.test(value) ? "must not contain control characters" : undefined,
+    ),
+  ),
+);
+
 export const ProcessSchema = Schema.Struct({
   name: Schema.String,
   command: Schema.Array(Schema.String),
   ports: Schema.Array(PortSchema),
-  environment: Schema.Record(Schema.String, Schema.String),
+  environment: EnvValueRecord,
   workingDir: Schema.optional(Schema.String),
   healthCheck: Schema.optional(ProcessHealthCheckSchema),
   mode: Schema.Literals(["daemon", "oneshot"]),
@@ -1072,7 +1096,7 @@ export const ProcessSchema = Schema.Struct({
 export const ServiceSchema = Schema.Struct({
   name: Schema.String,
   type: Schema.String,
-  environment: Schema.Record(Schema.String, Schema.String),
+  environment: EnvValueRecord,
   ports: Schema.Array(PortSchema),
 });
 
@@ -1227,15 +1251,30 @@ export const NormalizedMcpConfigSchema = Schema.Struct({
 
 export const BuildPlanSchema = Schema.Struct({
   project: Schema.String,
-  baseImage: Schema.String,
-  aptPackages: Schema.Array(Schema.String),
+  baseImage: Schema.String.check(
+    Schema.makeFilter((value) =>
+      // Empty is the createPlan default; finalize() replaces it. Otherwise
+      // only image-reference characters are allowed (defense against
+      // hand-tampered plan.json reaching the generated FROM line).
+      value === "" || /^[A-Za-z0-9][A-Za-z0-9._:/-]*(@sha256:[a-f0-9]{64})?$/.test(value)
+        ? undefined
+        : "must be a container image reference",
+    ),
+  ),
+  aptPackages: Schema.Array(
+    Schema.String.check(
+      Schema.makeFilter((value) =>
+        /^[a-z0-9][a-z0-9+.-]*$/.test(value) ? undefined : "must be an apt package name",
+      ),
+    ),
+  ),
   runtimeInstalls: Schema.Array(Schema.String),
   languageSnippets: Schema.Array(Schema.String),
   languageRequests: Schema.Array(LanguageRequestSchema),
   dependencyFiles: Schema.Array(Schema.String),
   dependencyInstalls: Schema.Array(DependencyInstallSchema),
   copyArtifacts: Schema.Array(CopyArtifactSchema),
-  environment: Schema.Record(Schema.String, Schema.String),
+  environment: EnvValueRecord,
   nodeModulesVolume: Schema.Boolean,
   venvVolume: Schema.Boolean,
   vendorVolume: Schema.Boolean,
@@ -1343,7 +1382,7 @@ export const RuntimePlanSchema = Schema.Struct({
   namedVolumes: Schema.Array(NamedVolumeSchema),
   volumes: Schema.Array(VolumeSchema),
   ports: Schema.Array(PortSchema),
-  environment: Schema.Record(Schema.String, Schema.String),
+  environment: EnvValueRecord,
   processes: Schema.Array(ProcessSchema),
   identities: Schema.Array(RuntimeIdentitySchema),
   endpoints: Schema.Array(EndpointSpecSchema),

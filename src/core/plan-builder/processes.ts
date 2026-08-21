@@ -11,6 +11,7 @@ import {
 } from "../plan.js";
 import type { HookSpec, ProcessSpec } from "../feature.js";
 import { ValidationError } from "../errors.js";
+import { assertNoControlChars } from "../validation.js";
 
 export class ProcessBuilder {
   constructor(
@@ -38,6 +39,11 @@ export class ProcessBuilder {
     label: "Process" | "Hook",
   ): void {
     this.validatePorts(spec, label);
+    for (const [key, value] of Object.entries(spec.environment ?? {})) {
+      // Rendered verbatim into supervisord config; newlines would start a new
+      // INI directive.
+      assertNoControlChars(value, `${label} ${spec.name}: environment.${key}`);
+    }
     if (this.plan.runtime.processes.some((process) => process.name === spec.name)) {
       throw new ValidationError({ message: `Duplicate process or hook name: ${spec.name}` });
     }
