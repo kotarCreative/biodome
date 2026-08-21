@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Command, InvalidArgumentError } from "commander";
 import { Effect, Layer } from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import { BiodomeTelemetry } from "../core/telemetry.js";
+import { provideTelemetry } from "../core/telemetry.js";
 import {
   EventStore,
   FileEventStoreLive,
@@ -54,7 +54,7 @@ function withLayers<E>(
 ): Effect.Effect<void, E, never> {
   return effect.pipe(
     Effect.provide(buildLayers(rootDir, enabled, runId, targetName)),
-    Effect.provide(BiodomeTelemetry),
+    provideTelemetry,
   ) as Effect.Effect<void, E, never>;
 }
 

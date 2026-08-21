@@ -1,24 +1,17 @@
-import { NodeSdk } from "@effect/opentelemetry";
-import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
-import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
-import { Layer, Effect } from "effect";
+import { Effect } from "effect";
 
-export const BiodomeTelemetry = Layer.unwrap(
-  Effect.sync(() => {
-    const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
-    if (!endpoint) return Layer.empty;
-
-    const logExporter = new OTLPLogExporter({
-      url: endpoint.replace(/\/+$/, "") + "/v1/logs",
-    });
-
-    return NodeSdk.layer(() => ({
-      resource: {
-        serviceName: process.env.OTEL_SERVICE_NAME || "biodome",
-        serviceVersion: "0.1.0",
-      },
-      logRecordProcessor: [new BatchLogRecordProcessor({ exporter: logExporter })],
-      loggerMergeWithExisting: true,
-    }));
-  }),
-);
+// Telemetry is active only when an OTLP endpoint is configured. The
+// OpenTelemetry SDK modules are large, so they are loaded through a dynamic
+// import and only when the endpoint is present; every other CLI invocation
+// skips the SDK entirely.
+export const provideTelemetry = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> => {
+  if (process.env.OTEL_EXPORTER_OTLP_ENDPOINT === undefined) {
+    return effect;
+  }
+  return Effect.flatMap(
+    Effect.promise(() => import("./otel.js")),
+    ({ BiodomeTelemetry }) => Effect.provide(effect, BiodomeTelemetry),
+  );
+};
