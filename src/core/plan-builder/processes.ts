@@ -79,6 +79,7 @@ export class ProcessBuilder {
       startOn: spec.startOn ?? defaultStartOn,
       bootstrap: spec.bootstrap,
       mergeEnv: spec.mergeEnv,
+      identity: spec.identity,
     };
   }
 
@@ -122,7 +123,10 @@ export class ProcessBuilder {
   }
 
   private mergeEnvironment(process: Process): void {
-    if (process.mergeEnv === false) return;
+    // Process environments are scoped by default: volume, provider, MCP, and
+    // harness credentials must not leak into sibling processes or the compose
+    // dev service. Sharing is an explicit opt-in.
+    if (process.mergeEnv !== true) return;
     for (const [key, value] of Object.entries(process.environment)) {
       if (this.plan.runtime.envVars.some((env) => env.key === key)) continue;
       this.plan.runtime.environment[key] = value;

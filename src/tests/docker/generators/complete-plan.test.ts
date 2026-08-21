@@ -27,18 +27,8 @@ function completePlan(): Plan {
   plan.runtime.services.push({
     name: "postgres",
     type: "postgres",
-    image: "postgres:16-alpine",
-    containerName: "complete-postgres",
     environment: { POSTGRES_USER: "app" },
     ports: [{ host: 5432, container: 5432 }],
-    volumes: [{ host: "postgres_data", container: "/var/lib/postgresql/data" }],
-    networks: ["biodome"],
-    healthCheck: {
-      test: ["CMD-SHELL", "pg_isready -U app"],
-      interval: "5s",
-      timeout: "3s",
-      retries: 10,
-    },
   });
   plan.runtime.volumes.push({
     name: "data",
@@ -251,8 +241,9 @@ describe("complete-plan artifact regression", () => {
       expect(mcpFile.content).toBeUndefined();
     }
 
-    // Compose artifact: dev service with ports, health check, volumes, services,
-    // and passthrough interpolation that never bakes secrets into the image.
+    // Compose artifact: a single dev service (backing services run in-container)
+    // with ports, health check, volumes, and passthrough interpolation that
+    // never bakes secrets into the image.
     const compose = generateCompose(plan, {
       buildContext: "../..",
       dockerfile: ".biodome-build/targets/local/Dockerfile",
@@ -260,12 +251,15 @@ describe("complete-plan artifact regression", () => {
     });
     expect(compose).toContain("complete-dev:latest");
     expect(compose).toContain("3000:3000");
-    expect(compose).toContain("postgres:16-alpine");
+    expect(compose).toContain("5432:5432");
     expect(compose).toContain("sh /workspace/.biodome-build/targets/local/healthchecks/all.sh");
-    expect(compose).toContain("postgres_data:");
     expect(compose).toContain("./data:/workspace/data");
     expect(compose).toContain("node_modules:/workspace/node_modules");
     expect(compose).toContain("${DATABASE_URL:?DATABASE_URL is required by DATABASE_URL}");
     expect(compose).toContain("${PORT:-8000}");
+    // Exactly one compose service: the dev image hosts everything.
+    expect(compose).toMatch(/services:\n  dev:\n/);
+    expect(compose).not.toContain("postgres:16-alpine");
+    expect(compose).not.toContain("depends_on");
   });
 });

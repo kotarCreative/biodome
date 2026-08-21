@@ -1,5 +1,125 @@
-import type { Plan, Process } from "../../core/plan.js";
+import { identitiesOf, type Plan, type Process, type RuntimeIdentity } from "../../core/plan.js";
 import { assertIdentifier, generatedRuntimeDir, shellQuote, supervisorLogDir } from "./shell.js";
+
+function runtimeIdentityOf(plan: Plan): RuntimeIdentity {
+  const identity = identitiesOf(plan).find((candidate) => candidate.role === "runtime");
+  if (!identity) throw new Error("Plan is missing the runtime identity");
+  return identity;
+}
+
+function mountIdentityOf(plan: Plan): RuntimeIdentity | undefined {
+  return identitiesOf(plan).find((candidate) => candidate.role === "mount");
+}
+
+/**
+ * Emits the bounded, narrowly scoped initialization that lets supervisord start
+ * elevated only to prepare paths and setuid programs:
+ *  - map the runtime identity onto the workspace bind-mount owner via
+ *    BIODOME_RUNTIME_UID/GID when shadow tools are available,
+ *  - grant non-root identities read access to the generated tree with mode
+ *    changes only (never recursive chown: the tree may be a host bind mount
+ *    whose ownership must stay with the host user),
+ *  - make container-owned writable state (logs, harness homes) group-shared,
+ *  - warn deterministically when the workspace remains unwritable.
+ */
+function initializeIdentities(lines: string[], plan: Plan): void {
+  const runtime = runtimeIdentityOf(plan);
+  const q = shellQuote;
+  const runtimeDir = generatedRuntimeDir(plan);
+  const logDir = supervisorLogDir(plan);
+
+  lines.push(
+    "# Map the runtime identity onto the workspace owner without rebuilding.",
+    `BIODOME_RUNTIME_UID="\${BIODOME_RUNTIME_UID:-${runtime.uid}}"`,
+    `BIODOME_RUNTIME_GID="\${BIODOME_RUNTIME_GID:-${runtime.gid}}"`,
+    "if command -v groupmod >/dev/null 2>&1 && command -v usermod >/dev/null 2>&1; then",
+    '  mapped_group=$(getent group "$BIODOME_RUNTIME_GID" | cut -d: -f1)',
+    `  if [ -n "$mapped_group" ] && [ "$mapped_group" != "${runtime.group}" ]; then`,
+    `    echo "biodome: WARNING: gid $BIODOME_RUNTIME_GID is taken by $mapped_group; keeping built-in group id" >&2`,
+    `  elif [ "$(id -g ${q(runtime.user)})" != "$BIODOME_RUNTIME_GID" ]; then`,
+    `    groupmod -g "$BIODOME_RUNTIME_GID" ${q(runtime.group)}`,
+    "  fi",
+    '  mapped_user=$(getent passwd "$BIODOME_RUNTIME_UID" | cut -d: -f1)',
+    `  if [ -n "$mapped_user" ] && [ "$mapped_user" != "${runtime.user}" ]; then`,
+    `    echo "biodome: WARNING: uid $BIODOME_RUNTIME_UID is taken by $mapped_user; keeping built-in user id" >&2`,
+    `  elif [ "$(id -u ${q(runtime.user)})" != "$BIODOME_RUNTIME_UID" ]; then`,
+    `    usermod -u "$BIODOME_RUNTIME_UID" ${q(runtime.user)}`,
+    "  fi",
+    "else",
+    "  echo 'biodome: WARNING: usermod/groupmod unavailable; keeping built-in identity ids' >&2",
+    "fi",
+    "",
+    "# Narrow fixups: biodome-owned paths only, never an arbitrary host tree.",
+    `install -d -o "$BIODOME_RUNTIME_UID" -g "$BIODOME_RUNTIME_GID" -m 0750 ${q(`/home/${runtime.user}`)}`,
+  );
+
+  // Named cache volumes are docker-managed (not host bind mounts), so their
+  // top-level dirs can safely become runtime-owned; contents are created by
+  // the runtime identity itself.
+  lines.push(
+    "for cache_dir in node_modules .venv vendor; do",
+    '  if [ -d "/workspace/$cache_dir" ]; then',
+    `    chown "$BIODOME_RUNTIME_UID:$BIODOME_RUNTIME_GID" "/workspace/$cache_dir"`,
+    "  fi",
+    "done",
+  );
+
+  // Read access for every identity via modes alone: no ownership changes on
+  // possibly host-owned files. Intermediate directories are rendered 0700, so
+  // each ancestor of the scoped runtime dir must be traversable too.
+  const ancestors: string[] = [];
+  let prefix = runtimeDir;
+  while (prefix !== "/workspace" && prefix !== "/") {
+    prefix = prefix.slice(0, prefix.lastIndexOf("/")) || "/";
+    if (prefix !== "/workspace" && prefix !== "/") ancestors.push(prefix);
+  }
+  lines.push(
+    ...(ancestors.length > 0 ? [`chmod a+rX ${ancestors.reverse().map(q).join(" ")}`] : []),
+    `if [ -d ${q(runtimeDir)} ]; then`,
+    `  chmod -R a+rX ${q(runtimeDir)}`,
+    "fi",
+  );
+
+  // Writable state lives in biodome-generated directories. Sharing happens
+  // through the runtime group so the host owner is never replaced.
+  lines.push(`mkdir -p ${q(logDir)}`);
+  const writableStateDirs = [
+    logDir,
+    ...["opencode-homes", "pi-homes", "codex-homes", "claude-homes"].map(
+      (dir) => `${runtimeDir}/${dir}`,
+    ),
+  ];
+  for (const stateDir of writableStateDirs) {
+    lines.push(`if [ -d ${q(stateDir)} ]; then`);
+    lines.push(`  chgrp -R "$BIODOME_RUNTIME_GID" ${q(stateDir)}`);
+    lines.push(`  chmod -R g+rwX ${q(stateDir)}`);
+    lines.push("fi");
+  }
+  lines.push(`chgrp "$BIODOME_RUNTIME_GID" ${q(logDir)}`, `chmod 2770 ${q(logDir)}`);
+
+  const mount = mountIdentityOf(plan);
+  if (mount) {
+    for (const volume of plan.runtime.volumes) {
+      if (volume.type === "local" || volume.proxy || !volume.directMount) continue;
+      assertIdentifier(volume.name, "volume name");
+      lines.push(`mkdir -p ${shellQuote(volume.target)}`);
+      lines.push(
+        `chown ${shellQuote(`${mount.user}:${mount.group}`)} ${shellQuote(volume.target)}`,
+      );
+    }
+  }
+
+  lines.push(
+    "if command -v setpriv >/dev/null 2>&1; then",
+    `  if ! setpriv --reuid="$BIODOME_RUNTIME_UID" --regid="$BIODOME_RUNTIME_GID" --clear-groups \\`,
+    "      test -w /workspace >/dev/null 2>&1; then",
+    "    echo 'biodome: WARNING: /workspace is not writable by the runtime identity;' >&2",
+    "    echo 'biodome: WARNING: set BIODOME_RUNTIME_UID/BIODOME_RUNTIME_GID to this repository owner ids' >&2",
+    "  fi",
+    "fi",
+    "",
+  );
+}
 
 function hookCommand(hook: Process): string {
   const environment = Object.entries(hook.environment)
@@ -11,9 +131,17 @@ function hookCommand(hook: Process): string {
   const command = hook.command.map(shellQuote).join(" ");
   const invocation = environment.length > 0 ? `env ${environment.join(" ")} ${command}` : command;
   const workingDir = shellQuote(hook.workingDir ?? "/workspace");
+  // Hooks are user-controlled workloads: run them as the mapped runtime
+  // identity instead of root. Bases without setpriv keep working with a loud
+  // warning rather than silently failing lifecycle hooks.
   return `(
   cd ${workingDir}
-  ${invocation}
+  if command -v setpriv >/dev/null 2>&1; then
+    setpriv --reuid="$BIODOME_RUNTIME_UID" --regid="$BIODOME_RUNTIME_GID" --clear-groups ${invocation}
+  else
+    echo 'biodome: WARNING: setpriv unavailable; running hook without identity drop' >&2
+    ${invocation}
+  fi
 )`;
 }
 
@@ -48,19 +176,12 @@ function boundedWait(
 }
 
 function startSupervisor(lines: string[], plan: Plan): void {
+  initializeIdentities(lines, plan);
   const config = `${generatedRuntimeDir(plan)}/supervisord.conf`;
   const quotedConfig = shellQuote(config);
-  const logDir = shellQuote(supervisorLogDir(plan));
-  const runtimeDir = shellQuote(generatedRuntimeDir(plan));
   lines.push(
-    // supervisord does not create missing log directories, and its log,
-    // pidfile, socket, and per-program logs all live in the private runtime
-    // dir rather than world-writable /tmp.
-    `mkdir -p ${logDir}`,
-    // Direct Compose users may not have run the host renderer. Match the
-    // mounted runtime directory's owner when GNU chown is available.
-    `chown --reference=${runtimeDir} ${logDir} 2>/dev/null || true`,
-    `chmod 700 ${logDir}`,
+    // supervisord does not create missing log directories; ownership and mode
+    // for the private runtime and log dirs were set during identity init.
     `supervisord -c ${quotedConfig} &`,
     "supervisord_pid=$!",
   );
@@ -104,6 +225,7 @@ export function generateStartupScript(plan: Plan): string | undefined {
 
   const lines = ["#!/bin/sh", "set -e", ""];
   if (!hasDaemons) {
+    initializeIdentities(lines, plan);
     emitHooks(lines, preHooks);
     emitHooks(lines, postHooks);
     lines.push("exec sleep infinity", "");

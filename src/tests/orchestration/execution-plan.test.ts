@@ -32,9 +32,7 @@ const document = {
     {
       name: "postgres",
       kind: "postgres",
-      runtime: "container",
       version: "17",
-      persistence: "task",
     },
   ],
   processes: [{ name: "api", command: ["npm", "run", "dev"], mode: "daemon" }],
@@ -44,7 +42,7 @@ describe("ExecutionPlanSchema", () => {
   it("decodes a portable provider-neutral plan", () => {
     const plan = decodeExecutionPlan(document);
     expect(plan.target.provider).toBe("docker-sandbox");
-    expect(plan.services[0]?.image).toBeUndefined();
+    expect(plan.services[0]).toEqual({ name: "postgres", kind: "postgres", version: "17" });
   });
 
   it("rejects an invalid plan version", () => {

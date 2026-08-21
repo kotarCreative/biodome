@@ -56,6 +56,7 @@ describe("VolumeBuilder", () => {
       prefix: "public/",
       target: "/workspace/assets",
       readOnly: true,
+      directMount: true,
       credentials: {
         accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
         secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
@@ -71,7 +72,6 @@ describe("VolumeBuilder", () => {
           "mount",
           "s3:example-assets/public/",
           "/workspace/assets",
-          "--allow-other",
           "--vfs-cache-mode",
           "writes",
           "--read-only",
@@ -80,9 +80,63 @@ describe("VolumeBuilder", () => {
           RCLONE_S3_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}",
           RCLONE_S3_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}",
         },
+        mergeEnv: false,
+        identity: "mount",
       },
     ]);
     expect(plan.runtime.volumes[0].readOnly).toBe(true);
+  });
+
+  it("never passes --allow-other to rclone mounts", () => {
+    const { builder, processes } = makeBuilder();
+
+    builder.add({
+      name: "assets",
+      type: "s3",
+      bucket: "example-assets",
+      target: "/workspace/assets",
+      directMount: true,
+    });
+
+    for (const process of processes as Array<{ command: string[] }>) {
+      expect(process.command).not.toContain("--allow-other");
+    }
+  });
+
+  it("rejects direct cloud mounts without explicit opt-in", () => {
+    const { builder } = makeBuilder();
+
+    expect(() =>
+      builder.add({
+        name: "assets",
+        type: "s3",
+        bucket: "example-assets",
+        target: "/workspace/assets",
+      }),
+    ).toThrow(/directMount: true|unsafe mode/);
+  });
+
+  it("emits a deterministic residual-risk warning when direct mounts are enabled", () => {
+    const { builder } = makeBuilder();
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (message: string) => warnings.push(message);
+    try {
+      builder.add({
+        name: "assets",
+        type: "s3",
+        bucket: "example-assets",
+        target: "/workspace/assets",
+        directMount: true,
+      });
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    expect(warnings).toEqual([
+      '[biodome] Direct FUSE mount "assets" requires SYS_ADMIN inside the dev container; ' +
+        "this grants broad kernel access and is an explicitly unsafe opt-in.",
+    ]);
   });
 
   it("derives provider-specific rclone settings", () => {
@@ -94,6 +148,7 @@ describe("VolumeBuilder", () => {
       container: "backups",
       path: "daily/",
       target: "/workspace/backups",
+      directMount: true,
       credentials: { accountKey: { env: "AZURE_KEY" } },
     });
     builder.addWebdav({
@@ -101,6 +156,7 @@ describe("VolumeBuilder", () => {
       url: "https://cloud.example.test/dav",
       vendor: "nextcloud",
       target: "/workspace/documents",
+      directMount: true,
       credentials: { password: { env: "WEBDAV_PASSWORD" } },
     });
 
@@ -111,7 +167,6 @@ describe("VolumeBuilder", () => {
         "mount",
         "azure:backups/daily/",
         "/workspace/backups",
-        "--allow-other",
         "--vfs-cache-mode",
         "writes",
       ],
@@ -119,23 +174,19 @@ describe("VolumeBuilder", () => {
         RCLONE_AZURE_ACCOUNT: "storage-account",
         RCLONE_AZURE_KEY: "${AZURE_KEY}",
       },
+      mergeEnv: false,
+      identity: "mount",
     });
     expect(processes).toContainEqual({
       name: "rclone-mount-documents",
-      command: [
-        "rclone",
-        "mount",
-        "webdav:",
-        "/workspace/documents",
-        "--allow-other",
-        "--vfs-cache-mode",
-        "writes",
-      ],
+      command: ["rclone", "mount", "webdav:", "/workspace/documents", "--vfs-cache-mode", "writes"],
       environment: {
         RCLONE_WEBDAV_URL: "https://cloud.example.test/dav",
         RCLONE_WEBDAV_VENDOR: "nextcloud",
         RCLONE_WEBDAV_PASS: "${WEBDAV_PASSWORD}",
       },
+      mergeEnv: false,
+      identity: "mount",
     });
   });
 
@@ -157,21 +208,28 @@ describe("VolumeBuilder", () => {
 
   it("contributes only proxy credential references to the MCP environment", () => {
     const { builder } = makeBuilder();
-    builder.addS3({
-      name: "proxy-assets",
-      bucket: "example-assets",
-      target: "/workspace/assets",
-      proxy: true,
-      credentials: {
-        accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
-      },
-    });
-    builder.addS3({
-      name: "mounted-assets",
-      bucket: "example-assets",
-      target: "/workspace/mounted-assets",
-      credentials: { secretAccessKey: { env: "MOUNT_SECRET" } },
-    });
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      builder.addS3({
+        name: "proxy-assets",
+        bucket: "example-assets",
+        target: "/workspace/assets",
+        proxy: true,
+        credentials: {
+          accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
+        },
+      });
+      builder.addS3({
+        name: "mounted-assets",
+        bucket: "example-assets",
+        target: "/workspace/mounted-assets",
+        directMount: true,
+        credentials: { secretAccessKey: { env: "MOUNT_SECRET" } },
+      });
+    } finally {
+      console.warn = originalWarn;
+    }
 
     const environment = builder.mcpCredentialEnvironment();
     expect(environment).toEqual({ AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}" });
@@ -200,6 +258,7 @@ describe("VolumeBuilder", () => {
       name: "drive",
       path: "/team",
       target: "/workspace/drive",
+      directMount: true,
       credentials: { clientId: undefined, token: { env: "GDRIVE_TOKEN" } },
     });
 

@@ -103,10 +103,8 @@ describe("validateCompatibility", () => {
     executionPlan.task.resources = { cpu: 1 };
     executionPlan.task.network.allow = ["api.example.test:443"];
     executionPlan.services.push({
-      name: "redis",
-      kind: "redis",
-      runtime: "process",
-      persistence: "task",
+      name: "legacy-db",
+      kind: "mysql",
     });
 
     const report = validateCompatibility(executionPlan, providerProfile(dockerComposeDriver));
@@ -117,7 +115,7 @@ describe("validateCompatibility", () => {
         expect.objectContaining({ kind: "workspace", subject: 'workspace strategy "upload"' }),
         expect.objectContaining({ kind: "resource", subject: "cpu" }),
         expect.objectContaining({ kind: "network", subject: "network allowlist" }),
-        expect.objectContaining({ kind: "service", subject: 'service "redis"' }),
+        expect.objectContaining({ kind: "service", subject: 'service "legacy-db"' }),
       ]),
     );
   });
@@ -128,8 +126,6 @@ describe("validateCompatibility", () => {
     executionPlan.services.push({
       name: "postgres",
       kind: "postgres",
-      runtime: "process",
-      persistence: "task",
     });
 
     expect(

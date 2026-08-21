@@ -15,7 +15,10 @@ import {
   PlanSchema,
   VolumeSpecSchema,
   McpConfigSchema,
+  RuntimeIdentitySchema,
   createPlan,
+  identityForProcess,
+  identitiesOf,
 } from "../../core/plan.js";
 
 describe("validateTargetName", () => {
@@ -428,5 +431,71 @@ describe("McpConfigSchema volume IO limits", () => {
 
   it("accepts the documented maximum of 10 MiB", () => {
     expect(decode({ maxReadBytes: 10485760 })).toMatchObject({ maxReadBytes: 10485760 });
+  });
+});
+
+describe("runtime identities", () => {
+  it("defaults every plan to the runtime, mcp, and mount identities", () => {
+    const plan = createPlan("my-app");
+    expect(identitiesOf(plan).map((identity) => identity.role)).toEqual([
+      "runtime",
+      "mcp",
+      "mount",
+    ]);
+    for (const identity of identitiesOf(plan)) {
+      expect(identity.uid).toBeGreaterThan(0);
+      expect(identity.gid).toBeGreaterThan(0);
+    }
+  });
+
+  it("falls back to generated defaults for plans that predate identities", () => {
+    const plan = createPlan("my-app");
+    (plan.runtime as { identities?: unknown }).identities = undefined;
+    expect(identitiesOf(plan)).toHaveLength(3);
+  });
+
+  it("resolves process identities with the runtime role as the default", () => {
+    const plan = createPlan("my-app");
+    const [runtime, mcp, mount] = identitiesOf(plan);
+    const base = {
+      command: ["node"],
+      ports: [],
+      environment: {},
+      mode: "daemon" as const,
+      startOn: "start.post" as const,
+    };
+    expect(identityForProcess(plan, { name: "web", ...base })).toEqual(runtime);
+    expect(identityForProcess(plan, { name: "mcp", ...base, identity: "mcp" })).toEqual(mcp);
+    expect(identityForProcess(plan, { name: "mount", ...base, identity: "mount" })).toEqual(mount);
+  });
+
+  it("validates identity names and id ranges", () => {
+    expect(() =>
+      Schema.decodeSync(RuntimeIdentitySchema)({
+        role: "runtime",
+        user: "Biodome",
+        group: "biodome",
+        uid: 10001,
+        gid: 10001,
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(RuntimeIdentitySchema)({
+        role: "runtime",
+        user: "biodome",
+        group: "biodome",
+        uid: 0,
+        gid: 10001,
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(RuntimeIdentitySchema)({
+        role: "runtime",
+        user: "biodome",
+        group: "biodome",
+        uid: 10001,
+        gid: 65536,
+      }),
+    ).toThrow();
   });
 });

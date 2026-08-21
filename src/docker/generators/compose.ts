@@ -1,5 +1,5 @@
 import { stringify } from "yaml";
-import type { Plan, Service, PortMapping, VolumeMapping } from "../../core/plan.js";
+import { identitiesOf, type Plan } from "../../core/plan.js";
 import { formatDuration, generatedRuntimeDir, parseDuration } from "./shell.js";
 
 interface ComposeService {
@@ -16,7 +16,6 @@ interface ComposeService {
   networks?: string[];
   command?: string[];
   ports?: string[];
-  depends_on?: Record<string, { condition: string }>;
   privileged?: boolean;
   healthcheck?: {
     test: string[];
@@ -40,20 +39,13 @@ export interface ComposePaths {
 }
 
 export function generateCompose(plan: Plan, paths: ComposePaths = {}): string {
+  // Every declared backing service runs inside the dev image as a supervised
+  // process, so the compose project is exactly one service: a single image.
   const services: Record<string, ComposeService> = {
     dev: devService(plan, paths),
   };
 
   const volumes: Record<string, unknown> = {};
-
-  for (const svc of plan.runtime.services.filter((service) => service.runtime !== "process")) {
-    services[svc.name] = serviceCompose(svc);
-    for (const vol of svc.volumes) {
-      if (isNamedVolume(vol.host)) {
-        volumes[vol.host] = {};
-      }
-    }
-  }
 
   for (const namedVol of plan.runtime.namedVolumes) {
     volumes[namedVol.name] = {};
@@ -141,6 +133,15 @@ function devService(plan: Plan, paths: ComposePaths): ComposeService {
 
   const environment: Record<string, string> = { ...plan.runtime.environment };
 
+  // The runtime identity maps onto the workspace bind-mount owner at `up`
+  // time, so hosts with differing uids keep a writable workspace without the
+  // container ever chowning host files. Defaults mirror the generated image.
+  const runtimeIdentity = identitiesOf(plan).find((identity) => identity.role === "runtime");
+  if (runtimeIdentity) {
+    environment.BIODOME_RUNTIME_UID = `\${BIODOME_RUNTIME_UID:-${runtimeIdentity.uid}}`;
+    environment.BIODOME_RUNTIME_GID = `\${BIODOME_RUNTIME_GID:-${runtimeIdentity.gid}}`;
+  }
+
   // Passthrough env vars are resolved from the host at `up` time via compose
   // interpolation (${VAR}), so their values are never written into the image or
   // plan.json. This is the safe path for secrets.
@@ -170,18 +171,22 @@ function devService(plan: Plan, paths: ComposePaths): ComposeService {
 
     const ports: string[] = [];
     const seen = new Set<string>();
+    const collectPort = (p: { host: number; container: number }): void => {
+      // The MCP server exposes action tools (exec_command, restart_process),
+      // so publish it only on host loopback rather than all interfaces.
+      const isMcpPort = plan.build.mcpEnabled && p.host === plan.build.mcpPort;
+      const mapping = isMcpPort ? `127.0.0.1:${p.host}:${p.container}` : `${p.host}:${p.container}`;
+      if (seen.has(mapping)) return;
+      seen.add(mapping);
+      ports.push(mapping);
+    };
     for (const proc of daemonProcesses) {
-      for (const p of proc.ports) {
-        // The MCP server exposes action tools (exec_command, restart_process),
-        // so publish it only on host loopback rather than all interfaces.
-        const isMcpPort = plan.build.mcpEnabled && p.host === plan.build.mcpPort;
-        const mapping = isMcpPort
-          ? `127.0.0.1:${p.host}:${p.container}`
-          : `${p.host}:${p.container}`;
-        if (seen.has(mapping)) continue;
-        seen.add(mapping);
-        ports.push(mapping);
-      }
+      for (const p of proc.ports) collectPort(p);
+    }
+    // In-container backing services publish their ports through the single
+    // dev service so local workflows keep reaching them on the host.
+    for (const svc of plan.runtime.services) {
+      for (const p of svc.ports) collectPort(p);
     }
     if (ports.length > 0) {
       service.ports = ports;
@@ -213,49 +218,7 @@ function devService(plan: Plan, paths: ComposePaths): ComposeService {
     service.command = ["sleep", "infinity"];
   }
 
-  const sidecars = plan.runtime.services.filter((service) => service.runtime !== "process");
-  if (sidecars.length > 0) {
-    service.depends_on = {};
-    for (const svc of sidecars) {
-      service.depends_on[svc.name] = {
-        condition: svc.healthCheck ? "service_healthy" : "service_started",
-      };
-    }
-  }
-
   return service;
-}
-
-function serviceCompose(svc: Service): ComposeService {
-  const compose: ComposeService = {
-    image: svc.image,
-    container_name: svc.containerName,
-    networks: svc.networks,
-  };
-
-  if (Object.keys(svc.environment).length > 0) {
-    compose.environment = svc.environment;
-  }
-
-  if (svc.ports.length > 0) {
-    compose.ports = svc.ports.map((p: PortMapping) => `${p.host}:${p.container}`);
-  }
-
-  if (svc.volumes.length > 0) {
-    compose.volumes = svc.volumes.map((v: VolumeMapping) => `${v.host}:${v.container}`);
-  }
-
-  if (svc.healthCheck) {
-    compose.healthcheck = {
-      test: svc.healthCheck.test,
-      interval: svc.healthCheck.interval,
-      timeout: svc.healthCheck.timeout,
-      retries: svc.healthCheck.retries,
-      start_period: svc.healthCheck.startPeriod,
-    };
-  }
-
-  return compose;
 }
 
 function isNamedVolume(host: string): boolean {

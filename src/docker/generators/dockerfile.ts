@@ -1,4 +1,4 @@
-import type { Plan } from "../../core/plan.js";
+import { identitiesOf, type Plan, type RuntimeIdentity } from "../../core/plan.js";
 import { generatedRuntimeDir } from "./shell.js";
 
 export interface DockerfileOptions {
@@ -26,6 +26,63 @@ function sortEnv(env: Record<string, string>): [string, string][] {
   return Object.keys(env)
     .sort()
     .map((k) => [k, env[k]]);
+}
+
+function identityCreationLines(identities: RuntimeIdentity[]): string[] {
+  const lines = [
+    "# Non-root runtime identities: user workloads never run as root.",
+    "# supervisord starts as root only to initialize paths and setuid programs.",
+  ];
+  const byUid = [...identities].sort((a, b) => a.uid - b.uid);
+  const byGid = [...identities].sort((a, b) => a.gid - b.gid);
+
+  const shadowGroups = byGid.map(
+    (identity) =>
+      `groupadd -f --gid ${shellWord(String(identity.gid))} ${shellWord(identity.group)}`,
+  );
+  const shadowUsers = byUid.map((identity) =>
+    [
+      `useradd --uid ${shellWord(String(identity.uid))}`,
+      `--gid ${shellWord(identity.group)}`,
+      ...(identity.supplementaryGroups ?? []).map((group) => `--groups ${shellWord(group)}`),
+      "--create-home",
+      "--shell /bin/sh",
+      shellWord(identity.user),
+    ].join(" "),
+  );
+
+  const busyboxGroups = byGid.map(
+    (identity) => `addgroup -g ${shellWord(String(identity.gid))} ${shellWord(identity.group)}`,
+  );
+  const busyboxUsers = byUid.map((identity) =>
+    [
+      `adduser -u ${shellWord(String(identity.uid))}`,
+      `-G ${shellWord(identity.group)}`,
+      "-D",
+      "-s /bin/sh",
+      shellWord(identity.user),
+    ].join(" "),
+  );
+  const busyboxSupplementary = byUid.flatMap((identity) =>
+    (identity.supplementaryGroups ?? []).map(
+      (group) => `adduser ${shellWord(identity.user)} ${shellWord(group)}`,
+    ),
+  );
+
+  lines.push(
+    `RUN if command -v groupadd >/dev/null 2>&1; then \\`,
+    `    ${[...shadowGroups, ...shadowUsers].join(" && \\\n    ")}; \\`,
+    `elif command -v addgroup >/dev/null 2>&1; then \\`,
+    `    ${[...busyboxGroups, ...busyboxUsers, ...busyboxSupplementary].join(" && \\\n    ")}; \\`,
+    `else \\`,
+    `    echo "No user management tooling available; cannot create runtime identities" >&2; exit 1; \\`,
+    `fi`,
+  );
+  return lines;
+}
+
+function shellWord(value: string): string {
+  return /^[a-zA-Z0-9_.:-]+$/.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}): string {
@@ -102,6 +159,9 @@ export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}):
     lines.push("");
   }
 
+  lines.push(...identityCreationLines(identitiesOf(plan)));
+  lines.push("");
+
   lines.push("# Stage 2: deps");
   lines.push("FROM base AS deps");
   lines.push("WORKDIR /workspace");
@@ -143,6 +203,30 @@ export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}):
       const suffix = i < envVars.length - 1 ? " \\" : "";
       lines.push(`${prefix}${k}=${v}${suffix}`);
     }
+    lines.push("");
+  }
+
+  const identities = identitiesOf(plan);
+  const runtimeIdentity =
+    identities.find((identity) => identity.role === "runtime") ?? identities[0];
+  if (runtimeIdentity) {
+    // Image-borne workspace content (dependency installs, generated runtime
+    // files) belongs to the workload identity. Bind-mounted host sources are
+    // handled by the startup script without touching host ownership.
+    lines.push("# Assign ownership only to image-borne workspace and generated paths.");
+    lines.push(
+      `RUN chown -R ${shellWord(`${runtimeIdentity.user}:${runtimeIdentity.group}`)} /workspace`,
+    );
+    lines.push(`RUN chmod -R g+rX /workspace`);
+    lines.push("");
+  }
+
+  const needsStartupScript =
+    hasDaemonProcesses || plan.runtime.processes.some((p) => p.mode === "oneshot");
+  if (!needsStartupScript && runtimeIdentity) {
+    // No supervised lifecycle to initialize: interactive sessions run directly
+    // as the non-root workload user.
+    lines.push(`USER ${shellWord(runtimeIdentity.user)}`);
     lines.push("");
   }
 

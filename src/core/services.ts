@@ -12,6 +12,21 @@ export function servicePassword(options: ServiceOptions): string | SecretReferen
   return options.users?.[0]?.password ?? options.password;
 }
 
+// Every declared backing service runs inside the dev image as a supervised
+// process under a dedicated system user, so a deployment is exactly one image.
+export const SUPPORTED_SERVICE_TYPES = new Set(["postgres", "redis"]);
+
+// The OS account (created by the service's apt package) each in-container
+// service runs as.
+export const SERVICE_SYSTEM_USERS: Record<string, string> = {
+  postgres: "postgres",
+  redis: "redis",
+};
+
+export function systemUserForService(type: string): string | undefined {
+  return SERVICE_SYSTEM_USERS[type];
+}
+
 export const serviceConfigs: Record<string, (svc: Service, options: ServiceOptions) => void> = {
   postgres: (svc, options) => {
     const user = options.users?.[0]?.name || "postgres";
@@ -25,29 +40,5 @@ export const serviceConfigs: Record<string, (svc: Service, options: ServiceOptio
       svc.environment.POSTGRES_PASSWORD = password;
     }
     svc.environment.POSTGRES_DB = database;
-    svc.healthCheck = {
-      test: ["CMD-SHELL", `pg_isready -U ${user} -d ${database}`],
-      interval: "5s",
-      timeout: "3s",
-      retries: 10,
-    };
-  },
-  redis: (svc, _options) => {
-    svc.volumes.push({ host: `${svc.name}_data`, container: "/data" });
-    svc.healthCheck = {
-      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"],
-      interval: "5s",
-      timeout: "3s",
-      retries: 10,
-    };
   },
 };
-
-export const defaultImages: Record<string, string> = {
-  postgres: "postgresql (in-container)",
-  redis: "redis:7-alpine",
-};
-
-export function defaultImage(name: string): string {
-  return defaultImages[name] ?? name;
-}

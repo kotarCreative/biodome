@@ -54,12 +54,14 @@ function pythonRuntimeInstall(ctx: BuildContext, options: LanguageOptions): void
     "libffi-dev",
     "liblzma-dev",
   ];
+  // PYENV_ROOT lives outside /root so every runtime identity (not just the
+  // build-time root user) can execute the installed interpreter and shims.
   ctx.addRuntimeInstall(
     shell([
       aptCacheMounts(),
       aptInstall(buildDeps),
+      "&& export PYENV_ROOT=/opt/pyenv",
       "&& curl -fsSL https://pyenv.run | bash",
-      '&& export PYENV_ROOT="$HOME/.pyenv"',
       '&& export PATH="$PYENV_ROOT/bin:$PATH"',
       `&& pyenv install -s ${version}`,
       `&& pyenv global ${version}`,
@@ -254,17 +256,22 @@ function rustBaseImage(options: LanguageOptions): string {
 
 function rustRuntimeInstall(ctx: BuildContext, options: LanguageOptions): void {
   const version = options.version || "1.75";
+  // RUSTUP_HOME/CARGO_HOME live outside /root so every runtime identity (not
+  // just the build-time root user) can execute the toolchain.
   ctx.addRuntimeInstall(
     shell([
       aptCacheMounts(),
       aptInstall(["ca-certificates", "curl", "build-essential"]),
-      `&& curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${version}`,
-      '&& ln -sf "$HOME/.cargo/bin/rustc" /usr/local/bin/rustc',
-      '&& ln -sf "$HOME/.cargo/bin/cargo" /usr/local/bin/cargo',
+      "&& export RUSTUP_HOME=/usr/local/rustup",
+      "&& export CARGO_HOME=/usr/local/cargo",
+      `&& curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${version} --profile minimal`,
+      "&& ln -sf /usr/local/cargo/bin/rustc /usr/local/bin/rustc",
+      "&& ln -sf /usr/local/cargo/bin/cargo /usr/local/bin/cargo",
     ]),
   );
-  // Match the registry path used by rustDependencies so dependencies are
-  // found at runtime in multi-language mode.
+  // Match the toolchain paths used by rustDependencies so they are found at
+  // runtime in multi-language mode.
+  ctx.addLanguageSnippet("ENV RUSTUP_HOME=/usr/local/rustup");
   ctx.addLanguageSnippet("ENV CARGO_HOME=/usr/local/cargo");
 }
 

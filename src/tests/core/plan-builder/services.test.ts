@@ -38,10 +38,8 @@ describe("ServiceBuilder", () => {
 
     expect(plan.runtime.services[0]).toMatchObject({
       name: "postgres",
-      image: "postgresql (in-container)",
-      runtime: "process",
+      type: "postgres",
     });
-    expect(plan.runtime.namedVolumes).not.toContainEqual({ name: "postgres_data" });
     expect(packages).toEqual(expect.arrayContaining(["postgresql"]));
     expect(processes).toContainEqual(
       expect.objectContaining({ name: "postgres-server", bootstrap: true }),
@@ -49,17 +47,68 @@ describe("ServiceBuilder", () => {
     expect(hooks).toContainEqual(expect.objectContaining({ name: "postgres-init" }));
   });
 
-  it("uses custom images for generic container services", () => {
+  it("runs redis in-container with a supervised server process and no named volume", () => {
+    const plan = createPlan("test");
+    const packages: string[] = [];
+    const processes: unknown[] = [];
+    const builder = new ServiceBuilder(
+      plan,
+      (name) => packages.push(name),
+      (spec) => processes.push(spec),
+      () => {},
+      "/workspace/.biodome-build/services",
+      () => {},
+    );
+
+    builder.add("redis", { port: 6380 });
+
+    expect(plan.runtime.services[0]).toMatchObject({
+      name: "redis",
+      type: "redis",
+      ports: [{ host: 6380, container: 6380 }],
+    });
+    expect(plan.runtime.namedVolumes).toEqual([]);
+    expect(packages).toEqual(expect.arrayContaining(["redis-server"]));
+    expect(processes).toContainEqual(
+      expect.objectContaining({
+        name: "redis-server",
+        bootstrap: true,
+        healthCheck: { type: "tcp", port: 6380, interval: "1s", retries: 30, startPeriod: "1s" },
+      }),
+    );
+  });
+
+  it("defaults the service port to the type's well-known port", () => {
+    const plan = createPlan("test");
+    const processes: unknown[] = [];
+    const builder = new ServiceBuilder(
+      plan,
+      () => {},
+      (spec) => processes.push(spec),
+      () => {},
+      "/services",
+      () => {},
+    );
+
+    builder.add("redis");
+
+    expect(processes).toContainEqual(
+      expect.objectContaining({
+        name: "redis-server",
+        healthCheck: expect.objectContaining({ port: 6379 }),
+      }),
+    );
+    expect(plan.runtime.services[0].ports).toEqual([]);
+  });
+
+  it("rejects service types that cannot run inside the single dev image", () => {
     const plan = createPlan("test");
     const builder = makeBuilder(plan, []);
 
-    builder.add("proxy", { image: "nginx:latest", port: 8080 });
-
-    expect(plan.runtime.services[0]).toMatchObject({
-      type: "container",
-      image: "nginx:latest",
-      ports: [{ host: 8080, container: 8080 }],
-    });
+    expect(() => builder.add("proxy", { port: 8080 })).toThrow(
+      /Unsupported service "proxy".*postgres, redis/,
+    );
+    expect(plan.runtime.services).toHaveLength(0);
   });
 
   it("rejects duplicate service names and invalid ports", () => {
@@ -67,7 +116,7 @@ describe("ServiceBuilder", () => {
     builder.add("redis");
 
     expect(() => builder.add("redis")).toThrow(/Duplicate service name/);
-    expect(() => builder.add("web", { port: 70000 })).toThrow(/integer between 1 and 65535/);
+    expect(() => builder.add("redis", { port: 70000 })).toThrow(/integer between 1 and 65535/);
   });
 
   it("injects a literal user password as a runtime env var and on the service", () => {

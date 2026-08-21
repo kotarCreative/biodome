@@ -41,6 +41,22 @@ export class VolumeBuilder {
 
     if (validated.proxy || validated.type === "local") return;
 
+    // Direct in-container FUSE mounts need SYS_ADMIN inside the dev container,
+    // which is not a defensible security boundary. They exist only as an
+    // explicit, warned-about opt-in; proxy volumes are the safe default.
+    if (!volume.directMount) {
+      throw new ValidationError({
+        message:
+          `Volume "${volume.name}": direct cloud mounts require SYS_ADMIN inside the dev ` +
+          `container and are an explicitly unsafe mode. Use proxy: true (recommended) or set ` +
+          `directMount: true to accept the residual risk.`,
+      });
+    }
+    console.warn(
+      `[biodome] Direct FUSE mount "${volume.name}" requires SYS_ADMIN inside the dev container; ` +
+        "this grants broad kernel access and is an explicitly unsafe opt-in.",
+    );
+
     this.addAptPackage("rclone");
     this.addAptPackage("fuse3");
 
@@ -49,7 +65,6 @@ export class VolumeBuilder {
       "mount",
       this.rcloneRemote(volume),
       validated.target,
-      "--allow-other",
       "--vfs-cache-mode",
       "writes",
     ];
@@ -58,6 +73,8 @@ export class VolumeBuilder {
       name: `rclone-mount-${validated.name}`,
       command,
       environment: this.buildRcloneEnv(volume),
+      mergeEnv: false,
+      identity: "mount",
     });
   }
 
@@ -83,6 +100,7 @@ export class VolumeBuilder {
       proxy: spec.proxy,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
+      directMount: spec.directMount,
     });
   }
 
@@ -97,6 +115,7 @@ export class VolumeBuilder {
       proxy: spec.proxy,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
+      directMount: spec.directMount,
     });
   }
 
@@ -112,6 +131,7 @@ export class VolumeBuilder {
       proxy: spec.proxy,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
+      directMount: spec.directMount,
     });
   }
 
@@ -127,6 +147,7 @@ export class VolumeBuilder {
       proxy: spec.proxy,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
+      directMount: spec.directMount,
     });
   }
 
@@ -141,6 +162,7 @@ export class VolumeBuilder {
       proxy: spec.proxy,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
+      directMount: spec.directMount,
     });
   }
 
@@ -156,6 +178,7 @@ export class VolumeBuilder {
       proxy: spec.proxy,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
+      directMount: spec.directMount,
     });
   }
 
@@ -169,6 +192,7 @@ export class VolumeBuilder {
       proxy: spec.proxy,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
+      directMount: spec.directMount,
     });
   }
 
@@ -182,6 +206,7 @@ export class VolumeBuilder {
       proxy: spec.proxy,
       readOnly: spec.readOnly,
       allowedPaths: spec.allowedPaths,
+      directMount: spec.directMount,
     });
   }
 

@@ -19,6 +19,62 @@ function hasDocker(): boolean {
   }
 }
 
+/**
+ * Plan 04 maps the container's runtime identity onto the workspace bind-mount
+ * owner at `up` time, so generated compose projects stay writable without the
+ * container ever chowning host files.
+ */
+function hostIdentityEnv(): Record<string, string> {
+  const uid = typeof process.getuid === "function" ? process.getuid() : 1000;
+  const gid = typeof process.getgid === "function" ? process.getgid() : 1000;
+  return { ...process.env, BIODOME_RUNTIME_UID: String(uid), BIODOME_RUNTIME_GID: String(gid) };
+}
+
+/** First effective uid of a supervised process, read from /proc inside dev. */
+function supervisedProcessUid(
+  cwd: string,
+  composeFile: string,
+  project: string,
+  processName: string,
+): string {
+  const pid = execFileSync(
+    "docker",
+    [
+      "compose",
+      "-f",
+      composeFile,
+      "-p",
+      project,
+      "exec",
+      "-T",
+      "dev",
+      "supervisorctl",
+      "-c",
+      "/workspace/.biodome-build/supervisord.conf",
+      "pid",
+      processName,
+    ],
+    { cwd, encoding: "utf-8" },
+  ).trim();
+  return execFileSync(
+    "docker",
+    [
+      "compose",
+      "-f",
+      composeFile,
+      "-p",
+      project,
+      "exec",
+      "-T",
+      "dev",
+      "sh",
+      "-c",
+      `grep '^Uid:' /proc/${pid}/status | awk '{print $2}'`,
+    ],
+    { cwd, encoding: "utf-8" },
+  ).trim();
+}
+
 function createProject(dir: string, files: Record<string, string>): void {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
@@ -109,13 +165,14 @@ describeIntegration("docker build integration", () => {
     }
   }, 300000);
 
-  it("runs a healthy ephemeral Postgres process inside the dev container", async () => {
+  it("runs healthy ephemeral Postgres and Redis processes inside the single dev container", async () => {
     const dir = join("/tmp", "sandbox-integration-" + Date.now());
     createProject(dir, {
       ".biodome/config.json": JSON.stringify({ project: { name: "pg-fixture" } }),
       ".biodome/services.mjs": `
         export default function services(ctx) {
           ctx.addService("postgres", { port: 5432 });
+          ctx.addService("redis", { port: 6379 });
         }
       `,
       ".biodome/features/node.mjs": `
@@ -167,7 +224,7 @@ describeIntegration("docker build integration", () => {
           "--build",
           "--wait",
         ],
-        { cwd: dir, stdio: "inherit" },
+        { cwd: dir, stdio: "inherit", env: hostIdentityEnv() },
       );
 
       // Postgres must become healthy and accept connections from inside dev.
@@ -190,6 +247,41 @@ describeIntegration("docker build integration", () => {
         ],
         { cwd: dir, stdio: "inherit" },
       );
+
+      // The database server runs as its dedicated system user, never root.
+      const postgresUid = supervisedProcessUid(
+        dir,
+        ".sandbox/docker-compose.yaml",
+        project,
+        "postgres-server",
+      );
+      expect(Number(postgresUid)).not.toBe(0);
+
+      // Redis runs in-container too, under its own system user, and answers pings.
+      execFileSync(
+        "docker",
+        [
+          "compose",
+          "-f",
+          ".sandbox/docker-compose.yaml",
+          "-p",
+          project,
+          "exec",
+          "-T",
+          "dev",
+          "redis-cli",
+          "ping",
+        ],
+        { cwd: dir, stdio: "inherit" },
+      );
+      const redisUid = supervisedProcessUid(
+        dir,
+        ".sandbox/docker-compose.yaml",
+        project,
+        "redis-server",
+      );
+      expect(Number(redisUid)).not.toBe(0);
+      expect(redisUid).not.toBe(postgresUid);
 
       const ps = execFileSync(
         "docker",
@@ -390,7 +482,7 @@ HTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
           "--build",
           "--wait",
         ],
-        { cwd: dir, stdio: "inherit" },
+        { cwd: dir, stdio: "inherit", env: hostIdentityEnv() },
       );
 
       // The dev service must be healthy, meaning the daemon passed its health check.
@@ -407,6 +499,34 @@ HTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
       expect(dev).toBeDefined();
       expect(dev!.State).toBe("running");
       expect(dev!.Health).toBe("healthy");
+
+      // User-declared workloads run as the non-root runtime identity mapped
+      // onto the workspace owner.
+      const webUid = supervisedProcessUid(dir, ".sandbox/docker-compose.yaml", project, "web");
+      expect(Number(webUid)).not.toBe(0);
+      expect(String(webUid)).toBe(hostIdentityEnv().BIODOME_RUNTIME_UID);
+
+      // The workspace bind mount is writable by the runtime identity.
+      execFileSync(
+        "docker",
+        [
+          "compose",
+          "-f",
+          ".sandbox/docker-compose.yaml",
+          "-p",
+          project,
+          "exec",
+          "-T",
+          "dev",
+          "su",
+          "biodome",
+          "-s",
+          "/bin/sh",
+          "-c",
+          "touch /workspace/.biodome-write-test && rm /workspace/.biodome-write-test",
+        ],
+        { cwd: dir, stdio: "inherit" },
+      );
 
       // The healthcheck monitor program should also be running under supervisord.
       const status = execFileSync(

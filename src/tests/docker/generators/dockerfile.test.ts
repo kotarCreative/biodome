@@ -43,6 +43,57 @@ describe("generateDockerfile", () => {
     expect(dockerfile).toContain('CMD ["bash"]');
   });
 
+  it("creates non-root runtime identities with stable uid and gid defaults", () => {
+    const dockerfile = generateDockerfile(createPlan("my-app"));
+    expect(dockerfile).toContain("groupadd -f --gid 10001 biodome");
+    expect(dockerfile).toContain("groupadd -f --gid 10002 biodome-mcp");
+    expect(dockerfile).toContain("groupadd -f --gid 10003 biodome-mount");
+    expect(dockerfile).toContain(
+      "useradd --uid 10001 --gid biodome --create-home --shell /bin/sh biodome",
+    );
+    expect(dockerfile).toContain(
+      "useradd --uid 10002 --gid biodome-mcp --groups biodome --create-home --shell /bin/sh biodome-mcp",
+    );
+  });
+
+  it("falls back to busybox user tooling on alpine-style bases", () => {
+    const plan = createPlan("my-app");
+    plan.build.baseImage = "golang:1.22-alpine";
+    const dockerfile = generateDockerfile(plan);
+    expect(dockerfile).toContain("command -v groupadd");
+    expect(dockerfile).toContain("addgroup -g 10001 biodome");
+    expect(dockerfile).toContain("adduser -u 10001 -G biodome -D -s /bin/sh biodome");
+    expect(dockerfile).toContain("adduser biodome-mcp biodome");
+  });
+
+  it("keeps interactive sessions non-root when no lifecycle startup is needed", () => {
+    const dockerfile = generateDockerfile(createPlan("my-app"));
+    expect(dockerfile).toContain("USER biodome");
+    expect(dockerfile.indexOf("USER biodome")).toBeLessThan(dockerfile.indexOf('CMD ["bash"]'));
+  });
+
+  it("stays root only for lifecycle initialization when managed processes exist", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "web",
+      command: ["node", "server.js"],
+      ports: [],
+      environment: {},
+      mode: "daemon",
+      startOn: "start.post",
+    });
+
+    const dockerfile = generateDockerfile(plan);
+    expect(dockerfile).not.toContain("USER ");
+    expect(dockerfile).toContain("startup.sh");
+  });
+
+  it("assigns image-borne workspace ownership to the runtime identity", () => {
+    const dockerfile = generateDockerfile(createPlan("my-app"));
+    expect(dockerfile).toContain("RUN chown -R biodome:biodome /workspace");
+    expect(dockerfile).toContain("RUN chmod -R g+rX /workspace");
+  });
+
   it("copies target-scoped generated files for image-only runtimes", () => {
     const dockerfile = generateDockerfile(createPlan("my-app"), {
       generatedFilesPath: ".biodome-build/targets/staging",

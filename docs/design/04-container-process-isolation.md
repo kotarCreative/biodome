@@ -1,6 +1,48 @@
 # Plan 04: Isolate Container Processes
 
-Status: proposed. Priority: P1. Dependencies: Plans 01 and 02.
+Status: complete (implemented 2026-08). Priority: P1. Dependencies: Plans 01 and 02.
+
+## Resolution Notes
+
+- Generated images create three non-root identities with stable uid/gid
+  defaults: runtime `biodome` (10001), MCP `biodome-mcp` (10002), and mount
+  helper `biodome-mount` (10003). The MCP and mount users join the runtime
+  group for shared read access to the generated tree and supervisor socket.
+  Creation falls back to busybox `addgroup`/`adduser` on alpine-style bases.
+- The startup script maps the runtime identity onto the workspace bind-mount
+  owner via `BIODOME_RUNTIME_UID` / `BIODOME_RUNTIME_GID`. Local Compose flows
+  default the mapping to the invoking host user; id collisions with image
+  accounts warn instead of aborting startup. Access for non-root identities is
+  granted with mode changes only (`a+rX` on the generated tree including its
+  0700 ancestors, group-shared writable state for logs and harness homes) —
+  never a recursive chown of possibly host-owned files.
+- Process environments are scoped by default; sharing with the global runtime
+  environment requires `mergeEnv: true`.
+- Supervisor assigns explicit `user=` per program category: user workloads run
+  as `biodome`, MCP as `biodome-mcp`, rclone helpers as `biodome-mount`,
+  in-container Postgres as its package-created `postgres` system user (scripts
+  no longer use `su`), and only biodome health monitors stay root so they can
+  restart programs through the socket (`chmod=0770`, group-owned).
+- FUSE sidecar evaluation: a dedicated sidecar with shared mount propagation
+  still requires elevated privileges somewhere in the trust chain without
+  providing a defensible boundary for local Compose, so direct mounts remain
+  available only as the explicitly unsafe opt-in below rather than via sidecar.
+- Direct in-container FUSE mounts require `directMount: true`; validation
+  rejects them otherwise (both at build time and in `validatePlan`) and emits a
+  deterministic residual-risk warning when enabled.
+- `--allow-other` was removed unconditionally; no tested workflow needed it, so
+  no typed option exists.
+- Hooks run under `setpriv` as the mapped runtime identity (with a loud
+  fallback warning where setpriv is unavailable); lifecycle init stays
+  root-only inside the generated startup script.
+- Language runtimes moved out of `/root` so non-root users can execute them:
+  pyenv installs to `/opt/pyenv`; rustup uses `/usr/local/rustup` and
+  `/usr/local/cargo`.
+- Docker Sandboxes consume the same rendered image and startup script; their
+  start flow maps the runtime identity onto the snapshot owner inside the
+  sandbox.
+- Plan 05 consumes `plan.runtime.identities` as the provider-neutral
+  runtime-user requirement for ECS task definitions.
 
 ## Objective
 

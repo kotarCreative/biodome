@@ -285,14 +285,6 @@ export function createAwsEcsDriver(
       plan: Plan;
       target: RuntimeTarget;
     }): Effect.Effect<string[], RuntimeError, never> {
-      if (input.plan.runtime.services.some((service) => service.runtime !== "process")) {
-        return Effect.fail(
-          new RuntimeError({
-            message:
-              "The aws-ecs driver does not support backing service containers yet. Use managed cloud services or a docker-compose target instead.",
-          }),
-        );
-      }
       const passthroughKeys = passthroughEnvKeys(input.plan);
       if (passthroughKeys.length > 0) {
         return Effect.fail(passthroughEnvError(passthroughKeys));

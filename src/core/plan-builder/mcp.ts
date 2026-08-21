@@ -150,6 +150,7 @@ export class McpBuilder {
         MCP_EVENTS_LOG: `${this.layout.logs}/mcp-events.jsonl`,
       },
       mergeEnv: false,
+      identity: "mcp",
     });
   }
 

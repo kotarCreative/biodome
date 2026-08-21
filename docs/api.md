@@ -95,7 +95,7 @@ rejects other versions because its release binaries are checksum-pinned.
 
 ### `addService(name, options)`
 
-Add a backing service. See [File layout](file-layout.md).
+Add a backing service. Services run as ephemeral processes inside the dev image under dedicated system accounts; supported types: `postgres`, `redis`. See [File layout](file-layout.md).
 
 ### `addEndpoint(spec)`
 

@@ -18,16 +18,12 @@ describe("generatePlanJson", () => {
     plan.runtime.services.push({
       name: "postgres",
       type: "postgres",
-      image: "postgres:16-alpine",
-      containerName: "app-postgres",
       environment: {
         POSTGRES_USER: "myuser",
         POSTGRES_PASSWORD: "mypass",
         POSTGRES_DB: "mydb",
       },
       ports: [{ host: 5432, container: 5432 }],
-      volumes: [],
-      networks: ["biodome"],
     });
 
     const json = JSON.parse(generatePlanJson(plan));

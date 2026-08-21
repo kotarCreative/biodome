@@ -21,6 +21,27 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\
     supervisor \\
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
+# Non-root runtime identities: user workloads never run as root.
+# supervisord starts as root only to initialize paths and setuid programs.
+RUN if command -v groupadd >/dev/null 2>&1; then \\
+    groupadd -f --gid 10001 biodome && \\
+    groupadd -f --gid 10002 biodome-mcp && \\
+    groupadd -f --gid 10003 biodome-mount && \\
+    useradd --uid 10001 --gid biodome --create-home --shell /bin/sh biodome && \\
+    useradd --uid 10002 --gid biodome-mcp --groups biodome --create-home --shell /bin/sh biodome-mcp && \\
+    useradd --uid 10003 --gid biodome-mount --create-home --shell /bin/sh biodome-mount; \\
+elif command -v addgroup >/dev/null 2>&1; then \\
+    addgroup -g 10001 biodome && \\
+    addgroup -g 10002 biodome-mcp && \\
+    addgroup -g 10003 biodome-mount && \\
+    adduser -u 10001 -G biodome -D -s /bin/sh biodome && \\
+    adduser -u 10002 -G biodome-mcp -D -s /bin/sh biodome-mcp && \\
+    adduser -u 10003 -G biodome-mount -D -s /bin/sh biodome-mount && \\
+    adduser biodome-mcp biodome; \\
+else \\
+    echo "No user management tooling available; cannot create runtime identities" >&2; exit 1; \\
+fi
+
 # Stage 2: deps
 FROM base AS deps
 WORKDIR /workspace
@@ -28,6 +49,10 @@ WORKDIR /workspace
 # Stage 3: dev
 FROM base AS dev
 WORKDIR /workspace
+
+# Assign ownership only to image-borne workspace and generated paths.
+RUN chown -R biodome:biodome /workspace
+RUN chmod -R g+rX /workspace
 
 # Copy the managed-process startup script.
 COPY .biodome-build/startup.sh /workspace/.biodome-build/startup.sh
@@ -48,6 +73,8 @@ user=root
 
 [unix_http_server]
 file=/workspace/.biodome-build/logs/supervisor.sock
+chmod=0770
+chown=root:biodome
 
 [supervisorctl]
 serverurl=unix:///workspace/.biodome-build/logs/supervisor.sock
@@ -57,6 +84,7 @@ supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 
 [program:backend]
 command=node api.js
+user=biodome
 autostart=false
 autorestart=true
 startretries=10
@@ -66,6 +94,7 @@ environment=BIODOME_LOG_DIR="/workspace/.biodome-build/logs"
 
 [program:backend-healthcheck]
 command=sh /workspace/.biodome-build/healthchecks/backend-monitor.sh
+user=root
 autostart=false
 autorestart=true
 startsecs=5
@@ -75,6 +104,7 @@ stderr_logfile=/workspace/.biodome-build/logs/backend-healthcheck.log
 [program:frontend]
 command=npm run dev
 directory=/workspace/frontend
+user=biodome
 autostart=false
 autorestart=true
 startretries=10
@@ -101,6 +131,9 @@ services:
       - ..:/workspace
     networks:
       - biodome
+    environment:
+      BIODOME_RUNTIME_UID: \${BIODOME_RUNTIME_UID:-10001}
+      BIODOME_RUNTIME_GID: \${BIODOME_RUNTIME_GID:-10001}
     ports:
       - 8000:8000
       - 3000:3000
@@ -137,6 +170,27 @@ RUN apt-get update && curl -fsSL https://deb.nodesource.com/setup_20.x | bash
 
 RUN corepack enable
 
+# Non-root runtime identities: user workloads never run as root.
+# supervisord starts as root only to initialize paths and setuid programs.
+RUN if command -v groupadd >/dev/null 2>&1; then \\
+    groupadd -f --gid 10001 biodome && \\
+    groupadd -f --gid 10002 biodome-mcp && \\
+    groupadd -f --gid 10003 biodome-mount && \\
+    useradd --uid 10001 --gid biodome --create-home --shell /bin/sh biodome && \\
+    useradd --uid 10002 --gid biodome-mcp --groups biodome --create-home --shell /bin/sh biodome-mcp && \\
+    useradd --uid 10003 --gid biodome-mount --create-home --shell /bin/sh biodome-mount; \\
+elif command -v addgroup >/dev/null 2>&1; then \\
+    addgroup -g 10001 biodome && \\
+    addgroup -g 10002 biodome-mcp && \\
+    addgroup -g 10003 biodome-mount && \\
+    adduser -u 10001 -G biodome -D -s /bin/sh biodome && \\
+    adduser -u 10002 -G biodome-mcp -D -s /bin/sh biodome-mcp && \\
+    adduser -u 10003 -G biodome-mount -D -s /bin/sh biodome-mount && \\
+    adduser biodome-mcp biodome; \\
+else \\
+    echo "No user management tooling available; cannot create runtime identities" >&2; exit 1; \\
+fi
+
 # Stage 2: deps
 FROM base AS deps
 WORKDIR /workspace
@@ -155,6 +209,12 @@ COPY --from=deps /workspace/.venv /workspace/.venv
 ENV PATH=/workspace/.venv/bin:$PATH
 
 COPY --from=deps /workspace/node_modules /workspace/node_modules
+
+# Assign ownership only to image-borne workspace and generated paths.
+RUN chown -R biodome:biodome /workspace
+RUN chmod -R g+rX /workspace
+
+USER biodome
 
 # Source code is mounted at runtime via 'docker run -v .:/workspace'
 CMD ["bash"]
@@ -181,6 +241,9 @@ services:
       - venv:/workspace/.venv
     networks:
       - biodome
+    environment:
+      BIODOME_RUNTIME_UID: \${BIODOME_RUNTIME_UID:-10001}
+      BIODOME_RUNTIME_GID: \${BIODOME_RUNTIME_GID:-10001}
     command:
       - sleep
       - infinity
@@ -206,6 +269,27 @@ exports[`Docker generator snapshots > matches for no-language bash fallback 1`] 
 
 FROM debian:12-slim AS base
 
+# Non-root runtime identities: user workloads never run as root.
+# supervisord starts as root only to initialize paths and setuid programs.
+RUN if command -v groupadd >/dev/null 2>&1; then \\
+    groupadd -f --gid 10001 biodome && \\
+    groupadd -f --gid 10002 biodome-mcp && \\
+    groupadd -f --gid 10003 biodome-mount && \\
+    useradd --uid 10001 --gid biodome --create-home --shell /bin/sh biodome && \\
+    useradd --uid 10002 --gid biodome-mcp --groups biodome --create-home --shell /bin/sh biodome-mcp && \\
+    useradd --uid 10003 --gid biodome-mount --create-home --shell /bin/sh biodome-mount; \\
+elif command -v addgroup >/dev/null 2>&1; then \\
+    addgroup -g 10001 biodome && \\
+    addgroup -g 10002 biodome-mcp && \\
+    addgroup -g 10003 biodome-mount && \\
+    adduser -u 10001 -G biodome -D -s /bin/sh biodome && \\
+    adduser -u 10002 -G biodome-mcp -D -s /bin/sh biodome-mcp && \\
+    adduser -u 10003 -G biodome-mount -D -s /bin/sh biodome-mount && \\
+    adduser biodome-mcp biodome; \\
+else \\
+    echo "No user management tooling available; cannot create runtime identities" >&2; exit 1; \\
+fi
+
 # Stage 2: deps
 FROM base AS deps
 WORKDIR /workspace
@@ -213,6 +297,12 @@ WORKDIR /workspace
 # Stage 3: dev
 FROM base AS dev
 WORKDIR /workspace
+
+# Assign ownership only to image-borne workspace and generated paths.
+RUN chown -R biodome:biodome /workspace
+RUN chmod -R g+rX /workspace
+
+USER biodome
 
 # Source code is mounted at runtime via 'docker run -v .:/workspace'
 CMD ["bash"]
@@ -237,6 +327,9 @@ services:
       - ..:/workspace
     networks:
       - biodome
+    environment:
+      BIODOME_RUNTIME_UID: \${BIODOME_RUNTIME_UID:-10001}
+      BIODOME_RUNTIME_GID: \${BIODOME_RUNTIME_GID:-10001}
     command:
       - sleep
       - infinity
@@ -266,8 +359,30 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \\
     apt-get update && apt-get install -y --no-install-recommends \\
     curl \\
+    postgresql \\
     supervisor \\
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+# Non-root runtime identities: user workloads never run as root.
+# supervisord starts as root only to initialize paths and setuid programs.
+RUN if command -v groupadd >/dev/null 2>&1; then \\
+    groupadd -f --gid 10001 biodome && \\
+    groupadd -f --gid 10002 biodome-mcp && \\
+    groupadd -f --gid 10003 biodome-mount && \\
+    useradd --uid 10001 --gid biodome --create-home --shell /bin/sh biodome && \\
+    useradd --uid 10002 --gid biodome-mcp --groups biodome --create-home --shell /bin/sh biodome-mcp && \\
+    useradd --uid 10003 --gid biodome-mount --create-home --shell /bin/sh biodome-mount; \\
+elif command -v addgroup >/dev/null 2>&1; then \\
+    addgroup -g 10001 biodome && \\
+    addgroup -g 10002 biodome-mcp && \\
+    addgroup -g 10003 biodome-mount && \\
+    adduser -u 10001 -G biodome -D -s /bin/sh biodome && \\
+    adduser -u 10002 -G biodome-mcp -D -s /bin/sh biodome-mcp && \\
+    adduser -u 10003 -G biodome-mount -D -s /bin/sh biodome-mount && \\
+    adduser biodome-mcp biodome; \\
+else \\
+    echo "No user management tooling available; cannot create runtime identities" >&2; exit 1; \\
+fi
 
 # Stage 2: deps
 FROM base AS deps
@@ -276,6 +391,10 @@ WORKDIR /workspace
 # Stage 3: dev
 FROM base AS dev
 WORKDIR /workspace
+
+# Assign ownership only to image-borne workspace and generated paths.
+RUN chown -R biodome:biodome /workspace
+RUN chmod -R g+rX /workspace
 
 # Copy the managed-process startup script.
 COPY .biodome-build/startup.sh /workspace/.biodome-build/startup.sh
@@ -296,6 +415,8 @@ user=root
 
 [unix_http_server]
 file=/workspace/.biodome-build/logs/supervisor.sock
+chmod=0770
+chown=root:biodome
 
 [supervisorctl]
 serverurl=unix:///workspace/.biodome-build/logs/supervisor.sock
@@ -305,6 +426,7 @@ supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 
 [program:web]
 command=node server.js
+user=biodome
 autostart=false
 autorestart=true
 startretries=10
@@ -314,6 +436,7 @@ environment=BIODOME_LOG_DIR="/workspace/.biodome-build/logs",DEBUG="1"
 
 [program:web-healthcheck]
 command=sh /workspace/.biodome-build/healthchecks/web-monitor.sh
+user=root
 autostart=false
 autorestart=true
 startsecs=5
@@ -340,8 +463,12 @@ services:
       - node_modules:/workspace/node_modules
     networks:
       - biodome
+    environment:
+      BIODOME_RUNTIME_UID: \${BIODOME_RUNTIME_UID:-10001}
+      BIODOME_RUNTIME_GID: \${BIODOME_RUNTIME_GID:-10001}
     ports:
       - 3000:3000
+      - 5432:5432
     healthcheck:
       test:
         - CMD-SHELL
@@ -350,31 +477,7 @@ services:
       timeout: 3s
       retries: 10
       start_period: 10s
-    depends_on:
-      postgres:
-        condition: service_healthy
-  postgres:
-    image: postgres:16-alpine
-    container_name: my-app-postgres
-    networks:
-      - biodome
-    environment:
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: dev
-      POSTGRES_DB: myapp
-    ports:
-      - 5432:5432
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - pg_isready -U app -d myapp
-      interval: 5s
-      timeout: 3s
-      retries: 10
 volumes:
-  postgres_data: {}
   node_modules: {}
 networks:
   biodome:
@@ -404,6 +507,27 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\
     supervisor \\
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
+# Non-root runtime identities: user workloads never run as root.
+# supervisord starts as root only to initialize paths and setuid programs.
+RUN if command -v groupadd >/dev/null 2>&1; then \\
+    groupadd -f --gid 10001 biodome && \\
+    groupadd -f --gid 10002 biodome-mcp && \\
+    groupadd -f --gid 10003 biodome-mount && \\
+    useradd --uid 10001 --gid biodome --create-home --shell /bin/sh biodome && \\
+    useradd --uid 10002 --gid biodome-mcp --groups biodome --create-home --shell /bin/sh biodome-mcp && \\
+    useradd --uid 10003 --gid biodome-mount --create-home --shell /bin/sh biodome-mount; \\
+elif command -v addgroup >/dev/null 2>&1; then \\
+    addgroup -g 10001 biodome && \\
+    addgroup -g 10002 biodome-mcp && \\
+    addgroup -g 10003 biodome-mount && \\
+    adduser -u 10001 -G biodome -D -s /bin/sh biodome && \\
+    adduser -u 10002 -G biodome-mcp -D -s /bin/sh biodome-mcp && \\
+    adduser -u 10003 -G biodome-mount -D -s /bin/sh biodome-mount && \\
+    adduser biodome-mcp biodome; \\
+else \\
+    echo "No user management tooling available; cannot create runtime identities" >&2; exit 1; \\
+fi
+
 # Stage 2: deps
 FROM base AS deps
 WORKDIR /workspace
@@ -417,6 +541,10 @@ FROM base AS dev
 WORKDIR /workspace
 
 COPY --from=deps /workspace/vendor /workspace/vendor
+
+# Assign ownership only to image-borne workspace and generated paths.
+RUN chown -R biodome:biodome /workspace
+RUN chmod -R g+rX /workspace
 
 # Copy the managed-process startup script.
 COPY .biodome-build/startup.sh /workspace/.biodome-build/startup.sh
@@ -437,6 +565,8 @@ user=root
 
 [unix_http_server]
 file=/workspace/.biodome-build/logs/supervisor.sock
+chmod=0770
+chown=root:biodome
 
 [supervisorctl]
 serverurl=unix:///workspace/.biodome-build/logs/supervisor.sock
@@ -446,6 +576,7 @@ supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 
 [program:laravel]
 command=php artisan serve '--host=0.0.0.0' '--port=8000'
+user=biodome
 autostart=false
 autorestart=true
 startretries=10
@@ -455,6 +586,7 @@ environment=BIODOME_LOG_DIR="/workspace/.biodome-build/logs"
 
 [program:laravel-healthcheck]
 command=sh /workspace/.biodome-build/healthchecks/laravel-monitor.sh
+user=root
 autostart=false
 autorestart=true
 startsecs=5
@@ -481,6 +613,9 @@ services:
       - vendor:/workspace/vendor
     networks:
       - biodome
+    environment:
+      BIODOME_RUNTIME_UID: \${BIODOME_RUNTIME_UID:-10001}
+      BIODOME_RUNTIME_GID: \${BIODOME_RUNTIME_GID:-10001}
     ports:
       - 8000:8000
     healthcheck:
@@ -517,8 +652,30 @@ FROM python:3.12-slim AS base
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \\
     apt-get update && apt-get install -y --no-install-recommends \\
+    redis-server \\
     supervisor \\
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+# Non-root runtime identities: user workloads never run as root.
+# supervisord starts as root only to initialize paths and setuid programs.
+RUN if command -v groupadd >/dev/null 2>&1; then \\
+    groupadd -f --gid 10001 biodome && \\
+    groupadd -f --gid 10002 biodome-mcp && \\
+    groupadd -f --gid 10003 biodome-mount && \\
+    useradd --uid 10001 --gid biodome --create-home --shell /bin/sh biodome && \\
+    useradd --uid 10002 --gid biodome-mcp --groups biodome --create-home --shell /bin/sh biodome-mcp && \\
+    useradd --uid 10003 --gid biodome-mount --create-home --shell /bin/sh biodome-mount; \\
+elif command -v addgroup >/dev/null 2>&1; then \\
+    addgroup -g 10001 biodome && \\
+    addgroup -g 10002 biodome-mcp && \\
+    addgroup -g 10003 biodome-mount && \\
+    adduser -u 10001 -G biodome -D -s /bin/sh biodome && \\
+    adduser -u 10002 -G biodome-mcp -D -s /bin/sh biodome-mcp && \\
+    adduser -u 10003 -G biodome-mount -D -s /bin/sh biodome-mount && \\
+    adduser biodome-mcp biodome; \\
+else \\
+    echo "No user management tooling available; cannot create runtime identities" >&2; exit 1; \\
+fi
 
 # Stage 2: deps
 FROM base AS deps
@@ -534,6 +691,12 @@ WORKDIR /workspace
 
 COPY --from=deps /workspace/.venv /workspace/.venv
 ENV PATH=/workspace/.venv/bin:$PATH
+
+# Assign ownership only to image-borne workspace and generated paths.
+RUN chown -R biodome:biodome /workspace
+RUN chmod -R g+rX /workspace
+
+USER biodome
 
 # Source code is mounted at runtime via 'docker run -v .:/workspace'
 CMD ["bash"]
@@ -559,30 +722,13 @@ services:
       - venv:/workspace/.venv
     networks:
       - biodome
+    environment:
+      BIODOME_RUNTIME_UID: \${BIODOME_RUNTIME_UID:-10001}
+      BIODOME_RUNTIME_GID: \${BIODOME_RUNTIME_GID:-10001}
     command:
       - sleep
       - infinity
-    depends_on:
-      redis:
-        condition: service_healthy
-  redis:
-    image: redis:7-alpine
-    container_name: py-app-redis
-    networks:
-      - biodome
-    ports:
-      - 6379:6379
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - redis-cli ping | grep -q PONG
-      interval: 5s
-      timeout: 3s
-      retries: 10
 volumes:
-  redis_data: {}
   venv: {}
 networks:
   biodome:

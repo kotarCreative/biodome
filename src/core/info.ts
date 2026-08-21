@@ -137,7 +137,7 @@ export function serviceConnection(svc: Service): ServiceConnection | undefined {
     const hostPort = svc.ports[0]?.host || 5432;
     return {
       label: "PostgreSQL",
-      internal: `postgresql://${user}@${svc.runtime === "process" ? "localhost" : svc.name}:5432/${database}`,
+      internal: `postgresql://${user}@localhost:5432/${database}`,
       external: `postgresql://${user}@localhost:${hostPort}/${database}`,
     };
   }
@@ -146,7 +146,7 @@ export function serviceConnection(svc: Service): ServiceConnection | undefined {
     const hostPort = svc.ports[0]?.host || 6379;
     return {
       label: "Redis",
-      internal: `redis://${svc.name}:6379/0`,
+      internal: `redis://localhost:6379/0`,
       external: `redis://localhost:${hostPort}/0`,
     };
   }
@@ -193,7 +193,7 @@ export function formatInfo(plan: Plan): string {
     lines.push("Services:");
     for (const svc of plan.runtime.services) {
       const port = svc.ports.map(formatPort).join(", ") || "none";
-      lines.push(`  - ${svc.name} (${svc.image}) ports ${port}`);
+      lines.push(`  - ${svc.name} (${svc.type}) ports ${port}`);
       const conn = serviceConnection(svc);
       if (conn) {
         lines.push(`      internal: ${conn.internal}`);
@@ -371,7 +371,6 @@ export function formatAgentsMd(plan: Plan): string {
     for (const svc of plan.runtime.services) {
       lines.push(`### ${svc.name}`);
       lines.push("");
-      lines.push(`- Image: \`${svc.image}\``);
       if (svc.ports.length > 0) {
         lines.push(`- Ports: ${svc.ports.map((p) => `\`${formatPort(p)}\``).join(", ")}`);
       }

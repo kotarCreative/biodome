@@ -131,15 +131,10 @@ describe("target workflows", () => {
     const deps = dependencies(runtimeDriver);
     deps.plan.deployment!.target.driver = "docker-compose";
     deps.plan.runtime.services.push({
-      name: "redis",
-      type: "redis",
-      runtime: "process",
-      image: "redis:7",
-      containerName: "redis",
+      name: "legacy-db",
+      type: "mysql",
       environment: {},
       ports: [],
-      volumes: [],
-      networks: [],
     });
 
     const rootDir = mkdtempSync(join(tmpdir(), "biodome-preflight-"));
@@ -341,14 +336,10 @@ describe("target workflows", () => {
   it("rejects unsupported target services during validation before driver operations", async () => {
     const plan = createPlan("project");
     plan.runtime.services.push({
-      name: "postgres",
-      type: "postgres",
-      image: "postgres:17",
-      containerName: "postgres",
+      name: "legacy-db",
+      type: "mysql",
       environment: {},
       ports: [],
-      volumes: [],
-      networks: [],
     });
     plan.deployment = {
       target: { name: "remote", driver: "aws-ecs", options: {} },

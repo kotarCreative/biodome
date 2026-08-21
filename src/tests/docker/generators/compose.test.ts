@@ -51,6 +51,12 @@ describe("generateCompose", () => {
     expect(compose).toContain('DEBUG: "1"');
   });
 
+  it("exposes runtime-identity uid/gid mapping knobs with image defaults", () => {
+    const compose = generateCompose(createPlan("my-app"));
+    expect(compose).toContain("BIODOME_RUNTIME_UID: ${BIODOME_RUNTIME_UID:-10001}");
+    expect(compose).toContain("BIODOME_RUNTIME_GID: ${BIODOME_RUNTIME_GID:-10001}");
+  });
+
   it("emits passthrough env vars as compose interpolations, not literals", () => {
     const plan = createPlan("my-app");
     plan.runtime.envVars.push(

@@ -115,14 +115,16 @@ export default function tools(ctx) {
 
 ## `addService(name, options)`
 
-Declares a backing service. Built-in Postgres runs as an ephemeral process inside
-the dev container by default. Use an external provider primitive when a task
-needs a managed or persistent database. See [services in file-layout.md](file-layout.md)
-for details.
+Declares a backing service. Services run as managed, ephemeral processes inside
+the dev image under dedicated system accounts — a deployment is exactly one
+image, with no sidecar containers. Supported types: `postgres` and `redis`.
+Use an external provider primitive when a task needs a managed or persistent
+database. See [services in file-layout.md](file-layout.md) for details.
 
-The built-in Postgres profile is tuned for short-lived coding tasks: it limits
+The built-in profiles are tuned for short-lived coding tasks: Postgres limits
 connections and memory, disables autovacuum, replication, and durable WAL
-flushes, and stores data under `/tmp`. Do not use it for data that must survive
+flushes, and stores data under `/tmp`; Redis disables snapshots and append-only
+persistence with data under `/tmp`. Do not use them for data that must survive
 an unexpected container stop.
 
 ```javascript
@@ -132,8 +134,14 @@ export default function services(ctx) {
     databases: [{ name: "myapp" }],
     users: [{ name: "myapp", password: "devpassword" }],
   });
+
+  ctx.addService("redis", { port: 6379 });
 }
 ```
+
+Each service's declared port is published from the dev container so host
+tooling keeps working; inside the environment the service is reachable on
+`localhost`.
 
 ## `addEndpoint(spec)`
 
@@ -423,8 +431,9 @@ export default function volumes(ctx) {
 - `path` — remote folder path for Dropbox or Google Drive.
 - `credentials` — map of provider credentials. Each value is either a literal string or an `{ env: "VAR_NAME" }` reference. Env references are resolved from the host at `up` time and never written to the generated files.
 - `options.readOnly` — set to `true` for a read-only local or `rclone` mount.
+- `directMount` — cloud volumes only. Explicit opt-in to a direct in-container FUSE mount (requires `SYS_ADMIN`; see the risk note below). Omit it and use `proxy: true` unless you have a tested workflow that needs the kernel-level mount.
 
-Cloud-backed volumes on Docker-based targets install `rclone` and `fuse3`, grant only the minimal FUSE capabilities (`/dev/fuse`, `SYS_ADMIN`, dropped default capabilities, `no-new-privileges`), and run an `rclone mount` daemon process. Files are read and written directly against the remote source. **Proxy mode** (see below) is the recommended approach for agent workloads — it avoids granting any container-level capabilities.
+Cloud-backed volumes on Docker-based targets install `rclone` and `fuse3` and run an `rclone mount` daemon process under a dedicated non-root mount identity. Files are read and written directly against the remote source. Direct mounts require an explicit `directMount: true` opt-in because they need the `SYS_ADMIN` capability inside the dev container — that grants broad kernel access and is an explicitly unsafe mode; validation rejects direct mounts without it and emits a deterministic warning when enabled. **Proxy mode** (see below) is the recommended approach for agent workloads — it avoids granting any container-level capabilities.
 
 ### Proxy mode (agent-safe access)
 

@@ -240,28 +240,18 @@ export interface Provider {
   metadata?: Record<string, string>;
 }
 
+// A declared backing service. Services run inside the dev image as supervised
+// processes under dedicated system accounts; a deployment is one image.
 export interface Service {
   name: string;
   type: string;
-  /** Container services are provider sidecars; process services run in the dev image. */
-  runtime?: "container" | "process";
-  image: string;
-  containerName: string;
   environment: Record<string, string>;
   ports: PortMapping[];
-  volumes: VolumeMapping[];
-  healthCheck?: HealthCheck;
-  networks: string[];
 }
 
 export interface PortMapping {
   host: number;
   container: number;
-}
-
-export interface VolumeMapping {
-  host: string;
-  container: string;
 }
 
 export interface HealthCheck {
@@ -317,6 +307,10 @@ export interface Volume {
   proxy?: boolean;
   readOnly?: boolean;
   allowedPaths?: string[];
+  // Explicit opt-in for direct in-container FUSE mounts of cloud volumes. Such
+  // mounts need SYS_ADMIN inside the dev container and are an explicitly unsafe
+  // mode; the builder and plan validation reject them without this flag.
+  directMount?: boolean;
 }
 
 export interface Port {
@@ -336,11 +330,66 @@ export interface Process {
   startOn: LifecyclePoint;
   /** Start this daemon and wait for its health check before lifecycle hooks run. */
   bootstrap?: boolean;
-  // When false, the process environment is not merged into the global runtime
-  // environment. This keeps sensitive env vars (e.g. MCP proxy credentials) out of
-  // the dev service's compose environment.
+  // When true, the process environment is merged into the global runtime
+  // environment. The default is scoped: process environments stay private to the
+  // process so volume, provider, MCP, and harness credentials never leak into
+  // sibling processes or the compose dev service.
   mergeEnv?: boolean;
+  // Which generated non-root identity runs this process. Resolved against
+  // `runtime.identities`; defaults to the runtime (workload) identity.
+  identity?: RuntimeIdentityRole;
 }
+
+// A generated non-root identity created in the image and used by supervisor,
+// the MCP server, mount helpers, and every user-declared workload.
+export interface RuntimeIdentity {
+  role: RuntimeIdentityRole;
+  user: string;
+  group: string;
+  uid: number;
+  gid: number;
+  // Extra groups the user is joined to. The MCP and mount identities join the
+  // runtime group so they can read the shared runtime tree and supervisor socket.
+  supplementaryGroups?: string[];
+}
+
+export type RuntimeIdentityRole = "runtime" | "mcp" | "mount";
+
+/** Resolve the generated identity a process runs as, defaulting to runtime. */
+export function identityForProcess(plan: Plan, process: Process): RuntimeIdentity {
+  const role = process.identity ?? "runtime";
+  const identity = identitiesOf(plan).find((candidate) => candidate.role === role);
+  if (!identity) {
+    throw new Error(`Plan is missing the "${role}" runtime identity`);
+  }
+  return identity;
+}
+
+/**
+ * Identities declared by the plan, falling back to the generated defaults.
+ * Plans built before Plan 04 or by third-party tooling may omit them.
+ */
+export function identitiesOf(plan: Plan): RuntimeIdentity[] {
+  if (!Array.isArray(plan.runtime.identities) || plan.runtime.identities.length === 0) {
+    return DEFAULT_RUNTIME_IDENTITIES;
+  }
+  return plan.runtime.identities;
+}
+
+// Stable defaults; overridable per project through the builder so hosts can map
+// the runtime identity onto the workspace bind-mount owner.
+export const DEFAULT_RUNTIME_IDENTITIES: RuntimeIdentity[] = [
+  { role: "runtime", user: "biodome", group: "biodome", uid: 10001, gid: 10001 },
+  {
+    role: "mcp",
+    user: "biodome-mcp",
+    group: "biodome-mcp",
+    uid: 10002,
+    gid: 10002,
+    supplementaryGroups: ["biodome"],
+  },
+  { role: "mount", user: "biodome-mount", group: "biodome-mount", uid: 10003, gid: 10003 },
+];
 
 export interface ProcessHealthCheck {
   type: "http" | "tcp" | "exec";
@@ -387,6 +436,36 @@ export const LifecyclePointSchema = Schema.Literals([
   "exec.post",
 ]);
 
+export const RuntimeIdentityRoleSchema = Schema.Literals(["runtime", "mcp", "mount"]);
+
+const IDENTITY_NAME_PATTERN = /^[a-z_][a-z0-9_-]*$/;
+const POSIX_ID_MAX = 65535;
+
+export const RuntimeIdentitySchema = Schema.Struct({
+  role: RuntimeIdentityRoleSchema,
+  user: Schema.String.check(Schema.isMinLength(1)).check(
+    Schema.makeFilter((value) =>
+      IDENTITY_NAME_PATTERN.test(value) ? undefined : "must be a lowercase system-user name",
+    ),
+  ),
+  group: Schema.String.check(Schema.isMinLength(1)).check(
+    Schema.makeFilter((value) =>
+      IDENTITY_NAME_PATTERN.test(value) ? undefined : "must be a lowercase system-group name",
+    ),
+  ),
+  uid: Schema.Number.check(Schema.isInt()).check(
+    Schema.makeFilter((value) =>
+      value > 0 && value <= POSIX_ID_MAX ? undefined : `must be between 1 and ${POSIX_ID_MAX}`,
+    ),
+  ),
+  gid: Schema.Number.check(Schema.isInt()).check(
+    Schema.makeFilter((value) =>
+      value > 0 && value <= POSIX_ID_MAX ? undefined : `must be between 1 and ${POSIX_ID_MAX}`,
+    ),
+  ),
+  supplementaryGroups: Schema.optional(Schema.Array(Schema.String)),
+});
+
 export function createPlan(project: string): Plan {
   return {
     project,
@@ -430,6 +509,12 @@ export function createPlan(project: string): Plan {
       ports: [],
       environment: {},
       processes: [],
+      identities: DEFAULT_RUNTIME_IDENTITIES.map((identity) => ({
+        ...identity,
+        supplementaryGroups: identity.supplementaryGroups
+          ? [...identity.supplementaryGroups]
+          : undefined,
+      })),
       endpoints: [],
       providers: [],
       envVars: [],
@@ -555,6 +640,7 @@ export const ProcessSpecSchema = Schema.Struct({
   startOn: Schema.optional(LifecyclePointSchema),
   mergeEnv: Schema.optional(Schema.Boolean),
   bootstrap: Schema.optional(Schema.Boolean),
+  identity: Schema.optional(RuntimeIdentityRoleSchema),
 });
 
 export const HookSpecSchema = ProcessSpecSchema.pipe(
@@ -595,7 +681,6 @@ export const ServiceDatabaseSchema = Schema.Struct({
 });
 
 export const ServiceOptionsSchema = Schema.Struct({
-  image: Schema.optional(Schema.String),
   port: Schema.optional(Schema.Number),
   environment: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   databases: Schema.optional(Schema.Array(ServiceDatabaseSchema)),
@@ -811,6 +896,7 @@ const VolumeSpecFields = {
   proxy: Schema.optional(Schema.Boolean),
   readOnly: Schema.optional(Schema.Boolean),
   allowedPaths: Schema.optional(Schema.Array(Schema.String)),
+  directMount: Schema.optional(Schema.Boolean),
 };
 
 export const VolumeSpecSchema = Schema.Union([
@@ -962,27 +1048,14 @@ export const ProcessSchema = Schema.Struct({
   startOn: LifecyclePointSchema,
   bootstrap: Schema.optional(Schema.Boolean),
   mergeEnv: Schema.optional(Schema.Boolean),
+  identity: Schema.optional(RuntimeIdentityRoleSchema),
 });
 
 export const ServiceSchema = Schema.Struct({
   name: Schema.String,
   type: Schema.String,
-  runtime: Schema.optional(Schema.Literals(["container", "process"])),
-  image: Schema.String,
-  containerName: Schema.String,
   environment: Schema.Record(Schema.String, Schema.String),
   ports: Schema.Array(PortSchema),
-  volumes: Schema.Array(Schema.Struct({ host: Schema.String, container: Schema.String })),
-  healthCheck: Schema.optional(
-    Schema.Struct({
-      test: Schema.Array(Schema.String),
-      interval: Schema.optional(Schema.String),
-      timeout: Schema.optional(Schema.String),
-      retries: Schema.optional(Schema.Number),
-      startPeriod: Schema.optional(Schema.String),
-    }),
-  ),
-  networks: Schema.Array(Schema.String),
 });
 
 export const ProviderSchema = Schema.Struct({
@@ -1155,14 +1228,6 @@ export const BuildPlanSchema = Schema.Struct({
 
 export const NetworkSchema = Schema.Struct({ name: Schema.String, driver: Schema.String });
 export const NamedVolumeSchema = Schema.Struct({ name: Schema.String });
-export const VolumeMappingSchema = Schema.Struct({ host: Schema.String, container: Schema.String });
-export const HealthCheckSchema = Schema.Struct({
-  test: Schema.Array(Schema.String),
-  interval: Schema.optional(Schema.String),
-  timeout: Schema.optional(Schema.String),
-  retries: Schema.optional(Schema.Number),
-  startPeriod: Schema.optional(Schema.String),
-});
 
 export const VolumeSchema = Schema.Struct({
   name: Schema.String,
@@ -1196,6 +1261,7 @@ export const VolumeSchema = Schema.Struct({
   proxy: Schema.optional(Schema.Boolean),
   readOnly: Schema.optional(Schema.Boolean),
   allowedPaths: Schema.optional(Schema.Array(Schema.String)),
+  directMount: Schema.optional(Schema.Boolean),
 });
 
 export const LlmProviderSchema = Schema.Struct({
@@ -1261,6 +1327,7 @@ export const RuntimePlanSchema = Schema.Struct({
   ports: Schema.Array(PortSchema),
   environment: Schema.Record(Schema.String, Schema.String),
   processes: Schema.Array(ProcessSchema),
+  identities: Schema.Array(RuntimeIdentitySchema),
   endpoints: Schema.Array(EndpointSpecSchema),
   providers: Schema.Array(ProviderSchema),
   envVars: Schema.Array(EnvVarSchema),

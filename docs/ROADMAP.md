@@ -12,6 +12,7 @@
 - [x] Initial ECS task execution and S3 artifact collection
 - [x] Mandatory MCP authentication (Plan 01)
 - [x] Typed secret handling and repository sync (Plan 02)
+- [x] Non-root local container and process isolation (Plan 04)
 
 ## Partially complete
 
@@ -21,7 +22,6 @@
 
 ## Upcoming
 
-- [ ] Non-root local container and process isolation (Plan 04)
 - [ ] AWS ECS production hardening and integration proof (Plan 05)
 - [ ] Security release documentation and automation (Plan 08)
 - [ ] Stable package and startup performance budgets (Plan 09)

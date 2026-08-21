@@ -72,22 +72,31 @@ describe("ProcessBuilder", () => {
     expect(aptPackages).toEqual(["curl", "netcat-openbsd"]);
   });
 
-  it("merges process environment unless excluded or explicitly declared", () => {
+  it("keeps process environments scoped unless merging is explicitly requested", () => {
     const { builder, plan } = makeBuilder();
     plan.runtime.envVars.push({ key: "DECLARED", scope: "runtime", value: "one" });
     plan.runtime.environment.DECLARED = "one";
     builder.addProcess({
-      name: "web",
-      command: ["node"],
-      environment: { DECLARED: "two", PROCESS: "three" },
-    });
-    builder.addProcess({
       name: "private",
       command: ["node"],
       environment: { PRIVATE: "four" },
-      mergeEnv: false,
+    });
+    builder.addProcess({
+      name: "web",
+      command: ["node"],
+      environment: { DECLARED: "two", PROCESS: "three" },
+      mergeEnv: true,
     });
 
     expect(plan.runtime.environment).toEqual({ DECLARED: "one", PROCESS: "three" });
+  });
+
+  it("defaults every process to the runtime identity unless overridden", () => {
+    const { builder, plan } = makeBuilder();
+    builder.addProcess({ name: "web", command: ["node"] });
+    builder.addProcess({ name: "helper", command: ["node"], identity: "mount" });
+
+    expect(plan.runtime.processes[0].identity).toBeUndefined();
+    expect(plan.runtime.processes[1].identity).toBe("mount");
   });
 });

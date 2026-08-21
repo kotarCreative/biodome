@@ -127,15 +127,8 @@ function serviceIssues(
   provider: ProviderProfile,
 ): CompatibilityIssue[] {
   return services.flatMap((service) => {
-    const supportedKinds =
-      service.runtime === "process" ? provider.processServiceKinds : provider.serviceKinds;
-    // Container services are passed directly to Docker Compose and therefore
-    // have no finite provider-owned kind list. Process services do.
-    if (!supportedKinds && service.runtime === "container") return [];
-    // A provider that does not publish a process-service list retains the
-    // historical default of running them in the dev image.
-    if (!supportedKinds && service.runtime === "process") return [];
-    if (supportedKinds?.includes(service.kind)) return [];
+    const supportedKinds = provider.processServiceKinds;
+    if (!supportedKinds || supportedKinds.includes(service.kind)) return [];
     return [
       {
         kind: "service" as const,
@@ -271,14 +264,8 @@ export function preflightTargetCompatibility(
   const issues: CompatibilityIssue[] = [];
 
   for (const service of plan.runtime.services) {
-    const runtime = service.runtime ?? "container";
-    const supportedKinds =
-      runtime === "process" ? provider.processServiceKinds : provider.serviceKinds;
-    if (!supportedKinds && runtime === "container") continue;
-    if (supportedKinds?.includes(service.type)) continue;
-    // A provider that does not publish a process-service list retains the
-    // historical default of running them in the dev image.
-    if (!supportedKinds && runtime === "process") continue;
+    const supportedKinds = provider.processServiceKinds;
+    if (!supportedKinds || supportedKinds.includes(service.type)) continue;
     issues.push({
       kind: "service",
       level: "required",

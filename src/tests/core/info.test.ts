@@ -17,21 +17,16 @@ describe("formatInfo", () => {
     plan.runtime.services.push({
       name: "postgres",
       type: "postgres",
-      image: "postgres:16-alpine",
-      containerName: "my-app-postgres",
       environment: {
         POSTGRES_USER: "app",
         POSTGRES_PASSWORD: "dev",
         POSTGRES_DB: "myapp",
       },
       ports: [{ host: 5432, container: 5432 }],
-      volumes: [],
-      networks: ["biodome"],
     });
 
     const info = formatInfo(plan);
     expect(info).toContain("Services:");
-    expect(info).toContain("postgresql://app@postgres:5432/myapp");
     expect(info).toContain("postgresql://app@localhost:5432/myapp");
   });
 
@@ -117,23 +112,19 @@ describe("formatAgentsMd", () => {
     plan.runtime.services.push({
       name: "postgres",
       type: "postgres",
-      image: "postgres:16-alpine",
-      containerName: "my-app-postgres",
       environment: {
         POSTGRES_USER: "app",
         POSTGRES_PASSWORD: "dev",
         POSTGRES_DB: "myapp",
       },
       ports: [{ host: 5432, container: 5432 }],
-      volumes: [],
-      networks: ["biodome"],
     });
 
     const md = formatAgentsMd(plan);
     expect(md).toContain("# Development Environment");
     expect(md).toContain("node:20-slim");
     expect(md).toContain("### postgres");
-    expect(md).toContain("postgresql://app@postgres:5432/myapp");
+    expect(md).toContain("postgresql://app@localhost:5432/myapp");
     expect(md).toContain("biodome up");
   });
 

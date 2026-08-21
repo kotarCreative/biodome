@@ -110,6 +110,18 @@ const samplePlan: Plan = {
     networks: [],
     ports: [],
     environment: {},
+    identities: [
+      { role: "runtime", user: "biodome", group: "biodome", uid: 10001, gid: 10001 },
+      {
+        role: "mcp",
+        user: "biodome-mcp",
+        group: "biodome-mcp",
+        uid: 10002,
+        gid: 10002,
+        supplementaryGroups: ["biodome"],
+      },
+      { role: "mount", user: "biodome-mount", group: "biodome-mount", uid: 10003, gid: 10003 },
+    ],
     envVars: [],
     endpoints: [],
     providers: [],
@@ -212,27 +224,6 @@ describe("createAwsEcsDriver", () => {
       }
     });
 
-    it("rejects plan rendering when backing services are present", () => {
-      const driver = createAwsEcsDriver(makeClients());
-      const planWithServices: Plan = {
-        ...samplePlan,
-        runtime: {
-          ...samplePlan.runtime,
-          services: [{ name: "postgres", image: "postgres:16" } as any],
-        },
-      };
-      expect(() =>
-        Effect.runSync(
-          driver.render({
-            rootDir: "/tmp/root",
-            outputDir: "/tmp/output",
-            plan: planWithServices,
-            target: sampleTarget,
-          }),
-        ),
-      ).toThrow(/does not support backing service containers/);
-    });
-
     it("rejects plans with host-env passthrough variables", () => {
       const driver = createAwsEcsDriver(makeClients());
       const planWithPassthrough: Plan = {
@@ -269,13 +260,8 @@ describe("createAwsEcsDriver", () => {
               {
                 name: "postgres",
                 type: "postgres",
-                runtime: "process",
-                image: "postgresql (in-container)",
-                containerName: "test-postgres",
                 environment: {},
                 ports: [],
-                volumes: [],
-                networks: [],
               },
             ],
           },

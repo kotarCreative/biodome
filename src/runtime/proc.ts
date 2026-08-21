@@ -81,6 +81,22 @@ function mergedEnv(env: Record<string, string> | undefined) {
 }
 
 /**
+ * Default runtime-identity mapping for local compose flows: the container's
+ * runtime user is mapped onto this host's uid/gid so workspace bind mounts
+ * stay writable without chowning host files. Explicit host exports win.
+ */
+export function hostIdentityMappingEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  if (process.env.BIODOME_RUNTIME_UID === undefined && typeof process.getuid === "function") {
+    env.BIODOME_RUNTIME_UID = String(process.getuid());
+  }
+  if (process.env.BIODOME_RUNTIME_GID === undefined && typeof process.getgid === "function") {
+    env.BIODOME_RUNTIME_GID = String(process.getgid());
+  }
+  return env;
+}
+
+/**
  * Spawn a child process inheriting stdio, failing on a nonzero exit.
  */
 export function runProcess(options: ProcessOptions): Effect.Effect<void, RuntimeError, never> {

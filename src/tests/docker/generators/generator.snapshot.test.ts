@@ -13,19 +13,10 @@ describe("Docker generator snapshots", () => {
     plan.runtime.services.push({
       name: "postgres",
       type: "postgres",
-      image: "postgres:16-alpine",
-      containerName: "my-app-postgres",
       environment: { POSTGRES_USER: "app", POSTGRES_PASSWORD: "dev", POSTGRES_DB: "myapp" },
       ports: [{ host: 5432, container: 5432 }],
-      volumes: [{ host: "postgres_data", container: "/var/lib/postgresql/data" }],
-      networks: ["biodome"],
-      healthCheck: {
-        test: ["CMD-SHELL", "pg_isready -U app -d myapp"],
-        interval: "5s",
-        timeout: "3s",
-        retries: 10,
-      },
     });
+    plan.build.aptPackages.push("postgresql");
     plan.runtime.processes.push({
       name: "web",
       command: ["node", "server.js"],
@@ -68,19 +59,10 @@ describe("Docker generator snapshots", () => {
     plan.runtime.services.push({
       name: "redis",
       type: "redis",
-      image: "redis:7-alpine",
-      containerName: "py-app-redis",
       environment: {},
       ports: [{ host: 6379, container: 6379 }],
-      volumes: [{ host: "redis_data", container: "/data" }],
-      networks: ["biodome"],
-      healthCheck: {
-        test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"],
-        interval: "5s",
-        timeout: "3s",
-        retries: 10,
-      },
     });
+    plan.build.aptPackages.push("redis-server");
 
     expect(generateDockerfile(plan)).toMatchSnapshot();
     expect(generateSupervisordConf(plan)).toMatchSnapshot();

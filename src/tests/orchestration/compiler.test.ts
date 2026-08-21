@@ -11,12 +11,8 @@ function legacyPlan(artifacts = ["review.md"]): Plan {
   plan.runtime.services.push({
     name: "postgres",
     type: "postgres",
-    image: "postgres:17",
-    containerName: "postgres",
     environment: {},
     ports: [],
-    volumes: [{ host: "pg-data", container: "/var/lib/postgresql/data" }],
-    networks: [],
   });
   plan.runtime.processes.push({
     name: "api",
@@ -71,9 +67,6 @@ describe("compileExecutionPlan", () => {
       {
         name: "postgres",
         kind: "postgres",
-        runtime: "container",
-        image: "postgres:17",
-        persistence: "workspace",
       },
     ]);
     expect(executionPlan.processes).toEqual([

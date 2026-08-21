@@ -4,10 +4,16 @@ import type { EnvSpec, ProcessSpec, ServiceOptions } from "../feature.js";
 import { ValidationError } from "../errors.js";
 import {
   POSTGRES_PASSWORD_ENV_VAR,
-  defaultImage,
+  SUPPORTED_SERVICE_TYPES,
   serviceConfigs,
   servicePassword,
 } from "../services.js";
+
+// Default TCP port per supported in-container service type.
+const SERVICE_DEFAULT_PORTS: Record<string, number> = {
+  postgres: 5432,
+  redis: 6379,
+};
 
 export class ServiceBuilder {
   constructor(
@@ -23,6 +29,13 @@ export class ServiceBuilder {
     if (!name || typeof name !== "string") {
       throw new ValidationError({ message: "Service requires a non-empty string name" });
     }
+    if (!SUPPORTED_SERVICE_TYPES.has(name)) {
+      throw new ValidationError({
+        message:
+          `Unsupported service "${name}". Services run inside the dev image as managed ` +
+          `processes; supported types: ${[...SUPPORTED_SERVICE_TYPES].sort().join(", ")}.`,
+      });
+    }
     const validated = Schema.decodeSync(ServiceOptionsSchema)(options);
     this.validatePort(validated.port, `Service ${name}: port`);
 
@@ -30,27 +43,23 @@ export class ServiceBuilder {
       throw new ValidationError({ message: `Duplicate service name: ${name}` });
     }
 
-    const type = validated.image ? "container" : name;
     const service: Service = {
       name,
-      type,
-      runtime: type === "postgres" ? "process" : "container",
-      image: validated.image || defaultImage(name),
-      containerName: `${this.plan.project}-${name}`,
+      type: name,
       environment: validated.environment || {},
       ports: validated.port ? [{ host: validated.port, container: validated.port }] : [],
-      volumes: [],
-      networks: ["biodome"],
     };
 
-    serviceConfigs[type]?.(service, validated);
+    serviceConfigs[name]?.(service, validated);
     this.plan.runtime.services.push(service);
-    if (service.runtime === "process" && service.type === "postgres") {
+
+    const port = validated.port ?? SERVICE_DEFAULT_PORTS[name];
+    if (name === "postgres") {
       this.addAptPackage("postgresql");
       this.addProcess({
         name: `${name}-server`,
         command: ["sh", `${this.servicesPath}/${name}.sh`],
-        healthCheck: { type: "tcp", port: 5432, interval: "1s", retries: 30, startPeriod: "1s" },
+        healthCheck: { type: "tcp", port, interval: "1s", retries: 30, startPeriod: "1s" },
         bootstrap: true,
       });
       this.addHook({
@@ -73,15 +82,14 @@ export class ServiceBuilder {
           });
         }
       }
-    }
-    for (const volume of service.volumes) {
-      if (
-        !volume.host.startsWith("/") &&
-        !volume.host.startsWith("./") &&
-        !volume.host.startsWith("~")
-      ) {
-        this.plan.runtime.namedVolumes.push({ name: volume.host });
-      }
+    } else if (name === "redis") {
+      this.addAptPackage("redis-server");
+      this.addProcess({
+        name: `${name}-server`,
+        command: ["sh", `${this.servicesPath}/${name}.sh`],
+        healthCheck: { type: "tcp", port, interval: "1s", retries: 30, startPeriod: "1s" },
+        bootstrap: true,
+      });
     }
   }
 

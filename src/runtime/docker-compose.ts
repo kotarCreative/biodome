@@ -37,6 +37,7 @@ import {
   captureProcess,
   execArgsWithTimeout,
   assertProcessName,
+  hostIdentityMappingEnv,
   imageRefFromLocalDigest,
   runProcess,
   stagingImageRef,
@@ -149,7 +150,7 @@ export const dockerComposeDriver: RuntimeDriver &
         command: "docker",
         args: ["compose", "-f", getComposePath(input.outputDir), "-p", input.deploymentId, "build"],
         cwd: input.outputDir,
-        env: { BIODOME_DEV_IMAGE: stagingImage },
+        env: { BIODOME_DEV_IMAGE: stagingImage, ...hostIdentityMappingEnv() },
       });
       const digest = yield* captureCommandOutput({
         command: "docker",
@@ -190,7 +191,7 @@ export const dockerComposeDriver: RuntimeDriver &
           "--wait",
         ],
         cwd: input.outputDir,
-        env: { BIODOME_DEV_IMAGE: imageRef },
+        env: { BIODOME_DEV_IMAGE: imageRef, ...hostIdentityMappingEnv() },
       });
       return {
         driver: "docker-compose" as const,

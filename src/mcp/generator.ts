@@ -48,7 +48,6 @@ export function generatePlanJson(plan: Plan): string {
     services: plan.runtime.services.map((svc) => ({
       name: svc.name,
       type: svc.type,
-      image: svc.image,
       ports: svc.ports.map((p) => ({ host: p.host, container: p.container })),
       connection: serviceConnection(svc) || null,
     })),

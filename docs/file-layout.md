@@ -50,9 +50,9 @@ Static metadata for the project. Currently only the project name is required.
 
 ## `.biodome/services.mjs`
 
-Built-in Postgres runs as an ephemeral process inside the dev container. Other
-services, including custom container images and Redis, run as separate containers.
-Use `ctx.addService()` for each service.
+All backing services run as ephemeral, supervised processes inside the dev
+container under dedicated system accounts — a deployment is exactly one image.
+Supported types: `postgres` and `redis`. Use `ctx.addService()` for each service.
 
 > Legacy `.js` extensions are also supported (`.biodome/services.js`).
 

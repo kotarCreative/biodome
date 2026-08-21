@@ -283,6 +283,54 @@ describe("validatePlan", () => {
     const plan = await buildPlan(dir);
     await expect(Effect.runPromise(validatePlan(plan))).resolves.toBeUndefined();
   });
+
+  it("rejects plans whose cloud volumes lack the direct-mount opt-in", async () => {
+    const dir = join("/tmp", "sandbox-test-" + Date.now());
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({ project: { name: "unsafe-mount" } }),
+      ".biodome/features/volumes.mjs": `
+        export default function volumes(ctx) {
+          ctx.addS3Volume({
+            name: "assets",
+            bucket: "example-assets",
+            target: "/workspace/assets",
+            credentials: { accessKeyId: { env: "AWS_ACCESS_KEY_ID" } },
+          });
+        }
+      `,
+    });
+
+    await expect(buildPlan(dir)).rejects.toThrow(/directMount: true/);
+  });
+
+  it("scopes rclone mount credentials to the mount helper process only", async () => {
+    const dir = join("/tmp", "sandbox-test-" + Date.now());
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({ project: { name: "scoped-creds" } }),
+      ".biodome/features/volumes.mjs": `
+        export default function volumes(ctx) {
+          ctx.addS3Volume({
+            name: "assets",
+            bucket: "example-assets",
+            target: "/workspace/assets",
+            directMount: true,
+            credentials: {
+              accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
+              secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
+            },
+          });
+        }
+      `,
+    });
+
+    const plan = await buildPlan(dir);
+    const mount = plan.runtime.processes.find((process) => process.name === "rclone-mount-assets");
+    expect(mount).toMatchObject({ mergeEnv: false, identity: "mount" });
+    expect(mount?.command).not.toContain("--allow-other");
+    // The credentials stay private to the mount helper's environment.
+    expect(plan.runtime.environment).not.toHaveProperty("RCLONE_S3_SECRET_ACCESS_KEY");
+    expect(mount?.environment.RCLONE_S3_SECRET_ACCESS_KEY).toBe("${AWS_SECRET_ACCESS_KEY}");
+  });
 });
 
 describe("validateFeatures", () => {

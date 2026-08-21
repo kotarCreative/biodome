@@ -394,12 +394,28 @@ export const dockerSandboxDriver: RuntimeDriver &
       }
       const workspace = snapshotWorkspace(id);
       const composeFile = `${workspace}/.biodome-build/targets/${input.target.name}/docker-compose.yaml`;
+      // Map the container's runtime identity onto the snapshot's owner so
+      // task execution can write /workspace without chowning user content.
+      const owner = yield* captureCommandOutput({
+        command: "sbx",
+        args: ["exec", id, "stat", "-c", "%u:%g", workspace],
+        cwd: input.rootDir,
+      }).pipe(
+        Effect.catch(() => Effect.succeed("")),
+        Effect.orElseSucceed(() => ""),
+      );
+      const [ownerUid, ownerGid] = owner.trim().split(":");
+      const identityEnv =
+        /^\d+$/.test(ownerUid ?? "") && /^\d+$/.test(ownerGid ?? "")
+          ? [`BIODOME_RUNTIME_UID=${ownerUid}`, `BIODOME_RUNTIME_GID=${ownerGid}`]
+          : [];
       yield* runProcess({
         command: "sbx",
         args: [
           "exec",
           id,
           "env",
+          ...identityEnv,
           `BIODOME_DEV_IMAGE=${imageRef}`,
           "docker",
           "compose",

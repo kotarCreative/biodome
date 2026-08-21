@@ -8,28 +8,39 @@ describe("generateInContainerServiceFiles", () => {
     plan.runtime.services.push({
       name: "postgres",
       type: "postgres",
-      runtime: "process",
-      image: "postgresql (in-container)",
-      containerName: "test-postgres",
       environment: {
         POSTGRES_USER: "vitruvi",
         POSTGRES_PASSWORD: "devpassword",
         POSTGRES_DB: "vitruvi",
       },
       ports: [],
-      volumes: [],
-      networks: ["biodome"],
     });
 
     const files = generateInContainerServiceFiles(plan);
     expect(files["postgres.sh"]).toContain(
-      "initdb -D $PGDATA --auth=trust --encoding=UTF8 --locale=C",
+      'initdb" -D "$PGDATA" --auth=trust --encoding=UTF8 --locale=C',
     );
-    expect(files["postgres.sh"]).toContain("postgres -D $PGDATA -p 5432");
+    expect(files["postgres.sh"]).toContain('postgres" -D "$PGDATA" -p 5432');
     expect(files["postgres.sh"]).toContain("max_connections=20");
     expect(files["postgres.sh"]).toContain("shared_buffers=32MB");
     expect(files["postgres.sh"]).toContain("fsync=off");
     expect(files["postgres.sh"]).toContain("autovacuum=off");
+  });
+
+  it("runs the database without privileged helpers so it can execute as its own user", () => {
+    const plan = createPlan("test");
+    plan.runtime.services.push({
+      name: "postgres",
+      type: "postgres",
+      environment: {},
+      ports: [],
+    });
+
+    const files = generateInContainerServiceFiles(plan);
+    for (const content of Object.values(files)) {
+      expect(content).not.toContain("su postgres");
+      expect(content).not.toContain("install -d");
+    }
   });
 
   it("binds the role password from the container environment instead of persisting it", () => {
@@ -37,17 +48,12 @@ describe("generateInContainerServiceFiles", () => {
     plan.runtime.services.push({
       name: "postgres",
       type: "postgres",
-      runtime: "process",
-      image: "postgresql (in-container)",
-      containerName: "test-postgres",
       environment: {
         POSTGRES_USER: "vitruvi",
         POSTGRES_PASSWORD: "devpassword",
         POSTGRES_DB: "vitruvi",
       },
       ports: [],
-      volumes: [],
-      networks: ["biodome"],
     });
 
     const files = generateInContainerServiceFiles(plan);

@@ -60,6 +60,7 @@ describe("McpBuilder", () => {
           MCP_EVENTS_LOG: "/workspace/.biodome-build/logs/mcp-events.jsonl",
         },
         mergeEnv: false,
+        identity: "mcp",
       },
     ]);
     expect(envVars).toContainEqual({ key: "MCP_TOKEN" });

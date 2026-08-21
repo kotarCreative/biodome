@@ -164,4 +164,96 @@ describe("generateSupervisordConf", () => {
 
     expect(() => generateSupervisordConf(plan)).toThrow(/Invalid process name/);
   });
+
+  it("runs user workloads as the runtime identity and never as root", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "django",
+      command: ["python", "manage.py", "runserver"],
+      ports: [],
+      environment: {},
+      mode: "daemon",
+      startOn: "start.post",
+    });
+
+    const conf = generateSupervisordConf(plan);
+    expect(conf).toContain("[program:django]\ncommand=python manage.py runserver");
+    expect(conf).toContain("user=biodome");
+    // Only supervisord itself and biodome-owned health monitors may be root.
+    const programSections = conf.split("[program:").slice(1);
+    for (const section of programSections) {
+      const isMonitor = section.startsWith("django-healthcheck]");
+      expect(section).toMatch(isMonitor ? /user=root/ : /user=biodome/);
+    }
+  });
+
+  it("runs MCP and mount-helper programs under their own identities", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push(
+      {
+        name: "biodome-mcp",
+        command: ["node", "server.js"],
+        ports: [],
+        environment: {},
+        mode: "daemon",
+        startOn: "start.post",
+        identity: "mcp",
+      },
+      {
+        name: "rclone-mount-assets",
+        command: ["rclone", "mount", "s3:bucket/", "/workspace/assets"],
+        ports: [],
+        environment: {},
+        mode: "daemon",
+        startOn: "start.post",
+        identity: "mount",
+      },
+    );
+
+    const conf = generateSupervisordConf(plan);
+    expect(conf).toContain("[program:biodome-mcp]\ncommand=node server.js\nuser=biodome-mcp");
+    expect(conf).toContain(
+      "[program:rclone-mount-assets]\ncommand=rclone mount 's3:bucket/' /workspace/assets\nuser=biodome-mount",
+    );
+  });
+
+  it("grants the supervisor socket to the shared runtime group instead of root only", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "django",
+      command: ["python", "manage.py", "runserver"],
+      ports: [],
+      environment: {},
+      mode: "daemon",
+      startOn: "start.post",
+    });
+
+    const conf = generateSupervisordConf(plan);
+    expect(conf).toContain("chmod=0770");
+    expect(conf).toContain("chown=root:biodome");
+  });
+
+  it("runs in-container postgres under its dedicated package system user", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.services.push({
+      name: "db",
+      type: "postgres",
+      environment: {},
+      ports: [],
+    });
+    plan.runtime.processes.push({
+      name: "db-server",
+      command: ["sh", "/workspace/.biodome-build/services/db.sh"],
+      ports: [],
+      environment: {},
+      mode: "daemon",
+      startOn: "start.post",
+      bootstrap: true,
+    });
+
+    const conf = generateSupervisordConf(plan);
+    expect(conf).toContain(
+      "[program:db-server]\ncommand=sh /workspace/.biodome-build/services/db.sh\nuser=postgres",
+    );
+  });
 });

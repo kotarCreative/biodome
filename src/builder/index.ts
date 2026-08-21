@@ -228,6 +228,16 @@ export function validatePlan(plan: Plan): Effect.Effect<void, SandboxError, neve
           registerPort(port, `service "${svc.name}"`);
         }
       }
+
+      for (const volume of plan.runtime.volumes) {
+        if (volume.type === "local" || volume.proxy || volume.directMount) continue;
+        throw new ValidationError({
+          message:
+            `Volume "${volume.name}": direct cloud mounts require SYS_ADMIN inside the dev ` +
+            `container and are an explicitly unsafe mode. Use proxy: true (recommended) or set ` +
+            `directMount: true to accept the residual risk.`,
+        });
+      }
     },
     catch: (error) =>
       error instanceof ValidationError ? error : new PlanError({ message: String(error) }),

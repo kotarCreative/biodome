@@ -57,15 +57,9 @@ plan.build = {
 plan.runtime.services.push({
   name: "postgres",
   type: "postgres",
-  image: "postgres:16",
-  containerName: "contract-postgres",
   environment: { POSTGRES_PASSWORD: "postgres" },
   ports: [{ host: 5432, container: 5432 }],
-  volumes: [{ host: "postgres-data", container: "/var/lib/postgresql/data" }],
-  healthCheck: { test: ["CMD-SHELL", "pg_isready"], interval: "5s" },
-  networks: ["biodome"],
 });
-plan.runtime.namedVolumes.push({ name: "postgres-data" });
 plan.runtime.volumes.push(
   { name: "local", type: "local", source: "./data", target: "/data" },
   {

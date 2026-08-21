@@ -66,6 +66,7 @@ export interface S3VolumeSpec {
   proxy?: boolean;
   readOnly?: boolean;
   allowedPaths?: string[];
+  directMount?: boolean;
 }
 
 export interface GcsVolumeSpec {
@@ -83,6 +84,7 @@ export interface GcsVolumeSpec {
   proxy?: boolean;
   readOnly?: boolean;
   allowedPaths?: string[];
+  directMount?: boolean;
 }
 
 export interface AzureVolumeSpec {
@@ -98,6 +100,7 @@ export interface AzureVolumeSpec {
   proxy?: boolean;
   readOnly?: boolean;
   allowedPaths?: string[];
+  directMount?: boolean;
 }
 
 export interface SftpVolumeSpec {
@@ -114,6 +117,7 @@ export interface SftpVolumeSpec {
   proxy?: boolean;
   readOnly?: boolean;
   allowedPaths?: string[];
+  directMount?: boolean;
 }
 
 export interface SmbVolumeSpec {
@@ -129,6 +133,7 @@ export interface SmbVolumeSpec {
   proxy?: boolean;
   readOnly?: boolean;
   allowedPaths?: string[];
+  directMount?: boolean;
 }
 
 export interface WebdavVolumeSpec {
@@ -145,6 +150,7 @@ export interface WebdavVolumeSpec {
   proxy?: boolean;
   readOnly?: boolean;
   allowedPaths?: string[];
+  directMount?: boolean;
 }
 
 export interface DropboxVolumeSpec {
@@ -155,6 +161,7 @@ export interface DropboxVolumeSpec {
   proxy?: boolean;
   readOnly?: boolean;
   allowedPaths?: string[];
+  directMount?: boolean;
 }
 
 export interface GdriveVolumeSpec {
@@ -169,6 +176,7 @@ export interface GdriveVolumeSpec {
   proxy?: boolean;
   readOnly?: boolean;
   allowedPaths?: string[];
+  directMount?: boolean;
 }
 
 export interface McpProviderSpec {
