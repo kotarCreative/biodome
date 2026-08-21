@@ -70,9 +70,14 @@ async function resolvePath(config: VolumeConfig, userPath: string): Promise<stri
 
 async function resolveExistingPath(config: VolumeConfig, userPath: string): Promise<string> {
   const candidate = await resolvePath(config, userPath);
-  const real = await fs.realpath(candidate);
   const root = resolve(resolveRoot(config));
-  if (real !== root && !real.startsWith(root + sep)) {
+  // Compare realpaths on both sides so a root reached through host-level
+  // symlinks (e.g. macOS /var -> /private/var) is not mistaken for an escape.
+  const [real, realRoot] = await Promise.all([
+    fs.realpath(candidate),
+    fs.realpath(root).catch(() => root),
+  ]);
+  if (real !== realRoot && !real.startsWith(realRoot + sep)) {
     throw new VolumeAccessError(`Symlink escape detected: ${userPath}`);
   }
   return real;
