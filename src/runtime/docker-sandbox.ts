@@ -1,8 +1,13 @@
-import { mkdirSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { join, relative } from "node:path";
 import { Effect } from "effect";
-import * as ChildProcess from "effect/unstable/process/ChildProcess";
-import { NodeRuntime } from "../core/runtime-node.js";
+import { generateCompose } from "../docker/generators/compose.js";
+import {
+  ensureCliAvailable,
+  captureTimedExec,
+  collectArtifactsByCopying,
+  supervisordLogFile,
+  supervisorctlArgs,
+} from "./driver-kit.js";
 import { RuntimeError } from "../core/errors.js";
 import { capabilitiesOf } from "../core/capabilities.js";
 import type { EventStore } from "../core/events.js";
@@ -11,18 +16,14 @@ import { runtimeLayout } from "./layout.js";
 import { renderCommonArtifacts, writeArtifacts } from "./artifacts.js";
 import { directoryDigest } from "./build-manifest.js";
 import {
-  TIMEOUT_EXIT_CODE,
   captureCommandOutput,
-  captureProcess,
   execArgsWithTimeout,
   imageRefFromLocalDigest,
-  assertProcessName,
   platformErrorMessage,
   runProcess,
   stagingImageRef,
   toRuntimeError,
 } from "./proc.js";
-import { generateCompose } from "../docker/generators/compose.js";
 import type {
   Artifact,
   BuildResult,
@@ -170,12 +171,7 @@ export function parseSbxListOutput(output: string, deploymentId: string): Status
   return { state: "unknown", message: `Sandbox state: ${rawState}` };
 }
 
-function artifactPath(input: RuntimeOperationInput, artifact: string): string {
-  if (artifact.startsWith("/") || artifact.split(/[\\/]/).includes("..")) {
-    throw new RuntimeError({
-      message: `Invalid artifact path "${artifact}": must be a relative path without traversal`,
-    });
-  }
+function remoteArtifactPath(input: RuntimeOperationInput, artifact: string): string {
   return join(snapshotWorkspace(sandboxId(input)), artifact);
 }
 
@@ -280,23 +276,9 @@ export const dockerSandboxDriver: RuntimeDriver &
   },
 
   ensureAvailable(): Effect.Effect<void, RuntimeError, EventStore> {
-    return Effect.gen(function* () {
-      const handle = yield* ChildProcess.make("sbx", ["version"], {
-        stdin: "ignore",
-        stdout: "ignore",
-        stderr: "ignore",
-      });
-      const exitCode = yield* handle.exitCode;
-      if (exitCode !== 0) {
-        return yield* new RuntimeError({
-          message:
-            "Docker Sandboxes is not available. Install Docker Sandboxes and run `sbx login`.",
-        });
-      }
-    }).pipe(
-      Effect.provide(NodeRuntime),
-      Effect.scoped,
-      Effect.catch((error) => Effect.fail(toRuntimeError(error))),
+    return ensureCliAvailable(
+      "sbx",
+      "Docker Sandboxes is not available. Install Docker Sandboxes and run `sbx login`.",
     );
   },
 
@@ -474,29 +456,10 @@ export const dockerSandboxDriver: RuntimeDriver &
   exec(
     input: RuntimeOperationInput & { command: string[]; timeoutMs?: number },
   ): Effect.Effect<CommandResult, RuntimeError, EventStore> {
-    const start = Date.now();
     const id = sandboxId(input);
     const command = ["docker", "exec", `${input.deploymentId}-dev`, ...input.command];
     const args = buildSbxExecArgs(id, command, input.timeoutMs);
-    return Effect.gen(function* () {
-      const { exitCode, stdout, stderr } = yield* captureProcess({
-        command: "sbx",
-        args,
-        cwd: input.rootDir,
-        stdin: input.timeoutMs === undefined ? "inherit" : "ignore",
-      });
-      return {
-        exitCode,
-        stdout,
-        stderr,
-        durationMs: Date.now() - start,
-        timedOut: input.timeoutMs !== undefined && exitCode === TIMEOUT_EXIT_CODE,
-      };
-    }).pipe(
-      Effect.provide(NodeRuntime),
-      Effect.scoped,
-      Effect.catch((error) => Effect.fail(toRuntimeError(error))),
-    );
+    return captureTimedExec({ command: "sbx", args, cwd: input.rootDir });
   },
 
   collectArtifacts(
@@ -504,30 +467,16 @@ export const dockerSandboxDriver: RuntimeDriver &
   ): Effect.Effect<Artifact[], RuntimeError, EventStore> {
     return Effect.gen(function* () {
       const id = yield* requireSandboxId(input);
-      const artifactsDir = join(input.outputDir, "artifacts");
-      mkdirSync(artifactsDir, { recursive: true });
-      const artifacts: Artifact[] = [];
-      for (const path of input.paths) {
-        const localPath = join(artifactsDir, path);
-        mkdirSync(dirname(localPath), { recursive: true });
-        const remotePath = yield* Effect.try({
-          try: () => artifactPath(input, path),
-          catch: toRuntimeError,
-        });
-        const copied = yield* Effect.result(
+      return yield* collectArtifactsByCopying({
+        outputDir: input.outputDir,
+        paths: input.paths,
+        copy: (path, localPath) =>
           captureCommandOutput({
             command: "sbx",
-            args: ["cp", `${id}:${remotePath}`, localPath],
+            args: ["cp", `${id}:${remoteArtifactPath(input, path)}`, localPath],
           }),
-        );
-        if (copied._tag === "Failure") {
-          return yield* new RuntimeError({
-            message: `Artifact "${path}" was not found in sandbox ${id}`,
-          });
-        }
-        artifacts.push({ path, localPath, sizeBytes: statSync(localPath).size });
-      }
-      return artifacts;
+        describeMissing: (path) => `Artifact "${path}" was not found in sandbox ${id}`,
+      });
     });
   },
 
@@ -555,8 +504,7 @@ export const dockerSandboxDriver: RuntimeDriver &
     input: RuntimeOperationInput & { processName?: string },
   ): Effect.Effect<void, RuntimeError, EventStore> {
     const logDir = runtimeLayout(input.rootDir, input.target.name).container.logs;
-    const name = input.processName ? assertProcessName(input.processName) : undefined;
-    const logFile = name ? `${logDir}/${name}.log` : `${logDir}/supervisord.log`;
+    const logFile = supervisordLogFile(logDir, input.processName);
     const id = sandboxId(input);
     return runProcess({
       command: "sbx",
@@ -577,11 +525,11 @@ export const dockerSandboxDriver: RuntimeDriver &
         "docker",
         "exec",
         `${input.deploymentId}-dev`,
-        "supervisorctl",
-        "-c",
-        runtimeLayout(input.rootDir, input.target.name).container.supervisordConfig,
-        "restart",
-        input.processName,
+        ...supervisorctlArgs(
+          runtimeLayout(input.rootDir, input.target.name).container.supervisordConfig,
+          "restart",
+          [input.processName],
+        ),
       ],
       cwd: input.rootDir,
     });

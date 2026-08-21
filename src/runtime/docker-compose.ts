@@ -1,11 +1,20 @@
-import { mkdirSync, statSync } from "node:fs";
-import { join, dirname, relative } from "node:path";
+import { mkdirSync } from "node:fs";
+import { join, relative } from "node:path";
 import { Effect } from "effect";
-import * as ChildProcess from "effect/unstable/process/ChildProcess";
-import { NodeRuntime } from "../core/runtime-node.js";
 import { generateCompose } from "../docker/generators/compose.js";
 import { parseServiceStatusOutput } from "./compose-status.js";
+import {
+  ensureCliAvailable,
+  captureTimedExec,
+  collectArtifactsByCopying,
+  supervisordLogFile,
+  supervisorctlArgs,
+} from "./driver-kit.js";
 import type {
+  Artifact,
+  BuildResult,
+  CommandResult,
+  DeploymentState,
   AvailableDriver,
   ArtifactDriver,
   BuildableDriver,
@@ -16,10 +25,6 @@ import type {
   RuntimeDriver,
   RuntimeOperationInput,
   StartInput,
-  BuildResult,
-  DeploymentState,
-  CommandResult,
-  Artifact,
   StatusDriver,
   StatusResult,
   StartableDriver,
@@ -32,16 +37,12 @@ import type { EventStore } from "../core/events.js";
 import { runtimeLayout } from "./layout.js";
 import { renderCommonArtifacts, writeArtifacts } from "./artifacts.js";
 import {
-  TIMEOUT_EXIT_CODE,
   captureCommandOutput,
-  captureProcess,
   execArgsWithTimeout,
-  assertProcessName,
   hostIdentityMappingEnv,
   imageRefFromLocalDigest,
   runProcess,
   stagingImageRef,
-  toRuntimeError,
 } from "./proc.js";
 
 export { imageRefFromLocalDigest };
@@ -124,23 +125,7 @@ export const dockerComposeDriver: RuntimeDriver &
   },
 
   ensureAvailable(): Effect.Effect<void, RuntimeError, EventStore> {
-    return Effect.gen(function* () {
-      const handle = yield* ChildProcess.make("docker", ["version"], {
-        stdin: "ignore",
-        stdout: "ignore",
-        stderr: "ignore",
-      });
-      const exitCode = yield* handle.exitCode;
-      if (exitCode !== 0) {
-        return yield* new RuntimeError({
-          message: "Docker is not available or the daemon is not running.",
-        });
-      }
-    }).pipe(
-      Effect.provide(NodeRuntime),
-      Effect.scoped,
-      Effect.catch((error) => Effect.fail(toRuntimeError(error))),
-    );
+    return ensureCliAvailable("docker", "Docker is not available or the daemon is not running.");
   },
 
   build(input: RuntimeOperationInput): Effect.Effect<BuildResult, RuntimeError, EventStore> {
@@ -213,58 +198,23 @@ export const dockerComposeDriver: RuntimeDriver &
   exec(
     input: RuntimeOperationInput & { command: string[]; timeoutMs?: number },
   ): Effect.Effect<CommandResult, RuntimeError, EventStore> {
-    const start = Date.now();
     const finalArgs = buildDockerExecArgs(input.deploymentId, input.command, input.timeoutMs);
-
-    return Effect.gen(function* () {
-      const { exitCode, stdout, stderr } = yield* captureProcess({
-        command: "docker",
-        args: finalArgs,
-        stdin: input.timeoutMs === undefined ? "inherit" : "ignore",
-      });
-      return {
-        exitCode,
-        stdout,
-        stderr,
-        durationMs: Date.now() - start,
-        timedOut: input.timeoutMs !== undefined && exitCode === TIMEOUT_EXIT_CODE,
-      };
-    }).pipe(
-      Effect.provide(NodeRuntime),
-      Effect.scoped,
-      Effect.catch((error) => Effect.fail(toRuntimeError(error))),
-    );
+    return captureTimedExec({ command: "docker", args: finalArgs });
   },
 
   collectArtifacts(
     input: RuntimeOperationInput & { paths: string[] },
   ): Effect.Effect<Artifact[], RuntimeError, EventStore> {
-    return Effect.gen(function* () {
-      const artifactsDir = join(input.outputDir, "artifacts");
-      mkdirSync(artifactsDir, { recursive: true });
-      const artifacts: Artifact[] = [];
-      for (const path of input.paths) {
-        if (path.startsWith("/") || path.includes("..")) {
-          return yield* new RuntimeError({
-            message: `Invalid artifact path "${path}": must be a relative path without traversal`,
-          });
-        }
-        const localPath = join(artifactsDir, path);
-        mkdirSync(dirname(localPath), { recursive: true });
-        const copied = yield* Effect.result(
-          captureCommandOutput({
-            command: "docker",
-            args: ["cp", `${input.deploymentId}-dev:/workspace/${path}`, localPath],
-          }),
-        );
-        if (copied._tag === "Failure") {
-          return yield* new RuntimeError({
-            message: `Artifact "${path}" was not found in the container at /workspace/${path}`,
-          });
-        }
-        artifacts.push({ path, localPath, sizeBytes: statSync(localPath).size });
-      }
-      return artifacts;
+    return collectArtifactsByCopying({
+      outputDir: input.outputDir,
+      paths: input.paths,
+      copy: (path, localPath) =>
+        captureCommandOutput({
+          command: "docker",
+          args: ["cp", `${input.deploymentId}-dev:/workspace/${path}`, localPath],
+        }),
+      describeMissing: (path) =>
+        `Artifact "${path}" was not found in the container at /workspace/${path}`,
     });
   },
 
@@ -307,10 +257,13 @@ export const dockerComposeDriver: RuntimeDriver &
     input: RuntimeOperationInput & { processName?: string },
   ): Effect.Effect<void, RuntimeError, EventStore> {
     const logDir = runtimeLayout(input.rootDir, input.target.name).container.logs;
-    const name = input.processName ? assertProcessName(input.processName) : undefined;
-    const args = name
-      ? ["exec", `${input.deploymentId}-dev`, "tail", "-f", `${logDir}/${name}.log`]
-      : ["exec", `${input.deploymentId}-dev`, "tail", "-f", `${logDir}/supervisord.log`];
+    const args = [
+      "exec",
+      `${input.deploymentId}-dev`,
+      "tail",
+      "-f",
+      supervisordLogFile(logDir, input.processName),
+    ];
     return runProcess({ command: "docker", args, cwd: input.outputDir });
   },
 
@@ -322,11 +275,11 @@ export const dockerComposeDriver: RuntimeDriver &
       args: [
         "exec",
         `${input.deploymentId}-dev`,
-        "supervisorctl",
-        "-c",
-        runtimeLayout(input.rootDir, input.target.name).container.supervisordConfig,
-        "restart",
-        input.processName,
+        ...supervisorctlArgs(
+          runtimeLayout(input.rootDir, input.target.name).container.supervisordConfig,
+          "restart",
+          [input.processName],
+        ),
       ],
       cwd: input.outputDir,
     });
