@@ -1,4 +1,11 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect } from "effect";
@@ -18,6 +25,10 @@ import { generatePiHarnessFiles } from "../docker/generators/harnesses/pi.js";
 import { generatePlanJson } from "../mcp/generator.js";
 import type { RuntimeLayout } from "./layout.js";
 
+/** Generated plans/configs may embed infrastructure detail; keep them private. */
+const DEFAULT_FILE_MODE = 0o600;
+const DEFAULT_DIR_MODE = 0o700;
+
 export interface GeneratedFile {
   readonly relativePath: string;
   readonly content?: string;
@@ -27,23 +38,25 @@ export interface GeneratedFile {
 }
 
 export const MCP_RUNTIME_FILES = [
-  "application.js",
-  "auth.js",
-  "event-sink.js",
-  "plan.js",
-  "provider-tools.js",
-  "server.js",
-  "startup.js",
-  "tools/info-provider.js",
-  "tools/process-logs.js",
-  "tools/types.js",
-  "tools/volumes.js",
-  "upstream.js",
-  "volumes/adapter.js",
-  "volumes/azure.js",
-  "volumes/gcs.js",
-  "volumes/local.js",
-  "volumes/s3.js",
+  "core/redaction.js",
+  "mcp/application.js",
+  "mcp/auth.js",
+  "mcp/command-runner.js",
+  "mcp/event-sink.js",
+  "mcp/plan.js",
+  "mcp/provider-tools.js",
+  "mcp/server.js",
+  "mcp/startup.js",
+  "mcp/tools/info-provider.js",
+  "mcp/tools/process-logs.js",
+  "mcp/tools/types.js",
+  "mcp/tools/volumes.js",
+  "mcp/upstream.js",
+  "mcp/volumes/adapter.js",
+  "mcp/volumes/azure.js",
+  "mcp/volumes/gcs.js",
+  "mcp/volumes/local.js",
+  "mcp/volumes/s3.js",
 ] as const;
 
 function textFile(
@@ -114,11 +127,11 @@ export function renderCommonArtifacts(plan: Plan, layout: RuntimeLayout): readon
 
   if (plan.build.mcpEnabled) {
     files.push(textFile(layout.host.projectRoot, layout.host.mcpPlan, generatePlanJson(plan)));
-    const mcpSourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "mcp");
+    const runtimeSourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
     for (const runtimeFile of MCP_RUNTIME_FILES) {
       files.push({
-        relativePath: relative(layout.host.projectRoot, join(layout.host.mcp, runtimeFile)),
-        sourcePath: join(mcpSourceRoot, runtimeFile),
+        relativePath: relative(layout.host.projectRoot, join(layout.host.root, runtimeFile)),
+        sourcePath: join(runtimeSourceRoot, runtimeFile),
       });
     }
   }
@@ -158,6 +171,16 @@ function validateGeneratedFile(file: GeneratedFile): void {
   }
 }
 
+/** True when the file on disk already holds exactly these bytes. */
+function isByteIdentical(path: string, bytes: Uint8Array): boolean {
+  try {
+    const existing = readFileSync(path);
+    return existing.equals(bytes);
+  } catch {
+    return false;
+  }
+}
+
 export function writeArtifacts(
   outputDir: string,
   files: readonly GeneratedFile[],
@@ -174,13 +197,26 @@ export function writeArtifacts(
             throw new Error(`Artifact path escapes output directory: ${file.relativePath}`);
           }
           if (file.writeMode === "if-absent" && existsSync(outputPath)) return undefined;
-          mkdirSync(dirname(outputPath), { recursive: true });
+          // Skip byte-identical rewrites so mtimes stay stable and Docker
+          // COPY layers keep caching; modes are still enforced.
+          if (
+            (file.content !== undefined &&
+              existsSync(outputPath) &&
+              isByteIdentical(outputPath, Buffer.from(file.content, "utf-8"))) ||
+            (file.sourcePath !== undefined &&
+              existsSync(outputPath) &&
+              isByteIdentical(outputPath, readFileSync(file.sourcePath)))
+          ) {
+            chmodSync(outputPath, file.mode ?? DEFAULT_FILE_MODE);
+            return undefined;
+          }
+          mkdirSync(dirname(outputPath), { recursive: true, mode: DEFAULT_DIR_MODE });
           if (file.content !== undefined) {
-            writeFileSync(outputPath, file.content);
+            writeFileSync(outputPath, file.content, { mode: DEFAULT_FILE_MODE });
           } else if (file.sourcePath !== undefined) {
             copyFileSync(file.sourcePath, outputPath);
           }
-          if (file.mode !== undefined) chmodSync(outputPath, file.mode);
+          chmodSync(outputPath, file.mode ?? DEFAULT_FILE_MODE);
           return outputPath;
         })
         .filter((path): path is string => path !== undefined);

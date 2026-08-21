@@ -89,16 +89,23 @@ describe("app package manager", () => {
     });
     const preflight = calls[0];
     if (!preflight) throw new Error("expected a preflight npm call");
+    const realInstall = calls[1];
+    if (!realInstall) throw new Error("expected a real npm install call");
     expect(calls).toEqual([
       {
         args: ["install", "--ignore-scripts", "--no-save", "@test/recipe"],
         cwd: preflight.cwd,
       },
-      { args: ["install", "--save", "@test/recipe"], cwd: join(project, ".biodome") },
+      {
+        args: ["install", "--ignore-scripts", "--save", "@test/recipe"],
+        cwd: join(project, ".biodome"),
+      },
     ]);
     expect(existsSync(preflight.cwd)).toBe(false);
     expect(preflight.args).toContain("--ignore-scripts");
     expect(preflight.args).not.toContain("--save");
+    expect(realInstall.args).toContain("--ignore-scripts");
+    expect(realInstall.args).toContain("--save");
   });
 
   it("does not create project package state for incompatible preflight metadata", async () => {

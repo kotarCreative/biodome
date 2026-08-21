@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import type { Dirent } from "node:fs";
 import { resolve, join, sep } from "node:path";
 import {
   VolumeAdapter,
@@ -11,6 +12,35 @@ import {
 } from "./adapter.js";
 
 const PROJECT_ROOT = "/workspace";
+
+// Hard ceiling on directory entries materialized per listing. This is generous
+// headroom above the configurable maxListEntries page size (default 100), so
+// normal directories paginate unchanged while pathological ones fail fast
+// instead of spiking memory, mirroring how readBounded caps read streams.
+export const MAX_DIRECTORY_SCAN_ENTRIES = 10_000;
+
+async function listDirectoryEntriesBounded(
+  dirPath: string,
+  displayPath: string,
+  maxEntries: number,
+): Promise<Dirent[]> {
+  const directory = await fs.opendir(dirPath);
+  const entries: Dirent[] = [];
+  try {
+    for (;;) {
+      const entry = await directory.read();
+      if (entry === null) return entries;
+      entries.push(entry);
+      if (entries.length > maxEntries) {
+        throw new VolumeAccessError(
+          `Directory ${displayPath} exceeds the maximum of ${maxEntries} entries per listing`,
+        );
+      }
+    }
+  } finally {
+    await directory.close().catch(() => {});
+  }
+}
 
 function resolveRoot(config: VolumeConfig): string {
   if (!config.source) {
@@ -51,11 +81,16 @@ async function resolveExistingPath(config: VolumeConfig, userPath: string): Prom
 export function createLocalAdapter(config: VolumeConfig): VolumeAdapter {
   return {
     async list(path, options) {
-      const dirPath = await resolveExistingPath(config, path || ".");
-      const entries = (await fs.readdir(dirPath, { withFileTypes: true })).sort((left, right) =>
-        left.name.localeCompare(right.name),
+      const userPath = path || ".";
+      const dirPath = await resolveExistingPath(config, userPath);
+      const scope = { kind: "local", volumeName: config.name, path: userPath };
+      const cursor = decodeCursor(options.cursor, scope);
+      const entries = await listDirectoryEntriesBounded(
+        dirPath,
+        userPath,
+        MAX_DIRECTORY_SCAN_ENTRIES,
       );
-      const cursor = decodeCursor(options.cursor);
+      entries.sort((left, right) => left.name.localeCompare(right.name));
       const offset = cursor === undefined ? 0 : Number(cursor);
       if (!Number.isSafeInteger(offset) || offset < 0 || offset > entries.length) {
         throw new VolumeAccessError("Invalid list cursor");
@@ -71,7 +106,10 @@ export function createLocalAdapter(config: VolumeConfig): VolumeAdapter {
         });
       }
       const next = offset + page.length;
-      return { files, nextCursor: next < entries.length ? encodeCursor(String(next)) : undefined };
+      return {
+        files,
+        nextCursor: next < entries.length ? encodeCursor(String(next), scope) : undefined,
+      };
     },
 
     async read(path, options) {

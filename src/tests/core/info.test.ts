@@ -59,6 +59,20 @@ describe("formatInfo", () => {
     expect(info).toContain("framework: django");
   });
 
+  it("renders service credential passthrough vars without exposing values", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.envVars.push({
+      key: "POSTGRES_PASSWORD",
+      scope: "runtime",
+      from: { env: "MY_PG_PASSWORD" },
+      required: true,
+    });
+
+    const info = formatInfo(plan);
+    expect(info).toContain("POSTGRES_PASSWORD = from $MY_PG_PASSWORD, required");
+    expect(info).not.toContain("MY_PG_PASSWORD =");
+  });
+
   it("lists hooks", () => {
     const plan = createPlan("my-app");
     plan.runtime.processes.push({

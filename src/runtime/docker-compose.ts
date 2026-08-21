@@ -1,12 +1,10 @@
 import { mkdirSync, statSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { join, dirname, relative } from "node:path";
-import { Effect, Stream } from "effect";
-import type { PlatformError } from "effect/PlatformError";
+import { Effect } from "effect";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import { NodeRuntime } from "../core/runtime-node.js";
 import { generateCompose } from "../docker/generators/compose.js";
-import { parseServiceStatusOutput } from "../docker/runner.js";
+import { parseServiceStatusOutput } from "./compose-status.js";
 import type {
   AvailableDriver,
   ArtifactDriver,
@@ -33,30 +31,24 @@ import { capabilitiesOf } from "../core/capabilities.js";
 import type { EventStore } from "../core/events.js";
 import { runtimeLayout } from "./layout.js";
 import { renderCommonArtifacts, writeArtifacts } from "./artifacts.js";
+import {
+  TIMEOUT_EXIT_CODE,
+  captureCommandOutput,
+  captureProcess,
+  execArgsWithTimeout,
+  assertProcessName,
+  imageRefFromLocalDigest,
+  runProcess,
+  stagingImageRef,
+  toRuntimeError,
+} from "./proc.js";
+
+export { imageRefFromLocalDigest };
 
 const COMPOSE_FILE = "docker-compose.yaml";
-const COMMAND_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
-const TIMEOUT_KILL_AFTER_SECONDS = 5;
 
 function getComposePath(outputDir: string): string {
   return join(outputDir, COMPOSE_FILE);
-}
-
-function stagingImageRef(input: RuntimeOperationInput): string {
-  return `${input.plan.project}-dev:${input.deploymentId}-build`;
-}
-
-export function imageRefFromLocalDigest(digest: string): string {
-  if (!/^sha256:[a-f0-9]{64}$/i.test(digest)) {
-    throw new RuntimeError({ message: `Docker returned an invalid image digest: ${digest}` });
-  }
-  return digest;
-}
-
-function platformErrorMessage(error: unknown): string {
-  return error && typeof error === "object" && "message" in error
-    ? String(error.message)
-    : String(error);
 }
 
 export function buildDockerExecArgs(
@@ -64,68 +56,7 @@ export function buildDockerExecArgs(
   command: string[],
   timeoutMs?: number,
 ): string[] {
-  const args = ["exec", `${deploymentId}-dev`];
-  if (timeoutMs === undefined) return [...args, ...command];
-
-  const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000));
-  return [
-    ...args,
-    "timeout",
-    "--signal=TERM",
-    `--kill-after=${TIMEOUT_KILL_AFTER_SECONDS}s`,
-    `${timeoutSeconds}s`,
-    ...command,
-  ];
-}
-
-function collectBoundedOutput(
-  stream: Stream.Stream<Uint8Array, PlatformError>,
-): Effect.Effect<string, PlatformError> {
-  return Stream.runFold(
-    stream,
-    () => ({ chunks: [] as Uint8Array[], size: 0 }),
-    (output, chunk) => {
-      const remaining = COMMAND_MAX_BUFFER_BYTES - output.size;
-      if (remaining <= 0) return output;
-      const retained = chunk.byteLength > remaining ? chunk.subarray(0, remaining) : chunk;
-      output.chunks.push(retained);
-      output.size += retained.byteLength;
-      return output;
-    },
-  ).pipe(Effect.map(({ chunks, size }) => Buffer.concat(chunks, size).toString("utf8")));
-}
-
-function runDockerCmd(
-  args: string[],
-  cwd?: string,
-  environment?: Record<string, string>,
-): Effect.Effect<void, RuntimeError, never> {
-  return Effect.gen(function* () {
-    const handle = yield* ChildProcess.make("docker", args, {
-      cwd,
-      env: environment ? { ...process.env, ...environment } : undefined,
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
-    });
-    const exitCode = (yield* handle.exitCode) as number;
-    if (exitCode !== 0) {
-      return yield* new RuntimeError({
-        message: `exited with code ${exitCode}`,
-        command: `docker ${args.join(" ")}`,
-      });
-    }
-  }).pipe(
-    Effect.provide(NodeRuntime),
-    Effect.scoped,
-    Effect.catch((error) =>
-      Effect.fail(
-        error instanceof RuntimeError
-          ? error
-          : new RuntimeError({ message: platformErrorMessage(error as PlatformError) }),
-      ),
-    ),
-  );
+  return execArgsWithTimeout(["exec", `${deploymentId}-dev`], command, timeoutMs);
 }
 
 export const dockerComposeDriver: RuntimeDriver &
@@ -164,6 +95,10 @@ export const dockerComposeDriver: RuntimeDriver &
     return Effect.try({
       try: () => {
         const layout = runtimeLayout(input.rootDir, input.target.name);
+        // The workspace is bind-mounted into the container. Creating this
+        // private directory on the host keeps it owned and removable by the
+        // invoking user even when container processes run as root.
+        mkdirSync(layout.host.logs, { recursive: true, mode: 0o700 });
         const plan = input.plan;
         const buildContext = relative(input.outputDir, input.rootDir) || ".";
         const dockerfile = relative(input.rootDir, layout.host.dockerfile);
@@ -194,7 +129,7 @@ export const dockerComposeDriver: RuntimeDriver &
         stdout: "ignore",
         stderr: "ignore",
       });
-      const exitCode = (yield* handle.exitCode) as number;
+      const exitCode = yield* handle.exitCode;
       if (exitCode !== 0) {
         return yield* new RuntimeError({
           message: "Docker is not available or the daemon is not running.",
@@ -203,34 +138,31 @@ export const dockerComposeDriver: RuntimeDriver &
     }).pipe(
       Effect.provide(NodeRuntime),
       Effect.scoped,
-      Effect.catch((error) =>
-        Effect.fail(
-          error instanceof RuntimeError
-            ? error
-            : new RuntimeError({ message: platformErrorMessage(error) }),
-        ),
-      ),
+      Effect.catch((error) => Effect.fail(toRuntimeError(error))),
     );
   },
 
   build(input: RuntimeOperationInput): Effect.Effect<BuildResult, RuntimeError, EventStore> {
     const stagingImage = stagingImageRef(input);
     return Effect.gen(function* () {
-      yield* runDockerCmd(
-        ["compose", "-f", getComposePath(input.outputDir), "-p", input.deploymentId, "build"],
-        input.outputDir,
-        { BIODOME_DEV_IMAGE: stagingImage },
-      );
-      const digest = yield* Effect.try({
-        try: () =>
-          execFileSync("docker", ["image", "inspect", "--format", "{{.Id}}", stagingImage], {
-            encoding: "utf-8",
-          }).trim(),
-        catch: (error) =>
-          new RuntimeError({
-            message: `Failed to inspect Docker image ${stagingImage}: ${platformErrorMessage(error)}`,
-          }),
+      yield* runProcess({
+        command: "docker",
+        args: ["compose", "-f", getComposePath(input.outputDir), "-p", input.deploymentId, "build"],
+        cwd: input.outputDir,
+        env: { BIODOME_DEV_IMAGE: stagingImage },
       });
+      const digest = yield* captureCommandOutput({
+        command: "docker",
+        args: ["image", "inspect", "--format", "{{.Id}}", stagingImage],
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.fail(
+            new RuntimeError({
+              message: `Failed to inspect Docker image ${stagingImage}: ${error.message}`,
+            }),
+          ),
+        ),
+      );
       const imageRef = imageRefFromLocalDigest(digest);
       return { imageRef, digest };
     });
@@ -244,8 +176,9 @@ export const dockerComposeDriver: RuntimeDriver &
           message: "Docker Compose build manifest is missing its immutable image reference",
         });
       }
-      yield* runDockerCmd(
-        [
+      yield* runProcess({
+        command: "docker",
+        args: [
           "compose",
           "-f",
           getComposePath(input.outputDir),
@@ -256,9 +189,9 @@ export const dockerComposeDriver: RuntimeDriver &
           "--no-build",
           "--wait",
         ],
-        input.outputDir,
-        { BIODOME_DEV_IMAGE: imageRef },
-      );
+        cwd: input.outputDir,
+        env: { BIODOME_DEV_IMAGE: imageRef },
+      });
       return {
         driver: "docker-compose" as const,
         deploymentId: input.deploymentId,
@@ -269,10 +202,11 @@ export const dockerComposeDriver: RuntimeDriver &
   },
 
   stop(input: RuntimeOperationInput): Effect.Effect<void, RuntimeError, EventStore> {
-    return runDockerCmd(
-      ["compose", "-f", getComposePath(input.outputDir), "-p", input.deploymentId, "down"],
-      input.outputDir,
-    );
+    return runProcess({
+      command: "docker",
+      args: ["compose", "-f", getComposePath(input.outputDir), "-p", input.deploymentId, "down"],
+      cwd: input.outputDir,
+    });
   },
 
   exec(
@@ -282,124 +216,109 @@ export const dockerComposeDriver: RuntimeDriver &
     const finalArgs = buildDockerExecArgs(input.deploymentId, input.command, input.timeoutMs);
 
     return Effect.gen(function* () {
-      const handle = yield* ChildProcess.make("docker", finalArgs, {
+      const { exitCode, stdout, stderr } = yield* captureProcess({
+        command: "docker",
+        args: finalArgs,
         stdin: input.timeoutMs === undefined ? "inherit" : "ignore",
-        stdout: "pipe",
-        stderr: "pipe",
       });
-      const [exitCode, stdout, stderr] = yield* Effect.all(
-        [handle.exitCode, collectBoundedOutput(handle.stdout), collectBoundedOutput(handle.stderr)],
-        { concurrency: "unbounded" },
-      );
       return {
-        exitCode: exitCode as number,
+        exitCode,
         stdout,
         stderr,
         durationMs: Date.now() - start,
-        timedOut: input.timeoutMs !== undefined && exitCode === 124,
+        timedOut: input.timeoutMs !== undefined && exitCode === TIMEOUT_EXIT_CODE,
       };
     }).pipe(
       Effect.provide(NodeRuntime),
       Effect.scoped,
-      Effect.catch((error) =>
-        Effect.fail(
-          error instanceof RuntimeError
-            ? error
-            : new RuntimeError({ message: platformErrorMessage(error as PlatformError) }),
-        ),
-      ),
+      Effect.catch((error) => Effect.fail(toRuntimeError(error))),
     );
   },
 
   collectArtifacts(
     input: RuntimeOperationInput & { paths: string[] },
   ): Effect.Effect<Artifact[], RuntimeError, EventStore> {
-    return Effect.try({
-      try: () => {
-        const artifactsDir = join(input.outputDir, "artifacts");
-        mkdirSync(artifactsDir, { recursive: true });
-        return input.paths.map((path) => {
-          if (path.startsWith("/") || path.includes("..")) {
-            throw new RuntimeError({
-              message: `Invalid artifact path "${path}": must be a relative path without traversal`,
-            });
-          }
-          const localPath = join(artifactsDir, path);
-          mkdirSync(dirname(localPath), { recursive: true });
-          try {
-            execFileSync("docker", [
-              "cp",
-              `${input.deploymentId}-dev:/workspace/${path}`,
-              localPath,
-            ]);
-          } catch {
-            throw new RuntimeError({
-              message: `Artifact "${path}" was not found in the container at /workspace/${path}`,
-            });
-          }
-          return { path, localPath, sizeBytes: statSync(localPath).size };
-        });
-      },
-      catch: (error) =>
-        error instanceof RuntimeError
-          ? error
-          : new RuntimeError({
-              message: `Failed to collect task artifacts: ${error instanceof Error ? error.message : String(error)}`,
-            }),
+    return Effect.gen(function* () {
+      const artifactsDir = join(input.outputDir, "artifacts");
+      mkdirSync(artifactsDir, { recursive: true });
+      const artifacts: Artifact[] = [];
+      for (const path of input.paths) {
+        if (path.startsWith("/") || path.includes("..")) {
+          return yield* new RuntimeError({
+            message: `Invalid artifact path "${path}": must be a relative path without traversal`,
+          });
+        }
+        const localPath = join(artifactsDir, path);
+        mkdirSync(dirname(localPath), { recursive: true });
+        const copied = yield* Effect.result(
+          captureCommandOutput({
+            command: "docker",
+            args: ["cp", `${input.deploymentId}-dev:/workspace/${path}`, localPath],
+          }),
+        );
+        if (copied._tag === "Failure") {
+          return yield* new RuntimeError({
+            message: `Artifact "${path}" was not found in the container at /workspace/${path}`,
+          });
+        }
+        artifacts.push({ path, localPath, sizeBytes: statSync(localPath).size });
+      }
+      return artifacts;
     });
   },
 
   status(input: RuntimeOperationInput): Effect.Effect<StatusResult, RuntimeError, EventStore> {
-    return Effect.try({
-      try: () => {
-        const output = execFileSync(
-          "docker",
-          [
-            "compose",
-            "-f",
-            getComposePath(input.outputDir),
-            "-p",
-            input.deploymentId,
-            "ps",
-            "--format",
-            "json",
-          ],
-          { cwd: input.outputDir, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
-        );
-        const statuses = parseServiceStatusOutput(output);
-        const running = statuses.filter((s) => s.state === "running");
-        if (running.length > 0) {
-          return { state: "running" as const, message: `${running.length} service(s) running` };
-        }
-        if (statuses.length > 0) {
-          return {
-            state: "stopped" as const,
-            message: `${statuses.length} service(s) found, none running`,
-          };
-        }
-        return { state: "unknown" as const, message: "No services found" };
-      },
-      catch: (error) =>
-        new RuntimeError({
-          message: `Failed to query status: ${error instanceof Error ? error.message : String(error)}`,
-        }),
+    return Effect.gen(function* () {
+      const output = yield* captureCommandOutput({
+        command: "docker",
+        args: [
+          "compose",
+          "-f",
+          getComposePath(input.outputDir),
+          "-p",
+          input.deploymentId,
+          "ps",
+          "--format",
+          "json",
+        ],
+        cwd: input.outputDir,
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.fail(new RuntimeError({ message: `Failed to query status: ${error.message}` })),
+        ),
+      );
+      const statuses = parseServiceStatusOutput(output);
+      const running = statuses.filter((s) => s.state === "running");
+      if (running.length > 0) {
+        return { state: "running" as const, message: `${running.length} service(s) running` };
+      }
+      if (statuses.length > 0) {
+        return {
+          state: "stopped" as const,
+          message: `${statuses.length} service(s) found, none running`,
+        };
+      }
+      return { state: "unknown" as const, message: "No services found" };
     });
   },
 
   logs(
     input: RuntimeOperationInput & { processName?: string },
   ): Effect.Effect<void, RuntimeError, EventStore> {
-    const args = input.processName
-      ? ["exec", `${input.deploymentId}-dev`, "tail", "-f", `/tmp/${input.processName}.log`]
-      : ["exec", `${input.deploymentId}-dev`, "tail", "-f", "/tmp/supervisord.log"];
-    return runDockerCmd(args, input.outputDir);
+    const logDir = runtimeLayout(input.rootDir, input.target.name).container.logs;
+    const name = input.processName ? assertProcessName(input.processName) : undefined;
+    const args = name
+      ? ["exec", `${input.deploymentId}-dev`, "tail", "-f", `${logDir}/${name}.log`]
+      : ["exec", `${input.deploymentId}-dev`, "tail", "-f", `${logDir}/supervisord.log`];
+    return runProcess({ command: "docker", args, cwd: input.outputDir });
   },
 
   restart(
     input: RuntimeOperationInput & { processName: string },
   ): Effect.Effect<void, RuntimeError, EventStore> {
-    return runDockerCmd(
-      [
+    return runProcess({
+      command: "docker",
+      args: [
         "exec",
         `${input.deploymentId}-dev`,
         "supervisorctl",
@@ -408,7 +327,7 @@ export const dockerComposeDriver: RuntimeDriver &
         "restart",
         input.processName,
       ],
-      input.outputDir,
-    );
+      cwd: input.outputDir,
+    });
   },
 };

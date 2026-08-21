@@ -1,3 +1,5 @@
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+
 export interface FileInfo {
   name: string;
   path: string;
@@ -54,20 +56,62 @@ export interface VolumeAdapter {
   close?(): Promise<void>;
 }
 
-const cursorPrefix = "biodome:v1:";
+// List cursors bind an opaque provider token to the listing it was issued for
+// (adapter kind, volume name, and path) with an HMAC digest, so a cursor
+// captured for one volume/path cannot be replayed against another. Cursors are
+// ephemeral — they only need to survive between consecutive list calls within a
+// single server process — so the digest key is random per process and never
+// persisted; restarting the server invalidates all outstanding cursors.
+const cursorPrefix = "biodome:v2:";
+const cursorKey = randomBytes(32);
 
-export function encodeCursor(token: string): string {
-  return cursorPrefix + Buffer.from(token, "utf8").toString("base64url");
+export interface CursorScope {
+  readonly kind: string;
+  readonly volumeName: string;
+  readonly path: string;
 }
 
-export function decodeCursor(cursor: string | undefined): string | undefined {
+interface CursorPayload {
+  readonly token: string;
+  readonly digest: string;
+}
+
+function cursorDigest(scope: CursorScope, token: string): Buffer {
+  return createHmac("sha256", cursorKey)
+    .update(`${scope.kind}\n${scope.volumeName}\n${scope.path}\n${token}`)
+    .digest();
+}
+
+export function encodeCursor(token: string, scope: CursorScope): string {
+  const payload: CursorPayload = {
+    token,
+    digest: cursorDigest(scope, token).toString("base64url"),
+  };
+  return cursorPrefix + Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+}
+
+export function decodeCursor(cursor: string | undefined, scope: CursorScope): string | undefined {
   if (cursor === undefined) return undefined;
   if (!cursor.startsWith(cursorPrefix)) throw new VolumeAccessError("Invalid list cursor");
   const encoded = cursor.slice(cursorPrefix.length);
   if (!encoded || !/^[A-Za-z0-9_-]+$/.test(encoded))
     throw new VolumeAccessError("Invalid list cursor");
-  const token = Buffer.from(encoded, "base64url").toString("utf8");
-  if (!token || encodeCursor(token) !== cursor) throw new VolumeAccessError("Invalid list cursor");
+  let payload: unknown;
+  try {
+    payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as unknown;
+  } catch {
+    throw new VolumeAccessError("Invalid list cursor");
+  }
+  if (typeof payload !== "object" || payload === null)
+    throw new VolumeAccessError("Invalid list cursor");
+  const record = payload as { token?: unknown; digest?: unknown };
+  const { token, digest } = record;
+  if (typeof token !== "string" || token.length === 0 || typeof digest !== "string")
+    throw new VolumeAccessError("Invalid list cursor");
+  const expected = cursorDigest(scope, token);
+  const provided = Buffer.from(digest, "base64url");
+  if (provided.length !== expected.length || !timingSafeEqual(provided, expected))
+    throw new VolumeAccessError("Invalid list cursor");
   return token;
 }
 

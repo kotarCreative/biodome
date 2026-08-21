@@ -5,12 +5,15 @@ import { tmpdir } from "node:os";
 import { Effect } from "effect";
 import {
   createFileEventStore,
+  commandMetadata,
+  instrumentOperation,
   NoOpEventStoreLive,
   readEventsFromPath,
   formatEvent,
-  filterEventsByRunId,
   EventStore,
+  type EventScope,
 } from "../../core/events.js";
+import { RuntimeError } from "../../core/errors.js";
 
 function tmpDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), `${prefix}-`));
@@ -206,6 +209,7 @@ describe("formatEvent", () => {
       sequence: 1,
       timestamp: "2026-01-01T00:00:00.000Z",
       type: "run.started" as const,
+      scope: { runId: "run-1" },
       data: { command: "build" },
     };
     expect(formatEvent(event)).toContain("run.started");
@@ -215,36 +219,93 @@ describe("formatEvent", () => {
   });
 });
 
-describe("filterEventsByRunId", () => {
-  it("keeps only events matching the run id", () => {
-    const events = [
-      {
-        id: "a",
-        runId: "run-1",
-        sequence: 1,
-        timestamp: "t",
-        type: "run.started" as const,
-        data: {},
-      },
-      {
-        id: "b",
-        runId: "run-2",
-        sequence: 1,
-        timestamp: "t",
-        type: "run.started" as const,
-        data: {},
-      },
-      {
-        id: "c",
-        runId: "run-1",
-        sequence: 2,
-        timestamp: "t",
-        type: "run.completed" as const,
-        data: {},
-      },
-    ];
-    const filtered = filterEventsByRunId(events, "run-1");
-    expect(filtered).toHaveLength(2);
-    expect(filtered.map((e) => e.id)).toEqual(["a", "c"]);
+describe("instrumentOperation", () => {
+  let dir: string;
+  let path: string;
+  const scope: EventScope = { runId: "run-1", target: "local", provider: "docker-compose" };
+
+  beforeEach(() => {
+    dir = tmpDir("events-instrument");
+    path = join(dir, "events.jsonl");
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function readAll() {
+    return Effect.runPromise(readEventsFromPath(path));
+  }
+
+  function payload(event: Awaited<ReturnType<typeof readAll>>[number]): Record<string, unknown> {
+    return event.data as Record<string, unknown>;
+  }
+
+  it("emits started and completed events carrying run, target, and provider scope", async () => {
+    const store = createFileEventStore({ runId: scope.runId, path });
+    await Effect.runPromise(
+      instrumentOperation(store, scope, "build", { rootDir: "/project" }, Effect.succeed("image")),
+    );
+
+    const events = await readAll();
+    expect(events.map((event) => event.type)).toEqual([
+      "runtime.build.started",
+      "runtime.build.completed",
+    ]);
+    for (const event of events) {
+      expect(event.scope).toEqual(scope);
+    }
+    expect(payload(events[1])).toMatchObject({ rootDir: "/project" });
+    expect(Number(payload(events[1]).durationMs)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("emits a failed event with the error message when the operation fails", async () => {
+    const store = createFileEventStore({ runId: scope.runId, path });
+    const failure = instrumentOperation(
+      store,
+      scope,
+      "start",
+      { rootDir: "/project", build: false },
+      Effect.fail(new RuntimeError({ message: "daemon refused" })),
+    );
+    await expect(Effect.runPromise(failure)).rejects.toBeInstanceOf(RuntimeError);
+
+    const events = await readAll();
+    expect(events.map((event) => event.type)).toEqual([
+      "runtime.start.started",
+      "runtime.start.failed",
+    ]);
+    expect(events[1].scope).toEqual(scope);
+    expect(payload(events[1]).error).toBe("daemon refused");
+  });
+
+  it("persists command metadata without arguments, prompts, or output", async () => {
+    const store = createFileEventStore({ runId: scope.runId, path });
+    await Effect.runPromise(
+      instrumentOperation(
+        store,
+        scope,
+        "exec",
+        commandMetadata(["npm", "test", "--secret-token"]),
+        Effect.succeed({ exitCode: 0 }),
+      ),
+    );
+
+    const events = await readAll();
+    for (const event of events) {
+      expect(event.scope).toEqual(scope);
+      expect(payload(event).executable).toBe("npm");
+      expect(JSON.stringify(event.data)).not.toContain("--secret-token");
+    }
+  });
+});
+
+describe("commandMetadata", () => {
+  it("records only the executable name and argument count", () => {
+    expect(commandMetadata(["npm", "test", "--silent"])).toEqual({
+      executable: "npm",
+      argumentCount: 2,
+    });
+    expect(commandMetadata([])).toEqual({ executable: "", argumentCount: 0 });
   });
 });

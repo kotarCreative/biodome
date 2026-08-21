@@ -1,8 +1,6 @@
-import { execFileSync } from "node:child_process";
 import { mkdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { Effect, Stream } from "effect";
-import type { PlatformError } from "effect/PlatformError";
+import { Effect } from "effect";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import { NodeRuntime } from "../core/runtime-node.js";
 import { RuntimeError } from "../core/errors.js";
@@ -12,6 +10,18 @@ import type { Plan, RuntimeTarget } from "../core/plan.js";
 import { runtimeLayout } from "./layout.js";
 import { renderCommonArtifacts, writeArtifacts } from "./artifacts.js";
 import { directoryDigest } from "./build-manifest.js";
+import {
+  TIMEOUT_EXIT_CODE,
+  captureCommandOutput,
+  captureProcess,
+  execArgsWithTimeout,
+  imageRefFromLocalDigest,
+  assertProcessName,
+  platformErrorMessage,
+  runProcess,
+  stagingImageRef,
+  toRuntimeError,
+} from "./proc.js";
 import { generateCompose } from "../docker/generators/compose.js";
 import type {
   Artifact,
@@ -33,9 +43,6 @@ import type {
   StartableDriver,
   StoppableDriver,
 } from "./driver.js";
-
-const COMMAND_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
-const TIMEOUT_KILL_AFTER_SECONDS = 5;
 
 /** Options accepted by Docker's `sbx create` command. */
 export interface DockerSandboxOptions {
@@ -63,18 +70,6 @@ export interface DockerSandboxOptions {
   memory?: string;
   /** In-container root used for clone mode when it differs from the host project path. */
   cloneWorkspacePath?: string;
-}
-
-function platformErrorMessage(error: unknown): string {
-  return error && typeof error === "object" && "message" in error
-    ? String(error.message)
-    : String(error);
-}
-
-function runtimeError(error: unknown): RuntimeError {
-  return error instanceof RuntimeError
-    ? error
-    : new RuntimeError({ message: platformErrorMessage(error) });
 }
 
 function dockerSandboxOptions(target: RuntimeTarget): DockerSandboxOptions {
@@ -124,57 +119,7 @@ export function buildSbxExecArgs(
   command: string[],
   timeoutMs?: number,
 ): string[] {
-  const args = ["exec", deploymentId];
-  if (timeoutMs === undefined) return [...args, ...command];
-
-  const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000));
-  return [
-    ...args,
-    "timeout",
-    "--signal=TERM",
-    `--kill-after=${TIMEOUT_KILL_AFTER_SECONDS}s`,
-    `${timeoutSeconds}s`,
-    ...command,
-  ];
-}
-
-function collectBoundedOutput(
-  stream: Stream.Stream<Uint8Array, PlatformError>,
-): Effect.Effect<string, PlatformError> {
-  return Stream.runFold(
-    stream,
-    () => ({ chunks: [] as Uint8Array[], size: 0 }),
-    (output, chunk) => {
-      const remaining = COMMAND_MAX_BUFFER_BYTES - output.size;
-      if (remaining <= 0) return output;
-      const retained = chunk.byteLength > remaining ? chunk.subarray(0, remaining) : chunk;
-      output.chunks.push(retained);
-      output.size += retained.byteLength;
-      return output;
-    },
-  ).pipe(Effect.map(({ chunks, size }) => Buffer.concat(chunks, size).toString("utf8")));
-}
-
-function runSbxCmd(args: string[], cwd?: string): Effect.Effect<void, RuntimeError, never> {
-  return Effect.gen(function* () {
-    const handle = yield* ChildProcess.make("sbx", args, {
-      cwd,
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
-    });
-    const exitCode = (yield* handle.exitCode) as number;
-    if (exitCode !== 0) {
-      return yield* new RuntimeError({
-        message: `exited with code ${exitCode}`,
-        command: `sbx ${args.join(" ")}`,
-      });
-    }
-  }).pipe(
-    Effect.provide(NodeRuntime),
-    Effect.scoped,
-    Effect.catch((error) => Effect.fail(runtimeError(error))),
-  );
+  return execArgsWithTimeout(["exec", deploymentId], command, timeoutMs);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -245,49 +190,16 @@ function sandboxId(input: RuntimeOperationInput): string {
   return id;
 }
 
+function requireSandboxId(input: RuntimeOperationInput): Effect.Effect<string, RuntimeError> {
+  return Effect.try({ try: () => sandboxId(input), catch: toRuntimeError });
+}
+
 function buildSandboxId(input: RuntimeOperationInput): string {
   return `${input.deploymentId}-build-${directoryDigest(input.outputDir).slice(0, 12)}`;
 }
 
 function snapshotWorkspace(id: string): string {
   return `/tmp/biodome-builds/${id}`;
-}
-
-function stagingImageRef(input: RuntimeOperationInput): string {
-  return `${input.plan.project}-dev:${input.deploymentId}-build`;
-}
-
-function imageRefFromDigest(digest: string): string {
-  if (!/^sha256:[a-f0-9]{64}$/i.test(digest)) {
-    throw new RuntimeError({ message: `Docker returned an invalid image digest: ${digest}` });
-  }
-  return digest;
-}
-
-function runSbxCapture(args: string[], cwd?: string): Effect.Effect<string, RuntimeError, never> {
-  return Effect.gen(function* () {
-    const handle = yield* ChildProcess.make("sbx", args, {
-      cwd,
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [exitCode, stdout, stderr] = yield* Effect.all(
-      [handle.exitCode, collectBoundedOutput(handle.stdout), collectBoundedOutput(handle.stderr)],
-      { concurrency: "unbounded" },
-    );
-    if (exitCode !== 0) {
-      return yield* new RuntimeError({
-        message: stderr || `exited with code ${exitCode}`,
-        command: `sbx ${args.join(" ")}`,
-      });
-    }
-    return stdout.trim();
-  }).pipe(
-    Effect.provide(NodeRuntime),
-    Effect.scoped,
-    Effect.catch((error) => Effect.fail(runtimeError(error))),
-  );
 }
 
 export function translateWorkspaceCommand(
@@ -374,7 +286,7 @@ export const dockerSandboxDriver: RuntimeDriver &
         stdout: "ignore",
         stderr: "ignore",
       });
-      const exitCode = (yield* handle.exitCode) as number;
+      const exitCode = yield* handle.exitCode;
       if (exitCode !== 0) {
         return yield* new RuntimeError({
           message:
@@ -384,7 +296,7 @@ export const dockerSandboxDriver: RuntimeDriver &
     }).pipe(
       Effect.provide(NodeRuntime),
       Effect.scoped,
-      Effect.catch((error) => Effect.fail(runtimeError(error))),
+      Effect.catch((error) => Effect.fail(toRuntimeError(error))),
     );
   },
 
@@ -401,20 +313,47 @@ export const dockerSandboxDriver: RuntimeDriver &
 
       // A content-addressed builder sandbox lets start consume this exact image
       // rather than rebuilding the mutable host workspace.
-      yield* runSbxCmd(["rm", "--force", id], input.rootDir).pipe(Effect.catch(() => Effect.void));
-      yield* runSbxCmd(buildSbxCreateArgs(id, input.rootDir, options), input.rootDir);
+      yield* runProcess({ command: "sbx", args: ["rm", "--force", id], cwd: input.rootDir }).pipe(
+        Effect.catch(() => Effect.void),
+      );
+      yield* runProcess({
+        command: "sbx",
+        args: buildSbxCreateArgs(id, input.rootDir, options),
+        cwd: input.rootDir,
+      });
       if (options.clone) {
         const generatedParent = `${sourceWorkspace}/.biodome-build/targets`;
-        yield* runSbxCmd(["exec", id, "mkdir", "-p", generatedParent], input.rootDir);
-        yield* runSbxCmd(["cp", input.outputDir, `${id}:${generatedParent}/`], input.rootDir);
+        yield* runProcess({
+          command: "sbx",
+          args: ["exec", id, "mkdir", "-p", generatedParent],
+          cwd: input.rootDir,
+        });
+        yield* runProcess({
+          command: "sbx",
+          args: ["cp", input.outputDir, `${id}:${generatedParent}/`],
+          cwd: input.rootDir,
+        });
       }
-      yield* runSbxCmd(["exec", id, "mkdir", "-p", workspace], input.rootDir);
-      yield* runSbxCmd(["exec", id, "cp", "-a", `${sourceWorkspace}/.`, workspace], input.rootDir);
+      yield* runProcess({
+        command: "sbx",
+        args: ["exec", id, "mkdir", "-p", workspace],
+        cwd: input.rootDir,
+      });
+      yield* runProcess({
+        command: "sbx",
+        args: ["exec", id, "cp", "-a", `${sourceWorkspace}/.`, workspace],
+        cwd: input.rootDir,
+      });
       // Generated task commands use /workspace. Point it at the immutable
       // snapshot rather than the source mount used while constructing it.
-      yield* runSbxCmd(["exec", id, "sudo", "ln", "-sfnT", workspace, "/workspace"], input.rootDir);
-      yield* runSbxCmd(
-        [
+      yield* runProcess({
+        command: "sbx",
+        args: ["exec", id, "sudo", "ln", "-sfnT", workspace, "/workspace"],
+        cwd: input.rootDir,
+      });
+      yield* runProcess({
+        command: "sbx",
+        args: [
           "exec",
           id,
           "env",
@@ -427,13 +366,14 @@ export const dockerSandboxDriver: RuntimeDriver &
           input.deploymentId,
           "build",
         ],
-        input.rootDir,
-      );
-      const digest = yield* runSbxCapture(
-        ["exec", id, "docker", "image", "inspect", "--format", "{{.Id}}", stagingImage],
-        input.rootDir,
-      );
-      const imageRef = imageRefFromDigest(digest);
+        cwd: input.rootDir,
+      });
+      const digest = yield* captureCommandOutput({
+        command: "sbx",
+        args: ["exec", id, "docker", "image", "inspect", "--format", "{{.Id}}", stagingImage],
+        cwd: input.rootDir,
+      });
+      const imageRef = imageRefFromLocalDigest(digest);
       return { imageRef, digest, provider: { sandbox: id } };
     });
   },
@@ -454,8 +394,9 @@ export const dockerSandboxDriver: RuntimeDriver &
       }
       const workspace = snapshotWorkspace(id);
       const composeFile = `${workspace}/.biodome-build/targets/${input.target.name}/docker-compose.yaml`;
-      yield* runSbxCmd(
-        [
+      yield* runProcess({
+        command: "sbx",
+        args: [
           "exec",
           id,
           "env",
@@ -471,8 +412,8 @@ export const dockerSandboxDriver: RuntimeDriver &
           "--no-build",
           "--wait",
         ],
-        input.rootDir,
-      );
+        cwd: input.rootDir,
+      });
       return {
         driver: "docker-sandbox",
         deploymentId: input.deploymentId,
@@ -487,11 +428,30 @@ export const dockerSandboxDriver: RuntimeDriver &
     const workspace = snapshotWorkspace(id);
     const composeFile = `${workspace}/.biodome-build/targets/${input.target.name}/docker-compose.yaml`;
     return Effect.gen(function* () {
-      yield* runSbxCmd(
-        ["exec", id, "docker", "compose", "-f", composeFile, "-p", input.deploymentId, "down"],
-        input.rootDir,
-      ).pipe(Effect.catch(() => Effect.void));
-      yield* runSbxCmd(["rm", "--force", id], input.rootDir);
+      yield* runProcess({
+        command: "sbx",
+        args: [
+          "exec",
+          id,
+          "docker",
+          "compose",
+          "-f",
+          composeFile,
+          "-p",
+          input.deploymentId,
+          "down",
+        ],
+        cwd: input.rootDir,
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.sync(() =>
+            console.warn(
+              `[biodome] Tolerated failure stopping compose project ${input.deploymentId} in sandbox ${id}: ${error.message}`,
+            ),
+          ),
+        ),
+      );
+      yield* runProcess({ command: "sbx", args: ["rm", "--force", id], cwd: input.rootDir });
     });
   },
 
@@ -503,89 +463,99 @@ export const dockerSandboxDriver: RuntimeDriver &
     const command = ["docker", "exec", `${input.deploymentId}-dev`, ...input.command];
     const args = buildSbxExecArgs(id, command, input.timeoutMs);
     return Effect.gen(function* () {
-      const handle = yield* ChildProcess.make("sbx", args, {
+      const { exitCode, stdout, stderr } = yield* captureProcess({
+        command: "sbx",
+        args,
+        cwd: input.rootDir,
         stdin: input.timeoutMs === undefined ? "inherit" : "ignore",
-        stdout: "pipe",
-        stderr: "pipe",
       });
-      const [exitCode, stdout, stderr] = yield* Effect.all(
-        [handle.exitCode, collectBoundedOutput(handle.stdout), collectBoundedOutput(handle.stderr)],
-        { concurrency: "unbounded" },
-      );
       return {
-        exitCode: exitCode as number,
+        exitCode,
         stdout,
         stderr,
         durationMs: Date.now() - start,
-        timedOut: input.timeoutMs !== undefined && exitCode === 124,
+        timedOut: input.timeoutMs !== undefined && exitCode === TIMEOUT_EXIT_CODE,
       };
     }).pipe(
       Effect.provide(NodeRuntime),
       Effect.scoped,
-      Effect.catch((error) => Effect.fail(runtimeError(error))),
+      Effect.catch((error) => Effect.fail(toRuntimeError(error))),
     );
   },
 
   collectArtifacts(
     input: RuntimeOperationInput & { paths: string[] },
   ): Effect.Effect<Artifact[], RuntimeError, EventStore> {
-    return Effect.try({
-      try: () => {
-        const id = sandboxId(input);
-        const artifactsDir = join(input.outputDir, "artifacts");
-        mkdirSync(artifactsDir, { recursive: true });
-        return input.paths.map((path) => {
-          const localPath = join(artifactsDir, path);
-          mkdirSync(dirname(localPath), { recursive: true });
-          try {
-            execFileSync("sbx", ["cp", `${id}:${artifactPath(input, path)}`, localPath]);
-          } catch {
-            throw new RuntimeError({
-              message: `Artifact "${path}" was not found in sandbox ${id}`,
-            });
-          }
-          return { path, localPath, sizeBytes: statSync(localPath).size };
+    return Effect.gen(function* () {
+      const id = yield* requireSandboxId(input);
+      const artifactsDir = join(input.outputDir, "artifacts");
+      mkdirSync(artifactsDir, { recursive: true });
+      const artifacts: Artifact[] = [];
+      for (const path of input.paths) {
+        const localPath = join(artifactsDir, path);
+        mkdirSync(dirname(localPath), { recursive: true });
+        const remotePath = yield* Effect.try({
+          try: () => artifactPath(input, path),
+          catch: toRuntimeError,
         });
-      },
-      catch: runtimeError,
+        const copied = yield* Effect.result(
+          captureCommandOutput({
+            command: "sbx",
+            args: ["cp", `${id}:${remotePath}`, localPath],
+          }),
+        );
+        if (copied._tag === "Failure") {
+          return yield* new RuntimeError({
+            message: `Artifact "${path}" was not found in sandbox ${id}`,
+          });
+        }
+        artifacts.push({ path, localPath, sizeBytes: statSync(localPath).size });
+      }
+      return artifacts;
     });
   },
 
   status(input: RuntimeOperationInput): Effect.Effect<StatusResult, RuntimeError, EventStore> {
-    return Effect.try({
-      try: () => {
-        const id = sandboxId(input);
-        const output = execFileSync("sbx", ["ls", "--json"], {
-          cwd: input.rootDir,
-          encoding: "utf-8",
-          stdio: ["pipe", "pipe", "pipe"],
-        });
-        return parseSbxListOutput(output, id);
-      },
-      catch: (error) =>
-        new RuntimeError({
-          message: `Failed to query Docker Sandbox status: ${platformErrorMessage(error)}`,
-        }),
+    return Effect.gen(function* () {
+      const id = yield* requireSandboxId(input);
+      const output = yield* captureCommandOutput({
+        command: "sbx",
+        args: ["ls", "--json"],
+        cwd: input.rootDir,
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.fail(
+            new RuntimeError({
+              message: `Failed to query Docker Sandbox status: ${error.message}`,
+            }),
+          ),
+        ),
+      );
+      return parseSbxListOutput(output, id);
     });
   },
 
   logs(
     input: RuntimeOperationInput & { processName?: string },
   ): Effect.Effect<void, RuntimeError, EventStore> {
-    const logFile = input.processName ? `/tmp/${input.processName}.log` : "/tmp/supervisord.log";
+    const logDir = runtimeLayout(input.rootDir, input.target.name).container.logs;
+    const name = input.processName ? assertProcessName(input.processName) : undefined;
+    const logFile = name ? `${logDir}/${name}.log` : `${logDir}/supervisord.log`;
     const id = sandboxId(input);
-    return runSbxCmd(
-      ["exec", id, "docker", "exec", `${input.deploymentId}-dev`, "tail", "-f", logFile],
-      input.rootDir,
-    );
+    return runProcess({
+      command: "sbx",
+      args: ["exec", id, "docker", "exec", `${input.deploymentId}-dev`, "tail", "-f", logFile],
+      cwd: input.rootDir,
+    });
   },
 
   restart(
     input: RuntimeOperationInput & { processName: string },
   ): Effect.Effect<void, RuntimeError, EventStore> {
     const id = sandboxId(input);
-    return runSbxCmd(
-      [
+    return runProcess({
+      command: "sbx",
+      args: [
         "exec",
         id,
         "docker",
@@ -597,7 +567,7 @@ export const dockerSandboxDriver: RuntimeDriver &
         "restart",
         input.processName,
       ],
-      input.rootDir,
-    );
+      cwd: input.rootDir,
+    });
   },
 };

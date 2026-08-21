@@ -56,4 +56,9 @@ describe("GCS volume adapter", () => {
     );
     expect(createReadStream).not.toHaveBeenCalled();
   });
+
+  it("rejects configurations without a bucket via a typed error", () => {
+    const { bucket: _bucket, ...withoutBucket } = config;
+    expect(() => createGcsAdapter(withoutBucket)).toThrow("requires a bucket");
+  });
 });

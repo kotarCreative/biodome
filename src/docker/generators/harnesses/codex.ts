@@ -1,10 +1,11 @@
 import type { CodexHarness, Plan } from "../../../core/plan.js";
-import { generatedRuntimeDir } from "../shell.js";
+import { assertIdentifier, generatedRuntimeDir, shellQuote } from "../shell.js";
 import {
-  eventToSnakeCase,
-  taskArtifactUploadLines,
+  substituteConfigLines,
+  taskWrapperScript,
+  telemetryHookEntries,
+  telemetryHookScript,
   telemetryWriterModule,
-  telemetryWriterPath,
 } from "./shared.js";
 
 export function generateCodexHarnessFiles(plan: Plan): Record<string, string> {
@@ -13,10 +14,18 @@ export function generateCodexHarnessFiles(plan: Plan): Record<string, string> {
     files["telemetry/writer.cjs"] = telemetryWriterModule();
   }
   for (const harness of plan.runtime.codexHarnesses) {
+    assertIdentifier(harness.name, "harness name");
     const homeDir = `codex-homes/${harness.name}`;
     files[`${homeDir}/.codex/config.toml`] = codexConfig(harness);
     files[`${homeDir}/.codex/hooks.json`] = codexHooks(harness, plan);
-    files[`${homeDir}/hooks/telemetry.js`] = codexTelemetryScript(harness, plan);
+    files[`${homeDir}/hooks/telemetry.js`] = telemetryHookScript({
+      tool: "Codex",
+      source: "codex",
+      pathEnvVar: "CODEX_BIODOME_TELEMETRY_PATH",
+      logPath: harness.telemetry.path,
+      capturePayloads: harness.telemetry.capturePayloads === true,
+      plan,
+    });
     files[`${homeDir}/start.sh`] = codexStartScript(harness, plan);
     files[`${homeDir}/task`] = codexTaskScript(harness, plan);
   }
@@ -76,63 +85,25 @@ function codexConfig(harness: CodexHarness): string {
 function codexHooks(harness: CodexHarness, plan?: Plan): string {
   const homeDir = `${generatedRuntimeDir(plan)}/codex-homes/${harness.name}`;
   const script = `${homeDir}/hooks/telemetry.js`;
-  const events = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse"];
-  const hooks: Record<string, unknown> = {};
-  for (const event of events) {
-    hooks[event] = [
-      {
-        hooks: [
-          {
-            type: "command",
-            command: "node",
-            args: [script, eventToSnakeCase(event)],
-          },
-        ],
-      },
-    ];
-  }
-  return JSON.stringify({ hooks }, null, 2) + "\n";
-}
-
-function codexTelemetryScript(harness: CodexHarness, plan: Plan): string {
-  const logPath = harness.telemetry.path;
-  const capturePayloads = harness.telemetry.capturePayloads === true;
-  return [
-    "// Auto-generated Codex telemetry hook script for biodome",
-    "const { randomUUID } = require('node:crypto')",
-    "",
-    `const LOG_PATH = process.env.CODEX_BIODOME_TELEMETRY_PATH || ${JSON.stringify(logPath)}`,
-    `const CAPTURE_PAYLOADS = ${capturePayloads}`,
-    `const { write } = require(${JSON.stringify(telemetryWriterPath(plan))})`,
-    "",
-    "let input = ''",
-    "process.stdin.on('data', (chunk) => { if (CAPTURE_PAYLOADS) input += chunk })",
-    "process.stdin.on('end', async () => {",
-    "  const data = input ? JSON.parse(input) : {}",
-    "  await write(LOG_PATH, { id: randomUUID(), timestamp: new Date().toISOString(), source: 'codex', type: process.argv[2] || 'unknown', data })",
-    "})",
-    "",
-  ].join("\n");
+  return JSON.stringify({ hooks: telemetryHookEntries(script) }, null, 2) + "\n";
 }
 
 function codexStartScript(harness: CodexHarness, plan?: Plan): string {
   const homeDir = `${generatedRuntimeDir(plan)}/codex-homes/${harness.name}`;
-  const configPath = `${homeDir}/.codex/config.toml`;
   return [
     "#!/bin/sh",
     `# Auto-generated Codex start script for ${harness.name}`,
     "set -e",
     "",
-    `export HOME=${homeDir}`,
+    `CODEX_RUN_HOME="$(mktemp -d /tmp/.biodome-codex-${harness.name}-XXXXXX)"`,
+    "trap 'rm -rf \"$CODEX_RUN_HOME\"' EXIT",
+    `cp -r ${shellQuote(`${homeDir}/.codex`)} "$CODEX_RUN_HOME/.codex"`,
+    'chmod -R go-rwx "$CODEX_RUN_HOME"',
     "",
-    `# Substitute \${VAR} references in the generated config with runtime env vars.`,
-    "node -e '",
-    'const fs = require("fs");',
-    `const file = ${JSON.stringify(configPath)};`,
-    'let text = fs.readFileSync(file, "utf8");',
-    'text = text.replace(/\\\$\\{([A-Za-z_][A-Za-z0-9_]*)\\}/g, (_, name) => process.env[name] || "");',
-    "fs.writeFileSync(file, text);",
-    "'",
+    ...substituteConfigLines("$CODEX_RUN_HOME/.codex/config.toml"),
+    "",
+    `export HOME=${shellQuote(homeDir)}`,
+    'export CODEX_HOME="$CODEX_RUN_HOME/.codex"',
     "",
     `exec codex --dangerously-bypass-hook-trust exec-server --listen ws://0.0.0.0:${harness.port}`,
     "",
@@ -141,16 +112,10 @@ function codexStartScript(harness: CodexHarness, plan?: Plan): string {
 
 function codexTaskScript(harness: CodexHarness, plan?: Plan): string {
   const homeDir = `${generatedRuntimeDir(plan)}/codex-homes/${harness.name}`;
-  const lines: string[] = [
-    "#!/bin/sh",
-    `# Auto-generated Codex task wrapper for ${harness.name}`,
-    "set -e",
-    "",
-    `export HOME=${homeDir}`,
-  ];
-  lines.push("");
-  lines.push('codex -p "$@"');
-  lines.push(...taskArtifactUploadLines());
-  lines.push("");
-  return lines.join("\n");
+  return taskWrapperScript({
+    tool: "Codex",
+    harnessName: harness.name,
+    setupLines: [`export HOME=${shellQuote(homeDir)}`],
+    commandLines: ['codex -p "$@"'],
+  });
 }

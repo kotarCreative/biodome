@@ -1,14 +1,28 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import type { Command } from "commander";
 import { createProgram } from "../../cli/program.js";
+import type { ProgramDependencies } from "../../cli/program.js";
+import type { SandboxError } from "../../core/errors.js";
+
+function exitOverrides(command: Command): Command {
+  command.exitOverride();
+  for (const sub of command.commands) exitOverrides(sub);
+  return command;
+}
+
+function testProgram(workflows: NonNullable<ProgramDependencies["workflows"]>) {
+  const run = vi.fn(async (effect: Effect.Effect<void, SandboxError, never>) => {
+    await Effect.runPromise(effect);
+  });
+  const program = createProgram({ rootDir: () => "/project", run, workflows });
+  return { program, run };
+}
 
 describe("CLI program parsing", () => {
   it("passes build target arguments to the build workflow", async () => {
     const build = vi.fn(() => Effect.succeed({ message: "built" }));
-    const run = vi.fn(async (effect) => {
-      await Effect.runPromise(effect);
-    });
-    const program = createProgram({ rootDir: () => "/project", run, workflows: { build } });
+    const { program, run } = testProgram({ build });
     await program.parseAsync(["node", "biodome", "--no-events", "build", "demo"]);
     expect(build).toHaveBeenCalledWith("/project", "demo");
     expect(run).toHaveBeenCalledOnce();
@@ -16,21 +30,63 @@ describe("CLI program parsing", () => {
 
   it("passes up options to the up workflow", async () => {
     const up = vi.fn(() => Effect.succeed({ message: "running", waiting: false }));
-    const run = vi.fn(async (effect) => {
-      await Effect.runPromise(effect);
-    });
-    const program = createProgram({ rootDir: () => "/project", run, workflows: { up } });
+    const { program } = testProgram({ up });
     await program.parseAsync(["node", "biodome", "--no-events", "up", "demo", "--build"]);
     expect(up).toHaveBeenCalledWith("/project", "demo", { build: true });
   });
 
   it("passes parsed event query options to the events workflow", async () => {
     const events = vi.fn(() => Effect.succeed([]));
-    const run = vi.fn(async (effect) => {
-      await Effect.runPromise(effect);
-    });
-    const program = createProgram({ rootDir: () => "/project", run, workflows: { events } });
+    const { program } = testProgram({ events });
     await program.parseAsync(["node", "biodome", "events", "--run", "run-1", "--limit", "50"]);
     expect(events).toHaveBeenCalledWith("/project", { runId: "run-1", limit: 50 });
+  });
+
+  it("rejects an out-of-range event limit with a clean error and exit code 1", async () => {
+    const events = vi.fn(() => Effect.succeed([]));
+    const { program, run } = testProgram({ events });
+    await expect(
+      exitOverrides(program).parseAsync(["node", "biodome", "events", "--limit", "0"]),
+    ).rejects.toMatchObject({ exitCode: 1, message: /--limit must be an integer between 1 and/ });
+    expect(events).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("routes down through a stubbed workflow", async () => {
+    const down = vi.fn(() => Effect.succeed({ message: "stopped" }));
+    const { program, run } = testProgram({ down });
+    await program.parseAsync(["node", "biodome", "--no-events", "down", "demo"]);
+    expect(down).toHaveBeenCalledWith("/project", "demo");
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("routes ps through a stubbed workflow", async () => {
+    const ps = vi.fn(() => Effect.succeed({ status: { state: "running" as const } }));
+    const { program } = testProgram({ ps });
+    await program.parseAsync(["node", "biodome", "--no-events", "ps", "demo"]);
+    expect(ps).toHaveBeenCalledWith("/project", "demo");
+  });
+
+  it("routes restart through a stubbed workflow", async () => {
+    const restart = vi.fn(() =>
+      Effect.succeed({ message: 'Restart completed on target "demo"', skipped: [] }),
+    );
+    const { program } = testProgram({ restart });
+    await program.parseAsync(["node", "biodome", "--no-events", "restart", "demo", "web"]);
+    expect(restart).toHaveBeenCalledWith("/project", "demo", "web");
+  });
+
+  it("routes app list through a stubbed workflow", async () => {
+    const appList = vi.fn(() => Effect.succeed("No applications declared\n"));
+    const { program } = testProgram({ appList });
+    await program.parseAsync(["node", "biodome", "app", "list"]);
+    expect(appList).toHaveBeenCalledWith("/project");
+  });
+
+  it("routes config validate through a stubbed workflow", async () => {
+    const configValidate = vi.fn(() => Effect.succeed({ message: "Configuration is valid" }));
+    const { program } = testProgram({ configValidate });
+    await program.parseAsync(["node", "biodome", "--no-events", "config", "validate"]);
+    expect(configValidate).toHaveBeenCalledWith("/project");
   });
 });

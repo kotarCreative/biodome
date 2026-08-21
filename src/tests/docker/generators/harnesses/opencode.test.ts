@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { generateHarnessFiles } from "../../../../docker/generators/harnesses/opencode.js";
+import { generateOpencodeHarnessFiles } from "../../../../docker/generators/harnesses/opencode.js";
 import { createPlan } from "../../../../core/plan.js";
 
-describe("generateHarnessFiles (OpenCode)", () => {
+describe("generateOpencodeHarnessFiles", () => {
   it("generates opencode config and telemetry plugin", () => {
     const plan = createPlan("my-app");
     plan.runtime.agentHarnesses.push({
@@ -19,7 +19,7 @@ describe("generateHarnessFiles (OpenCode)", () => {
       config: {},
     });
 
-    const files = generateHarnessFiles(plan);
+    const files = generateOpencodeHarnessFiles(plan);
     const configPath = "opencode-homes/agent/.config/opencode/opencode.json";
     const pluginPath = "opencode-homes/agent/.config/opencode/plugins/agent-telemetry.js";
     const startPath = "opencode-homes/agent/start.sh";
@@ -48,6 +48,15 @@ describe("generateHarnessFiles (OpenCode)", () => {
     expect(files[startPath]).toContain("#!/bin/sh");
     expect(files[startPath]).toContain("opencode serve");
     expect(files[startPath]).toContain("3002");
+    expect(files[startPath]).toContain("mktemp -d /tmp/.biodome-opencode-agent-XXXXXX");
+    expect(files[startPath]).toContain(
+      'cp -r /workspace/.biodome-build/opencode-homes/agent/.config "$OPENCODE_RUN_HOME/.config"',
+    );
+    expect(files[startPath]).toContain('chmod -R go-rwx "$OPENCODE_RUN_HOME"');
+    expect(files[startPath]).toContain('\' "$OPENCODE_RUN_HOME/.config/opencode/opencode.json"');
+    expect(files[startPath]).toContain('export XDG_CONFIG_HOME="$OPENCODE_RUN_HOME/.config"');
+    expect(files[startPath]).toContain("is not set");
+    expect(files[startPath]).not.toContain("process.env[name] ||");
 
     const taskPath = "opencode-homes/agent/task";
     expect(files[taskPath]).toBeDefined();
@@ -73,7 +82,7 @@ describe("generateHarnessFiles (OpenCode)", () => {
       deploymentId: "test-local",
     };
 
-    const task = generateHarnessFiles(plan)["opencode-homes/agent/task"];
+    const task = generateOpencodeHarnessFiles(plan)["opencode-homes/agent/task"];
     expect(task).toContain("/workspace/.biodome-build/targets/local/opencode-homes/agent");
     expect(task).toContain("opencode run");
   });
@@ -101,7 +110,7 @@ describe("generateHarnessFiles (OpenCode)", () => {
       },
     });
 
-    const files = generateHarnessFiles(plan);
+    const files = generateOpencodeHarnessFiles(plan);
     const config = JSON.parse(files["opencode-homes/agent/.config/opencode/opencode.json"]);
     expect(config.provider).toBeDefined();
     expect(config.provider.lmstudio).toEqual({
@@ -127,7 +136,7 @@ describe("generateHarnessFiles (OpenCode)", () => {
     });
 
     expect(
-      generateHarnessFiles(plan)[
+      generateOpencodeHarnessFiles(plan)[
         "opencode-homes/opencode/.config/opencode/plugins/opencode-telemetry.js"
       ],
     ).toContain("const CAPTURE_PAYLOADS = true");

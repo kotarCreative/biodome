@@ -153,7 +153,7 @@ describe("complete-plan artifact regression", () => {
     // Health-check scripts are executable shell scripts.
     const healthCheck = byPath(files, ".biodome-build/targets/local/healthchecks/web.sh");
     expect(healthCheck.mode).toBe(0o755);
-    expect(healthCheck.content).toContain("curl -fsS --max-time 3 http://localhost:3000/health");
+    expect(healthCheck.content).toContain("curl -fsS --max-time 3 'http://localhost:3000/health'");
     const monitor = byPath(files, ".biodome-build/targets/local/healthchecks/web-monitor.sh");
     expect(monitor.mode).toBe(0o755);
     expect(monitor.content).toContain(
@@ -246,7 +246,7 @@ describe("complete-plan artifact regression", () => {
     const mcpPlan = byPath(files, ".biodome-build/targets/local/plan.json");
     expect(mcpPlan.content).toContain('"project"');
     for (const runtimeFile of MCP_RUNTIME_FILES) {
-      const mcpFile = byPath(files, `.biodome-build/targets/local/mcp/${runtimeFile}`);
+      const mcpFile = byPath(files, `.biodome-build/targets/local/${runtimeFile}`);
       expect(mcpFile.sourcePath).toBeDefined();
       expect(mcpFile.content).toBeUndefined();
     }

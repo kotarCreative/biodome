@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EnvSpec } from "../../../core/feature.js";
-import { createPlan } from "../../../core/plan.js";
+import { createPlan, type SecretReference } from "../../../core/plan.js";
 import { ProviderBuilder } from "../../../core/plan-builder/providers.js";
 
 function makeBuilder(addEnv: (key: string, spec: EnvSpec) => void = () => undefined) {
@@ -75,7 +75,11 @@ describe("ProviderBuilder", () => {
       /Duplicate provider name/,
     );
     expect(() =>
-      builder.addProvider({ name: "literal", type: "custom", credentials: { token: "secret" } }),
+      builder.addProvider({
+        name: "literal",
+        type: "custom",
+        credentials: { token: "secret" as unknown as SecretReference },
+      }),
     ).toThrow();
   });
 
@@ -108,7 +112,7 @@ describe("ProviderBuilder", () => {
         name: "missing-token",
         type: "custom",
         mcpUrl: "https://example.com/mcp",
-        credentials: { token: "" },
+        credentials: { token: "" as unknown as SecretReference },
       }),
     ).toThrow(/credentials.token is required/);
   });

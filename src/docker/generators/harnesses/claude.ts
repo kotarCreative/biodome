@@ -1,11 +1,11 @@
 import type { ClaudeHarness, McpConfig, Plan } from "../../../core/plan.js";
 import { mcpClientAuthFromToken } from "../../../core/mcp-client.js";
-import { generatedRuntimeDir } from "../shell.js";
+import { assertIdentifier, generatedRuntimeDir, shellQuote } from "../shell.js";
 import {
-  eventToSnakeCase,
-  taskArtifactUploadLines,
+  taskWrapperScript,
+  telemetryHookEntries,
+  telemetryHookScript,
   telemetryWriterModule,
-  telemetryWriterPath,
 } from "./shared.js";
 
 export function generateClaudeHarnessFiles(plan: Plan): Record<string, string> {
@@ -14,10 +14,18 @@ export function generateClaudeHarnessFiles(plan: Plan): Record<string, string> {
     files["telemetry/writer.cjs"] = telemetryWriterModule();
   }
   for (const harness of plan.runtime.claudeHarnesses) {
+    assertIdentifier(harness.name, "harness name");
     const homeDir = `claude-homes/${harness.name}`;
     files[`${homeDir}/.claude/settings.json`] = claudeSettings(harness, plan);
     files[`${homeDir}/.claude.json`] = claudeMcpConfig(plan.build.mcpPort, plan.build.mcpConfig);
-    files[`${homeDir}/hooks/telemetry.js`] = claudeTelemetryScript(harness, plan);
+    files[`${homeDir}/hooks/telemetry.js`] = telemetryHookScript({
+      tool: "Claude",
+      source: "claude",
+      pathEnvVar: "CLAUDE_BIODOME_TELEMETRY_PATH",
+      logPath: harness.telemetry.path,
+      capturePayloads: harness.telemetry.capturePayloads === true,
+      plan,
+    });
     files[`${homeDir}/claude`] = claudeWrapperScript(harness, plan);
     files[`${homeDir}/task`] = claudeTaskScript(harness, plan);
   }
@@ -36,22 +44,7 @@ function claudeSettings(harness: ClaudeHarness, plan?: Plan): string {
 
   const homeDir = `${generatedRuntimeDir(plan)}/claude-homes/${harness.name}`;
   const script = `${homeDir}/hooks/telemetry.js`;
-  const events = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse"];
-  const hooks: Record<string, unknown> = {};
-  for (const event of events) {
-    hooks[event] = [
-      {
-        hooks: [
-          {
-            type: "command",
-            command: "node",
-            args: [script, eventToSnakeCase(event)],
-          },
-        ],
-      },
-    ];
-  }
-  settings.hooks = hooks;
+  settings.hooks = telemetryHookEntries(script);
 
   return JSON.stringify(settings, null, 2) + "\n";
 }
@@ -68,51 +61,31 @@ function claudeMcpConfig(mcpPort: number, mcpConfig: McpConfig): string {
   return JSON.stringify({ mcpServers: { biodome } }, null, 2) + "\n";
 }
 
-function claudeTelemetryScript(harness: ClaudeHarness, plan: Plan): string {
-  const logPath = harness.telemetry.path;
-  const capturePayloads = harness.telemetry.capturePayloads === true;
-  return [
-    "// Auto-generated Claude telemetry hook script for biodome",
-    "const { randomUUID } = require('node:crypto')",
-    "",
-    `const LOG_PATH = process.env.CLAUDE_BIODOME_TELEMETRY_PATH || ${JSON.stringify(logPath)}`,
-    `const CAPTURE_PAYLOADS = ${capturePayloads}`,
-    `const { write } = require(${JSON.stringify(telemetryWriterPath(plan))})`,
-    "",
-    "let input = ''",
-    "process.stdin.on('data', (chunk) => { if (CAPTURE_PAYLOADS) input += chunk })",
-    "process.stdin.on('end', async () => {",
-    "  const data = input ? JSON.parse(input) : {}",
-    "  await write(LOG_PATH, { id: randomUUID(), timestamp: new Date().toISOString(), source: 'claude', type: process.argv[2] || 'unknown', data })",
-    "})",
-    "",
-  ].join("\n");
-}
-
 function claudeWrapperScript(harness: ClaudeHarness, plan?: Plan): string {
   const homeDir = `${generatedRuntimeDir(plan)}/claude-homes/${harness.name}`;
   const envExports: string[] = [
-    `HOME=${homeDir}`,
+    `HOME=${shellQuote(homeDir)}`,
     "export HOME",
-    `CLAUDE_BIODOME_TELEMETRY_PATH=${harness.telemetry.path}`,
+    `CLAUDE_BIODOME_TELEMETRY_PATH=${shellQuote(harness.telemetry.path)}`,
     "export CLAUDE_BIODOME_TELEMETRY_PATH",
   ];
   if (harness.apiKey && typeof harness.apiKey === "object" && "env" in harness.apiKey) {
+    assertIdentifier(harness.apiKey.env, "API key environment variable name");
     envExports.push(`${harness.apiKey.env}="$${harness.apiKey.env}"`);
     envExports.push(`export ${harness.apiKey.env}`);
   }
 
   const flags: string[] = [];
-  if (harness.model) flags.push(`--model ${harness.model}`);
+  if (harness.model) flags.push(`--model ${shellQuote(harness.model)}`);
   if (harness.permissions) {
     if (harness.permissions === "bypassPermissions") {
       flags.push("--dangerously-skip-permissions");
     } else {
-      flags.push(`--permission-mode ${harness.permissions}`);
+      flags.push(`--permission-mode ${shellQuote(harness.permissions)}`);
     }
   }
   if (harness.tools && harness.tools.length > 0) {
-    flags.push(`--allowedTools ${harness.tools.join(",")}`);
+    flags.push(`--allowedTools ${shellQuote(harness.tools.join(","))}`);
   }
 
   return [
@@ -129,23 +102,21 @@ function claudeWrapperScript(harness: ClaudeHarness, plan?: Plan): string {
 
 function claudeTaskScript(harness: ClaudeHarness, plan?: Plan): string {
   const homeDir = `${generatedRuntimeDir(plan)}/claude-homes/${harness.name}`;
-  const lines: string[] = [
-    "#!/bin/sh",
-    `# Auto-generated Claude task wrapper for ${harness.name}`,
-    "set -e",
-    "",
-    `export HOME=${homeDir}`,
-    `export CLAUDE_BIODOME_TELEMETRY_PATH=${harness.telemetry.path}`,
+  const setupLines: string[] = [
+    `export HOME=${shellQuote(homeDir)}`,
+    `export CLAUDE_BIODOME_TELEMETRY_PATH=${shellQuote(harness.telemetry.path)}`,
   ];
   if (harness.apiKey && typeof harness.apiKey === "object" && "env" in harness.apiKey) {
-    lines.push(`export ${harness.apiKey.env}="$${harness.apiKey.env}"`);
+    assertIdentifier(harness.apiKey.env, "API key environment variable name");
+    setupLines.push(`export ${harness.apiKey.env}="$${harness.apiKey.env}"`);
   }
   if (harness.model) {
-    lines.push(`export CLAUDE_MODEL=${harness.model}`);
+    setupLines.push(`export CLAUDE_MODEL=${shellQuote(harness.model)}`);
   }
-  lines.push("");
-  lines.push(`claude -p "$@"`);
-  lines.push(...taskArtifactUploadLines());
-  lines.push("");
-  return lines.join("\n");
+  return taskWrapperScript({
+    tool: "Claude",
+    harnessName: harness.name,
+    setupLines,
+    commandLines: [`claude -p "$@"`],
+  });
 }

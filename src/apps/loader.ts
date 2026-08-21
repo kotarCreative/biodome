@@ -192,7 +192,12 @@ export function loadAppsEffect(
       const byName = new Map(declarations.map((declaration) => [declaration.name, declaration]));
       await builder.expandApplications(async (context, plan) => {
         for (const name of order) {
-          const declaration = byName.get(name)!;
+          const declaration = byName.get(name);
+          if (!declaration) {
+            throw new ValidationError({
+              message: `Application "${name}" was ordered but not discovered`,
+            });
+          }
           const recipe = isAppRecipe(declaration.default) ? declaration.default : undefined;
           const app = new ApplicationBuilderImpl(context, plan, {
             name,

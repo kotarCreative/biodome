@@ -31,7 +31,7 @@ describe("runtime artifacts", () => {
     const files = renderCommonArtifacts(plan, layout);
 
     expect(files.map((file) => file.relativePath)).toEqual([
-      ...files.map((file) => file.relativePath).sort(),
+      ...files.map((file) => file.relativePath).sort((left, right) => left.localeCompare(right)),
     ]);
     expect(files).toContainEqual(
       expect.objectContaining({ relativePath: ".biodome-build/targets/local/Dockerfile" }),
@@ -80,6 +80,35 @@ describe("runtime artifacts", () => {
     }
   });
 
+  it("skips byte-identical rewrites but still updates changed content", () => {
+    const outputDir = makeOutputDir();
+    const files: GeneratedFile[] = [
+      { relativePath: "script.sh", content: "#!/bin/sh\necho ok\n", mode: 0o755 },
+    ];
+
+    try {
+      expect(Effect.runSync(writeArtifacts(outputDir, files))).toEqual([
+        join(outputDir, "script.sh"),
+      ]);
+      const scriptPath = join(outputDir, "script.sh");
+      const firstMtime = statSync(scriptPath).mtimeMs;
+
+      // Second render with identical content leaves the file untouched.
+      expect(Effect.runSync(writeArtifacts(outputDir, files))).toEqual([]);
+      expect(statSync(scriptPath).mtimeMs).toBe(firstMtime);
+      expect(statSync(scriptPath).mode & 0o777).toBe(0o755);
+
+      // Changed content is written again.
+      const updated: GeneratedFile[] = [
+        { relativePath: "script.sh", content: "#!/bin/sh\necho changed\n", mode: 0o755 },
+      ];
+      expect(Effect.runSync(writeArtifacts(outputDir, updated))).toEqual([scriptPath]);
+      expect(readFileSync(scriptPath, "utf-8")).toContain("changed");
+    } finally {
+      rmSync(outputDir, { recursive: true, force: true });
+    }
+  });
+
   it("checks output containment with platform path semantics", () => {
     expect(isPathWithin("/tmp/output", "/tmp/output/nested/file")).toBe(true);
     expect(isPathWithin("/tmp/output", "/tmp/escape")).toBe(false);
@@ -106,18 +135,19 @@ describe("runtime artifacts", () => {
     const layout = runtimeLayout("/project", "local");
 
     const files = renderCommonArtifacts(plan, layout);
-    const mcpFiles = files.filter((file) => file.relativePath.includes("/mcp/"));
+    const runtimePaths = MCP_RUNTIME_FILES.map((file) => `.biodome-build/targets/local/${file}`);
+    const runtimeFiles = files.filter((file) => runtimePaths.includes(file.relativePath));
 
     expect(files.map((file) => file.relativePath)).toEqual(
-      files.map((file) => file.relativePath).sort(),
+      files.map((file) => file.relativePath).sort((left, right) => left.localeCompare(right)),
     );
     expect(files).toContainEqual(
       expect.objectContaining({ relativePath: ".biodome-build/targets/local/plan.json" }),
     );
-    expect(mcpFiles.map((file) => file.relativePath)).toEqual(
-      MCP_RUNTIME_FILES.map((file) => `.biodome-build/targets/local/mcp/${file}`),
-    );
-    for (const file of mcpFiles) {
+    expect(runtimeFiles.map((file) => file.relativePath)).toEqual(runtimePaths);
+    expect(runtimePaths).toContain(".biodome-build/targets/local/core/redaction.js");
+    expect(runtimePaths).toContain(".biodome-build/targets/local/mcp/command-runner.js");
+    for (const file of runtimeFiles) {
       expect((file.content === undefined) !== (file.sourcePath === undefined)).toBe(true);
     }
   });

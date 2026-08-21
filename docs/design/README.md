@@ -24,7 +24,7 @@ commands.
 | ---------------------------------------- | ------------------- | -------- | ---------- | -------- | ------------------------------------------------------------------ |
 | [01](01-mcp-authentication.md)           | MCP authentication  | P0       | None       | Complete | Mandatory auth with supported generated clients                    |
 | [02](02-secrets-and-repositories.md)     | Secret handling     | P0       | 01         | Complete | Typed secret references and credential-safe repository sync        |
-| [03](03-runtime-execution-contracts.md)  | Runtime contracts   | P0       | 02         | Partial  | Portable workspace, secret, job, build, state, and event contracts |
+| [03](03-runtime-execution-contracts.md)  | Runtime contracts   | P0       | 02         | Complete | Portable workspace, secret, job, build, state, and event contracts |
 | [04](04-container-process-isolation.md)  | Local containment   | P1       | 01, 02     | Proposed | Non-root processes and explicit direct-mount risk boundaries       |
 | [05](05-aws-ecs-production-readiness.md) | AWS ECS             | P0       | 03, 04     | Proposed | A tested, immutable, recoverable remote task provider              |
 | [06](06-bounded-mcp-io.md)               | MCP resource bounds | P1       | 01, 02     | Partial  | Bounded commands, telemetry, uploads, and adapters                 |

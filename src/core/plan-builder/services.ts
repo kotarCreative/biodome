@@ -1,8 +1,13 @@
 import { Schema } from "effect";
 import { type Plan, type Service, ServiceOptionsSchema } from "../plan.js";
-import type { ProcessSpec, ServiceOptions } from "../feature.js";
+import type { EnvSpec, ProcessSpec, ServiceOptions } from "../feature.js";
 import { ValidationError } from "../errors.js";
-import { defaultImage, serviceConfigs } from "../services.js";
+import {
+  POSTGRES_PASSWORD_ENV_VAR,
+  defaultImage,
+  serviceConfigs,
+  servicePassword,
+} from "../services.js";
 
 export class ServiceBuilder {
   constructor(
@@ -11,6 +16,7 @@ export class ServiceBuilder {
     private readonly addProcess: (spec: ProcessSpec) => void,
     private readonly addHook: (spec: ProcessSpec) => void,
     private readonly servicesPath: string,
+    private readonly addEnv: (key: string, spec: EnvSpec) => void,
   ) {}
 
   add(name: string, options: ServiceOptions = {}): void {
@@ -52,6 +58,21 @@ export class ServiceBuilder {
         command: ["sh", `${this.servicesPath}/${name}-init.sh`],
         startOn: "start.pre",
       });
+      // The init script reads the role password from the container environment,
+      // so declare it as a runtime env var: literals are injected verbatim,
+      // while { env } references become required host passthroughs that fail
+      // `docker compose` loudly when unset. The value never touches disk.
+      const password = servicePassword(validated);
+      if (password !== undefined) {
+        if (typeof password === "string") {
+          this.addEnv(POSTGRES_PASSWORD_ENV_VAR, { value: password });
+        } else {
+          this.addEnv(POSTGRES_PASSWORD_ENV_VAR, {
+            from: { env: password.env },
+            required: true,
+          });
+        }
+      }
     }
     for (const volume of service.volumes) {
       if (

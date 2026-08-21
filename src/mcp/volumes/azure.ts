@@ -13,7 +13,10 @@ import {
 
 export function createAzureAdapter(config: VolumeConfig): VolumeAdapter {
   const credentials = resolveCredentials(config.credentials);
-  const account = config.account!;
+  const account = config.account;
+  if (!account) {
+    throw new VolumeAccessError(`Azure volume ${config.name} requires an account`);
+  }
   let client: BlobServiceClient;
 
   if (credentials.accountKey) {
@@ -25,7 +28,10 @@ export function createAzureAdapter(config: VolumeConfig): VolumeAdapter {
     throw new VolumeAccessError(`Azure volume ${config.name} requires accountKey or sasUrl`);
   }
 
-  const containerClient = client.getContainerClient(config.container!);
+  if (!config.container) {
+    throw new VolumeAccessError(`Azure volume ${config.name} requires a container`);
+  }
+  const containerClient = client.getContainerClient(config.container);
   const prefix = config.path || "";
 
   function fullPath(path: string): string {
@@ -39,10 +45,12 @@ export function createAzureAdapter(config: VolumeConfig): VolumeAdapter {
   return {
     async list(path, options) {
       const full = fullPath(path);
+      const scope = { kind: "azure", volumeName: config.name, path };
       const result: FileInfo[] = [];
-      const pages = containerClient
-        .listBlobsByHierarchy("/", { prefix: full })
-        .byPage({ continuationToken: decodeCursor(options.cursor), maxPageSize: options.limit });
+      const pages = containerClient.listBlobsByHierarchy("/", { prefix: full }).byPage({
+        continuationToken: decodeCursor(options.cursor, scope),
+        maxPageSize: options.limit,
+      });
       const page = await pages.next();
       if (page.done || !page.value) return { files: result };
       for (const item of page.value.segment.blobItems ?? []) {
@@ -67,7 +75,7 @@ export function createAzureAdapter(config: VolumeConfig): VolumeAdapter {
       return {
         files: result,
         nextCursor: page.value.continuationToken
-          ? encodeCursor(page.value.continuationToken)
+          ? encodeCursor(page.value.continuationToken, scope)
           : undefined,
       };
     },

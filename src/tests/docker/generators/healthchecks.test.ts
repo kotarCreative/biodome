@@ -66,4 +66,38 @@ describe("generateHealthcheckScripts", () => {
     const healthchecks = generateHealthcheckScripts(plan);
     expect(healthchecks["custom.sh"]).toContain("sh -c 'curl -f http://localhost/'");
   });
+
+  it("quotes health check URLs so shell metacharacters stay inert", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "web",
+      command: ["node", "server.js"],
+      ports: [{ host: 3000, container: 3000 }],
+      environment: {},
+      mode: "daemon",
+      startOn: "start.post",
+      healthCheck: {
+        type: "http",
+        url: "http://localhost:3000/health; curl evil",
+      },
+    });
+
+    const healthchecks = generateHealthcheckScripts(plan);
+    expect(healthchecks["web.sh"]).toContain("'http://localhost:3000/health; curl evil'");
+  });
+
+  it("rejects process names that are not safe identifiers", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "web-$(id)",
+      command: ["node", "server.js"],
+      ports: [],
+      environment: {},
+      mode: "daemon",
+      startOn: "start.post",
+      healthCheck: { type: "http", url: "http://localhost:3000" },
+    });
+
+    expect(() => generateHealthcheckScripts(plan)).toThrow(/Invalid process name/);
+  });
 });

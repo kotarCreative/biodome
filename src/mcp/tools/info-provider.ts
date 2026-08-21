@@ -1,6 +1,7 @@
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { McpPlan } from "../plan.js";
 import type { ProviderRegistry } from "../application.js";
+import { redactSecrets } from "../../core/redaction.js";
 import { text, type ToolDefinition } from "./types.js";
 
 export function createInfoProviderTools(
@@ -14,9 +15,9 @@ export function createInfoProviderTools(
     {
       name: "get_sandbox_info",
       description:
-        "Get a description of the current sandbox setup: project, languages, services, processes, ports, and connection strings.",
+        "Get a description of the current sandbox setup: project, languages, services, processes, ports, and connection strings. Secret values are redacted.",
       inputSchema: empty,
-      handler: async () => text(JSON.stringify(plan, null, 2)),
+      handler: async () => text(JSON.stringify(redactSecrets(plan), null, 2)),
     },
     {
       name: "get_endpoints",

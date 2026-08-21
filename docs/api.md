@@ -406,7 +406,7 @@ type LifecyclePoint =
 
 ### `biodome init [--bare]`
 
-Create a `.biodome/` directory with a starter config and a generated `.biodome/features/auto-detect.mjs` feature. The auto-detect feature inspects project files (`package.json`, `bun.lockb`, `requirements.txt`, `go.mod`, `Cargo.toml`, `pom.xml`, etc.) and calls `ctx.addLanguage` for each detected language. Pass `--bare` to skip auto-detection and create a minimal scaffold.
+Create a `.biodome/` directory with a starter config and a generated `.biodome/features/auto-detect.mjs` feature. The auto-detect feature inspects project files (`package.json`, `bun.lockb`, `requirements.txt`, `go.mod`, `Cargo.toml`, `pom.xml`, etc.) and calls `ctx.addLanguage` for each detected language. Pass `--bare` to skip auto-detection and create a minimal scaffold. `init` also appends `.biodome-build/` to the project's `.gitignore` (creating it if needed) so build output stays out of version control.
 
 ### `biodome build <target>`
 
@@ -422,7 +422,7 @@ Stop the selected target sandbox. The command requires existing deployment state
 
 ### `biodome exec <target> <command...>`
 
-Run a command in the selected target sandbox.
+Run a command in place inside a running target sandbox. The selected provider must advertise in-place execution (`exec.inplace`); one-shot job providers reject `exec` and run commands through named tasks instead.
 
 ```bash
 biodome exec local npm test

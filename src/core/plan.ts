@@ -579,9 +579,15 @@ export const ToolOptionsSchema = Schema.Struct({
   version: Schema.optional(Schema.String),
 });
 
+// A credential value is either a plain string or an { env: "VAR" } reference
+// that resolves from the host/container environment at run time. Literal
+// strings remain accepted for throwaway dev values (they are stored verbatim
+// in plan.json); references keep the secret out of the plan entirely.
+export const SecretValueSchema = Schema.Union([Schema.String, SecretReferenceSchema]);
+
 export const ServiceUserSchema = Schema.Struct({
   name: Schema.String,
-  password: Schema.String,
+  password: SecretValueSchema,
 });
 
 export const ServiceDatabaseSchema = Schema.Struct({
@@ -594,14 +600,10 @@ export const ServiceOptionsSchema = Schema.Struct({
   environment: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   databases: Schema.optional(Schema.Array(ServiceDatabaseSchema)),
   users: Schema.optional(Schema.Array(ServiceUserSchema)),
-  password: Schema.optional(Schema.String),
+  password: Schema.optional(SecretValueSchema),
 });
 
 const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-// A credential value is either a plain string or an { env: "VAR" } reference
-// that resolves from the container's environment at runtime.
-export const SecretValueSchema = Schema.Union([Schema.String, SecretReferenceSchema]);
 
 export const RepoCredentialsSchema = Schema.Struct({
   token: Schema.optional(SecretReferenceSchema),
@@ -917,9 +919,9 @@ export const McpConfigSchema = Schema.Struct({
   commandTimeoutMs: Schema.optional(CommandTimeoutSchema),
   commandStdoutMaxBytes: Schema.optional(CommandOutputBytesSchema),
   commandStderrMaxBytes: Schema.optional(CommandOutputBytesSchema),
-  maxReadBytes: Schema.optional(Schema.Number),
-  maxWriteBytes: Schema.optional(Schema.Number),
-  maxListEntries: Schema.optional(Schema.Number),
+  maxReadBytes: Schema.optional(CommandOutputBytesSchema),
+  maxWriteBytes: Schema.optional(CommandOutputBytesSchema),
+  maxListEntries: Schema.optional(CommandOutputBytesSchema),
   providerConnectTimeoutMs: Schema.optional(Schema.Number),
   providerRequestTimeoutMs: Schema.optional(Schema.Number),
   providerCatalogConcurrency: Schema.optional(Schema.Number),

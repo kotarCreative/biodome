@@ -1,5 +1,7 @@
 import { Schema } from "effect";
 
+export { redactQueryTokens, redactSecrets, redactString } from "./redaction.js";
+
 // Valid environment variable name: letter or underscore, followed by letters,
 // digits, or underscores.
 const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -48,53 +50,4 @@ export function secretEnv(value: SecretReference | undefined): string | undefine
 // Render a secret reference as a shell variable expansion (e.g. "${VAR}").
 export function secretShellExpansion(value: SecretReference): string {
   return `\${${value.env}}`;
-}
-
-// Centralized redaction of known secret shapes. This is defense in depth: the
-// primary defense is never putting resolved secrets in events/errors in the
-// first place.
-export function redactSecrets(value: unknown): unknown {
-  if (typeof value === "string") {
-    return redactString(value);
-  }
-  if (typeof value !== "object" || value === null) {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map(redactSecrets);
-  }
-  const result: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (isSecretReference(entry)) {
-      result[key] = { env: entry.env };
-    } else if (looksLikeCredentialKey(key) && typeof entry === "string") {
-      result[key] = "***REDACTED***";
-    } else {
-      result[key] = redactSecrets(entry);
-    }
-  }
-  return result;
-}
-
-// Heuristic for structural redaction: keys that commonly hold credentials.
-function looksLikeCredentialKey(key: string): boolean {
-  const lower = key.toLowerCase();
-  return (
-    lower.includes("password") ||
-    lower.includes("token") ||
-    lower.includes("secret") ||
-    lower.includes("apikey") ||
-    lower.includes("api_key") ||
-    lower.includes("credential")
-  );
-}
-
-// Redact likely embedded credentials from a string. This is a last-resort guard.
-function redactString(value: string): string {
-  // https://user:pass@host
-  let redacted = value.replace(/(\/\/)[^@\s]+@/g, "$1***REDACTED***@");
-  // Bearer / Basic tokens
-  redacted = redacted.replace(/\b(Bearer\s+)\S+/gi, "$1***REDACTED***");
-  redacted = redacted.replace(/\b(Basic\s+)\S+/gi, "$1***REDACTED***");
-  return redacted;
 }

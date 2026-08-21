@@ -42,15 +42,15 @@ exports[`Docker generator snapshots > matches for multi-daemon with workingDir +
 ; Managed processes declared in biodome/features/*.js
 [supervisord]
 nodaemon=true
-logfile=/tmp/supervisord.log
-pidfile=/tmp/supervisord.pid
+logfile=/workspace/.biodome-build/logs/supervisord.log
+pidfile=/workspace/.biodome-build/logs/supervisord.pid
 user=root
 
 [unix_http_server]
-file=/tmp/supervisor.sock
+file=/workspace/.biodome-build/logs/supervisor.sock
 
 [supervisorctl]
-serverurl=unix:///tmp/supervisor.sock
+serverurl=unix:///workspace/.biodome-build/logs/supervisor.sock
 
 [rpcinterface:supervisor]
 supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
@@ -60,16 +60,17 @@ command=node api.js
 autostart=false
 autorestart=true
 startretries=10
-stdout_logfile=/tmp/backend.log
-stderr_logfile=/tmp/backend.log
+stdout_logfile=/workspace/.biodome-build/logs/backend.log
+stderr_logfile=/workspace/.biodome-build/logs/backend.log
+environment=BIODOME_LOG_DIR="/workspace/.biodome-build/logs"
 
 [program:backend-healthcheck]
 command=sh /workspace/.biodome-build/healthchecks/backend-monitor.sh
 autostart=false
 autorestart=true
 startsecs=5
-stdout_logfile=/tmp/backend-healthcheck.log
-stderr_logfile=/tmp/backend-healthcheck.log
+stdout_logfile=/workspace/.biodome-build/logs/backend-healthcheck.log
+stderr_logfile=/workspace/.biodome-build/logs/backend-healthcheck.log
 
 [program:frontend]
 command=npm run dev
@@ -77,8 +78,9 @@ directory=/workspace/frontend
 autostart=false
 autorestart=true
 startretries=10
-stdout_logfile=/tmp/frontend.log
-stderr_logfile=/tmp/frontend.log
+stdout_logfile=/workspace/.biodome-build/logs/frontend.log
+stderr_logfile=/workspace/.biodome-build/logs/frontend.log
+environment=BIODOME_LOG_DIR="/workspace/.biodome-build/logs"
 
 "
 `;
@@ -288,15 +290,15 @@ exports[`Docker generator snapshots > matches for node + postgres + daemon 2`] =
 ; Managed processes declared in biodome/features/*.js
 [supervisord]
 nodaemon=true
-logfile=/tmp/supervisord.log
-pidfile=/tmp/supervisord.pid
+logfile=/workspace/.biodome-build/logs/supervisord.log
+pidfile=/workspace/.biodome-build/logs/supervisord.pid
 user=root
 
 [unix_http_server]
-file=/tmp/supervisor.sock
+file=/workspace/.biodome-build/logs/supervisor.sock
 
 [supervisorctl]
-serverurl=unix:///tmp/supervisor.sock
+serverurl=unix:///workspace/.biodome-build/logs/supervisor.sock
 
 [rpcinterface:supervisor]
 supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
@@ -306,17 +308,17 @@ command=node server.js
 autostart=false
 autorestart=true
 startretries=10
-stdout_logfile=/tmp/web.log
-stderr_logfile=/tmp/web.log
-environment=DEBUG="1"
+stdout_logfile=/workspace/.biodome-build/logs/web.log
+stderr_logfile=/workspace/.biodome-build/logs/web.log
+environment=BIODOME_LOG_DIR="/workspace/.biodome-build/logs",DEBUG="1"
 
 [program:web-healthcheck]
 command=sh /workspace/.biodome-build/healthchecks/web-monitor.sh
 autostart=false
 autorestart=true
 startsecs=5
-stdout_logfile=/tmp/web-healthcheck.log
-stderr_logfile=/tmp/web-healthcheck.log
+stdout_logfile=/workspace/.biodome-build/logs/web-healthcheck.log
+stderr_logfile=/workspace/.biodome-build/logs/web-healthcheck.log
 
 "
 `;
@@ -429,34 +431,35 @@ exports[`Docker generator snapshots > matches for php + composer + vendor volume
 ; Managed processes declared in biodome/features/*.js
 [supervisord]
 nodaemon=true
-logfile=/tmp/supervisord.log
-pidfile=/tmp/supervisord.pid
+logfile=/workspace/.biodome-build/logs/supervisord.log
+pidfile=/workspace/.biodome-build/logs/supervisord.pid
 user=root
 
 [unix_http_server]
-file=/tmp/supervisor.sock
+file=/workspace/.biodome-build/logs/supervisor.sock
 
 [supervisorctl]
-serverurl=unix:///tmp/supervisor.sock
+serverurl=unix:///workspace/.biodome-build/logs/supervisor.sock
 
 [rpcinterface:supervisor]
 supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 
 [program:laravel]
-command=php artisan serve --host=0.0.0.0 --port=8000
+command=php artisan serve '--host=0.0.0.0' '--port=8000'
 autostart=false
 autorestart=true
 startretries=10
-stdout_logfile=/tmp/laravel.log
-stderr_logfile=/tmp/laravel.log
+stdout_logfile=/workspace/.biodome-build/logs/laravel.log
+stderr_logfile=/workspace/.biodome-build/logs/laravel.log
+environment=BIODOME_LOG_DIR="/workspace/.biodome-build/logs"
 
 [program:laravel-healthcheck]
 command=sh /workspace/.biodome-build/healthchecks/laravel-monitor.sh
 autostart=false
 autorestart=true
 startsecs=5
-stdout_logfile=/tmp/laravel-healthcheck.log
-stderr_logfile=/tmp/laravel-healthcheck.log
+stdout_logfile=/workspace/.biodome-build/logs/laravel-healthcheck.log
+stderr_logfile=/workspace/.biodome-build/logs/laravel-healthcheck.log
 
 "
 `;

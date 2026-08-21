@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ProcessSpec } from "../../../core/feature.js";
 import { createPlan } from "../../../core/plan.js";
 import { McpBuilder } from "../../../core/plan-builder/mcp.js";
@@ -114,9 +114,9 @@ describe("McpBuilder", () => {
   it("rejects literal tokens after setting MCP flags", () => {
     const { builder, languages, plan, processes } = makeBuilder();
 
-    expect(() => builder.configure(3001, { token: "secret" })).toThrow(
-      "MCP token must be an environment variable reference",
-    );
+    expect(() =>
+      builder.configure(3001, { token: "secret" as unknown as { env: string } }),
+    ).toThrow("MCP token must be an environment variable reference");
     expect(plan.build.mcpEnabled).toBe(true);
     expect(plan.build.mcpConfig.enabled).toBe(true);
     expect(languages).toEqual([]);
@@ -155,12 +155,11 @@ describe("McpBuilder", () => {
 
   it("rejects a harness that cannot send authorization headers to biodome MCP", () => {
     const { builder, plan } = makeBuilder();
-    plan.runtime.codexHarnesses.push({
+    plan.runtime.agentHarnesses.push({
       name: "legacy",
       type: "pi",
       port: 3003,
       mcpServers: { biodome: { url: "http://localhost:3001" } },
-      model: "gpt-5.6",
       telemetry: { enabled: true, path: "/workspace/events.jsonl" },
       config: {},
     });
@@ -182,5 +181,24 @@ describe("McpBuilder", () => {
     );
     expect(plan.build.mcpEnabled).toBe(true);
     expect(languages).toEqual([{ name: "node", version: "20" }]);
+  });
+
+  it("advises about token strength exactly once per build", () => {
+    const warnings: string[] = [];
+    const spy = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    });
+    try {
+      const { builder } = makeBuilder();
+      builder.configure(3001, { token: { env: "MCP_TOKEN" } });
+      builder.configure(3002, { token: { env: "MCP_TOKEN" } });
+
+      const advice = warnings.filter((line) => line.includes("high-entropy"));
+      expect(advice).toHaveLength(1);
+      expect(advice[0]).toContain("MCP_TOKEN");
+      expect(advice[0]).toContain("exec_command");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

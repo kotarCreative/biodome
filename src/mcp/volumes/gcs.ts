@@ -4,6 +4,7 @@ import {
   FileInfo,
   VolumeConfig,
   resolveCredentials,
+  VolumeAccessError,
   decodeCursor,
   encodeCursor,
   readBounded,
@@ -12,11 +13,14 @@ import {
 
 export function createGcsAdapter(config: VolumeConfig): VolumeAdapter {
   const credentials = resolveCredentials(config.credentials);
+  if (!config.bucket) {
+    throw new VolumeAccessError(`GCS volume ${config.name} requires a bucket`);
+  }
   const storage = new Storage({
     projectId: credentials.projectNumber,
     keyFilename: credentials.serviceAccountFile,
   });
-  const bucket = storage.bucket(config.bucket!);
+  const bucket = storage.bucket(config.bucket);
   const prefix = config.prefix || "";
 
   function fullPath(path: string): string {
@@ -30,12 +34,13 @@ export function createGcsAdapter(config: VolumeConfig): VolumeAdapter {
   return {
     async list(path, options) {
       const full = fullPath(path);
+      const scope = { kind: "gcs", volumeName: config.name, path };
       const [files, nextQuery] = await bucket.getFiles({
         prefix: full,
         delimiter: "/",
         autoPaginate: false,
         maxResults: options.limit,
-        pageToken: decodeCursor(options.cursor),
+        pageToken: decodeCursor(options.cursor, scope),
       });
 
       const result: FileInfo[] = [];
@@ -75,7 +80,9 @@ export function createGcsAdapter(config: VolumeConfig): VolumeAdapter {
       return {
         files: result,
         nextCursor:
-          typeof nextQuery.pageToken === "string" ? encodeCursor(nextQuery.pageToken) : undefined,
+          typeof nextQuery.pageToken === "string"
+            ? encodeCursor(nextQuery.pageToken, scope)
+            : undefined,
       };
     },
 

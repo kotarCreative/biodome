@@ -9,7 +9,6 @@ import {
   detectStarterLanguages,
   generateStarterFeature,
   runHooks,
-  resolveProjectName,
   runSafe,
 } from "../../cli/helpers.js";
 import { createPlan } from "../../core/plan.js";
@@ -24,23 +23,6 @@ function tmpDir(prefix: string): string {
 const NodeRuntime = NodeChildProcessSpawner.layer.pipe(
   Layer.provide(Layer.merge(NodeFileSystem.layer, NodePath.layer)),
 );
-
-describe("resolveProjectName", () => {
-  it("reads the project name from sandbox/config.json", () => {
-    const dir = tmpDir("project-name");
-    mkdirSync(join(dir, ".biodome"), { recursive: true });
-    writeFileSync(
-      join(dir, ".biodome", "config.json"),
-      JSON.stringify({ project: { name: "my-app" } }),
-    );
-
-    try {
-      expect(resolveProjectName(dir)).toBe("my-app");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-});
 
 describe("runHooks", () => {
   it("runs container hooks through the provider", async () => {

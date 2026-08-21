@@ -10,7 +10,6 @@ import {
   supportsAvailability,
   supportsBuild,
   supportsInplaceExec,
-  supportsJob,
   supportsLogs,
   supportsRender,
   supportsRestart,
@@ -206,10 +205,10 @@ export function upWorkflow(
     );
     writeState(rootDir, targetName, state);
     const validated = readState(rootDir, targetName, operation.deploymentId, driver.id);
-    yield* Effect.logInfo(`Target "${targetName}" is running`);
+    yield* Effect.sync(() => console.log(`Target "${targetName}" is running`));
     if (options.wait) {
       if (!supportsStop(driver)) return yield* unsupported(driver.id, "lifecycle.stop");
-      yield* Effect.logInfo("Press Ctrl+C to stop");
+      yield* Effect.sync(() => console.log("Press Ctrl+C to stop"));
       yield* Effect.callback<void, never, never>((resume) => {
         process.on("SIGINT", () => resume(Effect.void));
       });
@@ -278,27 +277,19 @@ export function execWorkflow(
       target: targetName,
       provider: operation.driver.id,
     };
-    if (supportsJob(operation.driver)) {
-      const input = operationInputWithState(operation);
-      yield* instrumentOperation(
-        store,
-        scope,
-        "job",
-        commandMetadata(command),
-        operation.driver.runJob({ ...input, command }),
-      );
-    } else if (supportsInplaceExec(operation.driver)) {
-      const input = operationInputWithState(operation);
-      yield* instrumentOperation(
-        store,
-        scope,
-        "exec",
-        commandMetadata(command),
-        operation.driver.exec({ ...input, command }),
-      );
-    } else {
-      return yield* unsupported(operation.driver.id, "command execution");
+    // `biodome exec` is in-place execution by contract. One-shot jobs belong
+    // to named task runs, which select the job path through the orchestrator.
+    if (!supportsInplaceExec(operation.driver)) {
+      return yield* unsupported(operation.driver.id, "in-place command execution");
     }
+    const input = operationInputWithState(operation);
+    yield* instrumentOperation(
+      store,
+      scope,
+      "exec",
+      commandMetadata(command),
+      operation.driver.exec({ ...input, command }),
+    );
     return { message: `Command completed on target "${targetName}"` };
   }).pipe(Effect.scoped);
 }
@@ -453,22 +444,24 @@ export function restartWorkflow(
     } else {
       const skipped: string[] = [];
       const input = operationInputWithValidatedState(operation);
+      const store = yield* EventStore;
+      const scope: EventScope = {
+        runId: store.runId,
+        target: targetName,
+        provider: operation.driver.id,
+      };
       for (const process of operation.plan.runtime.processes.filter(
         (item) => item.mode === "daemon",
       )) {
         if (!supportsRestart(operation.driver)) {
           skipped.push(process.name);
-          yield* Effect.logWarning(
-            `Driver "${operation.driver.id}" does not support process.signal, skipping ${process.name}`,
+          yield* Effect.sync(() =>
+            console.error(
+              `Driver "${operation.driver.id}" does not support process.signal, skipping ${process.name}`,
+            ),
           );
           continue;
         }
-        const store = yield* EventStore;
-        const scope: EventScope = {
-          runId: store.runId,
-          target: targetName,
-          provider: operation.driver.id,
-        };
         yield* instrumentOperation(
           store,
           scope,

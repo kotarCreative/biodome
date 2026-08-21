@@ -299,7 +299,7 @@ export function createFileEventStore(options: FileEventStoreOptions): EventStore
       const writeNext = writes.then(() => write(type, data, defaultScope(scope)));
       writes = writeNext.catch(() => undefined);
       return writeNext;
-    }).pipe(Effect.tap(() => Effect.logInfo(`event:${type}`)));
+    });
 
   const events: EventStore["events"] = () =>
     Effect.sync(() => {
@@ -341,13 +341,6 @@ export function formatEvent(event: SandboxEvent): string {
       ? JSON.stringify(event.data)
       : String(event.data);
   return `[${event.timestamp}] ${event.type.padEnd(32)} #${event.sequence} ${data}`;
-}
-
-export function filterEventsByRunId(
-  events: readonly SandboxEvent[],
-  runId: string,
-): readonly SandboxEvent[] {
-  return events.filter((e) => e.runId === runId);
 }
 
 export function readEventFile(path: string): EventReadResult {

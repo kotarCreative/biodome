@@ -46,7 +46,7 @@ describe("generatePiHarnessFiles", () => {
     expect(wrapper).toContain("#!/bin/sh");
     expect(wrapper).toContain("PI_CODING_AGENT_DIR=/workspace/.biodome-build/pi-homes/coder");
     expect(wrapper).toContain('ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"');
-    expect(wrapper).toContain("--tools read,bash,edit,write");
+    expect(wrapper).toContain("--tools 'read,bash,edit,write'");
 
     const task = files["pi-homes/coder/task"];
     expect(task).toContain("#!/bin/sh");

@@ -312,4 +312,22 @@ describe("UpstreamRegistry", () => {
       vi.useRealTimers();
     }
   });
+
+  it("redacts credentials from describe and call failures", async () => {
+    const registry = new UpstreamRegistry([provider("one", "test-token")], async () => {
+      throw new Error(
+        "connect ECONNREFUSED with Authorization: Bearer test-token and https://h?token=test-token",
+      );
+    });
+
+    await expect(registry.describe("one.tool")).rejects.toThrow(
+      "connect ECONNREFUSED with Authorization: [REDACTED]",
+    );
+    const callError = await registry.call("one.tool", {}).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(callError).toBeInstanceOf(Error);
+    expect((callError as Error).message).not.toContain("test-token");
+  });
 });

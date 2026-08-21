@@ -1,11 +1,11 @@
 import { readdirSync, readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { Effect, Schema } from "effect";
 import { PlanBuilder } from "../core/plan-builder/plan-builder.js";
 import { loadAppsEffect } from "../apps/loader.js";
-import { Plan, Port, ConfigSchema, validateTargetName } from "../core/plan.js";
+import { Plan, Port, ConfigSchema } from "../core/plan.js";
 import { TargetContextImpl } from "../core/target-context.js";
 import { TaskContextImpl } from "../core/task-context.js";
 import { getDriver } from "../runtime/registry.js";
@@ -42,6 +42,10 @@ export interface McpConfig {
   providerCatalogConcurrency?: number;
 }
 
+function isEnvTokenReference(token: McpConfig["token"]): token is { env: string } {
+  return typeof token === "object" && token !== null && typeof token.env === "string";
+}
+
 export interface Config {
   project: {
     name: string;
@@ -60,10 +64,14 @@ export const buildPlanEffect = Effect.fnUntraced(function* (
   if (config.mcp?.enabled) {
     const port = config.mcp.port ?? 3001;
     const mcpToken = config.mcp.token;
+    if (!isEnvTokenReference(mcpToken)) {
+      return yield* new ConfigError({
+        message: 'MCP requires an environment-backed token when enabled ({ env: "VAR" })',
+        path: join(rootDir, BIODOME_DIR, "config.json"),
+      });
+    }
     builder.configureMcp(port, {
-      // ConfigSchema rejects a missing or literal token when MCP is enabled, so
-      // at this point the token is always an `{ env: "VAR" }` reference.
-      token: mcpToken as { env: string },
+      token: mcpToken,
       allowExec: config.mcp.allowExec,
       allowProcessControl: config.mcp.allowProcessControl,
       commandTimeoutMs: config.mcp.commandTimeoutMs,
@@ -192,10 +200,6 @@ const readConfig = Effect.fnUntraced(function* (rootDir: string) {
 });
 
 function formatSchemaIssue(issue: unknown): string {
-  // Best-effort formatting of a SchemaError.
-  if (issue && typeof issue === "object" && "toString" in issue) {
-    return String(issue);
-  }
   return String(issue);
 }
 
@@ -295,6 +299,33 @@ const executeFeatureModule = Effect.fnUntraced(function* (path: string, ctx: Fea
 const BIODOME_TARGETS_DIR = join(BIODOME_DIR, "targets");
 const BIODOME_TASKS_DIR = join(BIODOME_DIR, "tasks");
 
+const MODULE_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
+// Shared validation for target/task module names so a hostile name can never
+// escape its module directory via resolveModulePath + import().
+function validateModuleName(name: string, kind: "target" | "task"): void {
+  if (!name || typeof name !== "string") {
+    throw new Error(`Invalid ${kind} name: ${JSON.stringify(name)} (must be a non-empty string)`);
+  }
+  if (!MODULE_NAME_PATTERN.test(name)) {
+    throw new Error(`Invalid ${kind} name: "${name}". Must match ${MODULE_NAME_PATTERN.source}`);
+  }
+  if (name === "." || name === "..") {
+    throw new Error(`Invalid ${kind} name: "${name}"`);
+  }
+  if (name.length > 64) {
+    throw new Error(`${kind} name too long (${name.length} chars, max 64)`);
+  }
+}
+
+function isPathWithin(baseDir: string, candidate: string): boolean {
+  const pathFromBase = relative(baseDir, candidate);
+  return (
+    pathFromBase === "" ||
+    (!isAbsolute(pathFromBase) && pathFromBase !== ".." && !pathFromBase.startsWith(`..${sep}`))
+  );
+}
+
 function resolveModulePath(rootDir: string, baseDir: string, name: string): string | null {
   const mjsPath = join(rootDir, baseDir, `${name}.mjs`);
   const jsPath = join(rootDir, baseDir, `${name}.js`);
@@ -318,7 +349,7 @@ export const buildTargetPlanEffect = Effect.fnUntraced(function* (
   options: BuildPlanOptions = {},
 ) {
   try {
-    validateTargetName(targetName);
+    validateModuleName(targetName, "target");
   } catch (e) {
     return yield* new ValidationError({ message: (e as Error).message });
   }
@@ -342,6 +373,12 @@ export const buildTargetPlanEffect = Effect.fnUntraced(function* (
     return yield* new FeatureError({
       message: `Target "${targetName}" not found at ${targetDir}/${targetName}.mjs or .js`,
       path: targetDir,
+    });
+  }
+
+  if (!isPathWithin(join(rootDir, BIODOME_TARGETS_DIR), targetPath)) {
+    return yield* new ValidationError({
+      message: `Target "${targetName}" resolves outside ${BIODOME_TARGETS_DIR}`,
     });
   }
 
@@ -424,6 +461,12 @@ export const buildTaskPlanEffect = Effect.fnUntraced(function* (
   taskName: string,
   options: BuildPlanOptions = {},
 ) {
+  try {
+    validateModuleName(taskName, "task");
+  } catch (e) {
+    return yield* new ValidationError({ message: (e as Error).message });
+  }
+
   const plan = yield* buildTargetPlanEffect(rootDir, targetName, options);
 
   const taskPath = resolveModulePath(rootDir, BIODOME_TASKS_DIR, taskName);
@@ -441,6 +484,12 @@ export const buildTaskPlanEffect = Effect.fnUntraced(function* (
     }
     return yield* new FeatureError({
       message: `Task "${taskName}" not found at .biodome/tasks/${taskName}.mjs or .js`,
+    });
+  }
+
+  if (!isPathWithin(join(rootDir, BIODOME_TASKS_DIR), taskPath)) {
+    return yield* new ValidationError({
+      message: `Task "${taskName}" resolves outside ${BIODOME_TASKS_DIR}`,
     });
   }
 

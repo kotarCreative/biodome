@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseServiceStatus, parseServiceStatusOutput } from "../../docker/runner.js";
+import { parseServiceStatus, parseServiceStatusOutput } from "../../runtime/compose-status.js";
 
 describe("parseServiceStatus", () => {
   it("extracts name, state, and health from a docker compose ps json entry", () => {

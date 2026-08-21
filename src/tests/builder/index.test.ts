@@ -486,6 +486,19 @@ describe("buildTargetPlan", () => {
     await expect(buildTargetPlan(dir, "nonexistent")).rejects.toThrow(/not found/);
   });
 
+  it.each(["../../evil", "..\\..\\escape", ".", "..", "sub/dir/evil", ""])(
+    "rejects target names that could traverse out of .biodome/targets (%s)",
+    async (targetName) => {
+      const dir = join("/tmp", "sandbox-test-target-" + Date.now());
+      createProject(dir, {
+        ".biodome/config.json": JSON.stringify({ project: { name: "traversal-target" } }),
+        ".biodome/features/.gitkeep": "",
+      });
+
+      await expect(buildTargetPlan(dir, targetName)).rejects.toThrow(/Invalid target name/);
+    },
+  );
+
   it("fails when target module has no default export", async () => {
     const dir = join("/tmp", "sandbox-test-target-" + Date.now());
     createProject(dir, {
@@ -588,6 +601,43 @@ describe("buildTaskPlan", () => {
     });
 
     await expect(buildTaskPlan(dir, "local", "nonexistent")).rejects.toThrow(/not found/);
+  });
+
+  it.each(["../../../../tmp/evil", "..\\..\\..\\escape", ".", "..", "sub/dir/evil", ""])(
+    "rejects task names that could traverse out of .biodome/tasks (%s)",
+    async (taskName) => {
+      const dir = join("/tmp", "sandbox-test-task-" + Date.now());
+      createProject(dir, {
+        ".biodome/config.json": JSON.stringify({ project: { name: "task-traversal" } }),
+        ".biodome/features/.gitkeep": "",
+        ".biodome/targets/local.mjs": `
+        export default function t(ctx) { ctx.useRuntime("docker-compose"); }
+      `,
+      });
+
+      await expect(buildTaskPlan(dir, "local", taskName)).rejects.toThrow(/Invalid task name/);
+    },
+  );
+
+  it("accepts task names containing dots, dashes, and underscores", async () => {
+    const dir = join("/tmp", "sandbox-test-task-" + Date.now());
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({ project: { name: "task-app" } }),
+      ".biodome/features/codex.mjs": `
+        export default function c(ctx) {
+          ctx.addCodexHarness({ name: "coder", apiKey: { env: "TEST_KEY" }, mcpServers: {} });
+        }
+      `,
+      ".biodome/targets/local.mjs": `
+        export default function t(ctx) { ctx.useRuntime("docker-compose"); }
+      `,
+      ".biodome/tasks/review_step-1.2.mjs": `
+        export default function r(ctx) { ctx.addTask({ harness: "coder", prompt: "Review" }); }
+      `,
+    });
+
+    const plan = await buildTaskPlan(dir, "local", "review_step-1.2");
+    expect(plan.deployment?.task?.harness).toBe("coder");
   });
 
   it("succeeds when harness exists", async () => {

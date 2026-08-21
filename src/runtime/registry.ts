@@ -78,12 +78,25 @@ export function createDriverRegistry(): RuntimeDriverRegistry {
   return { registerDriver, getDriver, hasDriver, registeredDrivers };
 }
 
+// Module-level default registry. The named exports below are thin delegates
+// over it; tests should build isolated registries via createDriverRegistry().
 const registry = createDriverRegistry();
 
-export const registerDriver = registry.registerDriver;
-export const getDriver = registry.getDriver;
-export const hasDriver = registry.hasDriver;
-export const registeredDrivers = registry.registeredDrivers;
+export function registerDriver(id: string, loader: DriverLoader): void {
+  registry.registerDriver(id, loader);
+}
+
+export function getDriver(id: string): Effect.Effect<RuntimeDriver, RuntimeError, never> {
+  return registry.getDriver(id);
+}
+
+export function hasDriver(id: string): boolean {
+  return registry.hasDriver(id);
+}
+
+export function registeredDrivers(): string[] {
+  return registry.registeredDrivers();
+}
 
 // Register built-ins by ID without evaluating their provider SDKs.
 registerDriver("docker-compose", () =>

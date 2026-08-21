@@ -46,6 +46,15 @@ describe("generateCodexHarnessFiles", () => {
     expect(start).toContain("#!/bin/sh");
     expect(start).toContain("exec-server --listen ws://0.0.0.0:3003");
     expect(start).toContain("--dangerously-bypass-hook-trust");
+    expect(start).toContain("mktemp -d /tmp/.biodome-codex-coder-XXXXXX");
+    expect(start).toContain(
+      'cp -r /workspace/.biodome-build/codex-homes/coder/.codex "$CODEX_RUN_HOME/.codex"',
+    );
+    expect(start).toContain('chmod -R go-rwx "$CODEX_RUN_HOME"');
+    expect(start).toContain('\' "$CODEX_RUN_HOME/.codex/config.toml"');
+    expect(start).toContain('export CODEX_HOME="$CODEX_RUN_HOME/.codex"');
+    expect(start).toContain("is not set");
+    expect(start).not.toContain("process.env[name] ||");
 
     const task = files["codex-homes/coder/task"];
     expect(task).toContain("#!/bin/sh");

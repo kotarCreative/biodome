@@ -46,6 +46,12 @@ export function resolveAgent(plan: Plan, harnessName: string): ResolvedAgent {
 /** Builds the command used to execute a configured agent task in a workspace. */
 export function agentTaskCommand(plan: Plan, harnessName: string, prompt: string): string[] {
   const { adapter, harness } = resolveAgent(plan, harnessName);
-  const layout = runtimeLayout("", plan.deployment?.target.name);
+  const targetName = plan.deployment?.target.name;
+  if (!targetName) {
+    throw new ValidationError({
+      message: `Cannot build task command for harness "${harnessName}": plan has no deployment target`,
+    });
+  }
+  const layout = runtimeLayout("", targetName);
   return adapter.command({ harness, prompt, layout: layout.container });
 }

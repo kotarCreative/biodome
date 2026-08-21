@@ -1,5 +1,15 @@
+import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { buildDockerExecArgs, imageRefFromLocalDigest } from "../../runtime/docker-compose.js";
+import { createPlan, type RuntimeTarget } from "../../core/plan.js";
+import {
+  buildDockerExecArgs,
+  dockerComposeDriver,
+  imageRefFromLocalDigest,
+} from "../../runtime/docker-compose.js";
+import { runtimeLayout } from "../../runtime/layout.js";
 
 describe("buildDockerExecArgs", () => {
   it("preserves normal docker exec arguments", () => {
@@ -33,5 +43,30 @@ describe("imageRefFromLocalDigest", () => {
 
   it("rejects a mutable or malformed image ID", () => {
     expect(() => imageRefFromLocalDigest("latest")).toThrow(/invalid image digest/);
+  });
+});
+
+describe("dockerComposeDriver.render", () => {
+  it("creates the private log directory as the host user", () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "biodome-compose-render-"));
+    const target: RuntimeTarget = { name: "local", driver: "docker-compose", options: {} };
+    const layout = runtimeLayout(rootDir, target.name);
+    try {
+      Effect.runSync(
+        dockerComposeDriver.render({
+          rootDir,
+          outputDir: layout.host.root,
+          plan: createPlan("test"),
+          target,
+        }),
+      );
+
+      const logs = statSync(layout.host.logs);
+      expect(logs.isDirectory()).toBe(true);
+      expect(logs.mode & 0o777).toBe(0o700);
+      if (process.getuid) expect(logs.uid).toBe(process.getuid());
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
   });
 });

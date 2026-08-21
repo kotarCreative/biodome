@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createPlan, type Plan } from "../../core/plan.js";
-import { compileExecutionPlan, executionPlanDigest } from "../../orchestration/compiler.js";
+import {
+  compileExecutionPlan,
+  defaultWorkspaceStrategy,
+  executionPlanDigest,
+} from "../../orchestration/compiler.js";
 
 function legacyPlan(artifacts = ["review.md"]): Plan {
   const plan = createPlan("demo");
@@ -96,5 +100,28 @@ describe("compileExecutionPlan", () => {
     expect(executionPlanDigest(first)).not.toBe(
       executionPlanDigest(compileExecutionPlan(legacyPlan([]))),
     );
+  });
+});
+
+describe("defaultWorkspaceStrategy", () => {
+  it("never silently selects bind for remote or job-oriented providers", () => {
+    expect(defaultWorkspaceStrategy("aws-ecs")).toEqual({ strategy: "upload" });
+    expect(defaultWorkspaceStrategy("docker-sandbox")).toEqual({ strategy: "clone" });
+  });
+
+  it("keeps the local bind default for Docker Compose", () => {
+    expect(defaultWorkspaceStrategy("docker-compose")).toEqual({ strategy: "bind" });
+  });
+
+  it("refuses to guess a workspace strategy for unregistered drivers", () => {
+    expect(() => defaultWorkspaceStrategy("unknown-provider")).toThrow(
+      /Cannot default a workspace strategy/,
+    );
+  });
+
+  it("compiles tasks without an explicit workspace onto the driver-safe default", () => {
+    const remote = legacyPlan();
+    remote.deployment!.target = { name: "remote", driver: "aws-ecs", options: {} };
+    expect(compileExecutionPlan(remote).task.workspace).toEqual({ strategy: "upload" });
   });
 });

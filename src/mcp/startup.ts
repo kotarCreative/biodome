@@ -39,6 +39,10 @@ export async function startMcpServer(
         stderrMaxBytes: plan.mcp.commandStderrMaxBytes,
       },
     ),
+    process.env,
+    {
+      allowedHosts: [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`],
+    },
   );
   const server = http.createServer(application.handler);
   listenOnLoopback(server, port);

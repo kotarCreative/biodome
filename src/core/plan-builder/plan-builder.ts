@@ -48,12 +48,15 @@ export class PlanBuilder {
     this.build = new BuildBuilder(this.plan, (path) => this.io.fileExists(path));
     this.environment = new EnvironmentBuilder(this.plan);
     this.processes = new ProcessBuilder(this.plan, (name) => this.build.addAptPackage(name));
+    const addEnv: FeatureContext["addEnv"] = (key, spec) =>
+      this.mutate(() => this.environment.add(key, spec));
     this.services = new ServiceBuilder(
       this.plan,
       (name) => this.build.addAptPackage(name),
       (spec) => this.processes.addProcess(spec),
       (spec) => this.processes.addHook(spec),
       `${layout.root}/services`,
+      addEnv,
     );
 
     const addProcess: FeatureContext["addProcess"] = (spec) =>
@@ -62,8 +65,6 @@ export class PlanBuilder {
       this.mutate(() => this.processes.addHook(spec));
     const addLanguage: FeatureContext["addLanguage"] = (name, options) =>
       this.mutate(() => this.build.addLanguage(name, options));
-    const addEnv: FeatureContext["addEnv"] = (key, spec) =>
-      this.mutate(() => this.environment.add(key, spec));
 
     this.repositories = new RepositoryBuilder(
       this.plan,

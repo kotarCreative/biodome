@@ -13,16 +13,28 @@ function plan(
     readonly readOnly?: boolean;
     readonly providers?: boolean;
     readonly commandTimeoutMs?: number;
+    readonly environment?: Record<string, string>;
+    readonly serviceConnection?: unknown;
   } = {},
 ) {
   return decodeMcpPlan({
     project: "test",
     languages: [],
-    services: [],
+    services: options.serviceConnection
+      ? [
+          {
+            name: "db",
+            type: "postgres",
+            image: "postgres:17",
+            ports: [{ host: 5432, container: 5432 }],
+            connection: options.serviceConnection,
+          },
+        ]
+      : [],
     processes: [],
     endpoints: [],
     providers: options.providers ? [{ name: "issues", type: "github" }] : [],
-    environment: {},
+    environment: options.environment ?? {},
     envVars: [],
     repos: [],
     volumes: [
@@ -148,6 +160,82 @@ describe("MCP application", () => {
     }
   });
 
+  it("rejects declared request bodies above the size cap with a JSON-RPC 413", async () => {
+    const app = await createMcpApplication(
+      plan({ token: { env: "MCP_TOKEN" } }),
+      { ...dependencies(adapter), maxRequestBodyBytes: 16 },
+      { MCP_TOKEN: "secret" },
+    );
+    const server = http.createServer(app.handler);
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("expected TCP listener");
+    const status = await new Promise<number | undefined>((resolve, reject) => {
+      // Raw request so the declared Content-Length exceeds the cap regardless of body.
+      const request = http.request(
+        {
+          host: "127.0.0.1",
+          port: address.port,
+          method: "POST",
+          path: "/mcp",
+          headers: {
+            authorization: "Bearer secret",
+            "content-type": "application/json",
+            "content-length": String(1024),
+          },
+        },
+        (response) => {
+          response.resume();
+          response.on("end", () => resolve(response.statusCode));
+        },
+      );
+      request.on("error", reject);
+      request.end("{}");
+    });
+    expect(status).toBe(413);
+  });
+
+  it("aborts chunked request bodies that exceed the size cap mid-stream", async () => {
+    const app = await createMcpApplication(
+      plan({ token: { env: "MCP_TOKEN" } }),
+      { ...dependencies(adapter), maxRequestBodyBytes: 16 },
+      { MCP_TOKEN: "secret" },
+    );
+    const server = http.createServer(app.handler);
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("expected TCP listener");
+    const outcome = await new Promise<{ status?: number; error?: Error }>((resolve) => {
+      const request = http.request(
+        {
+          host: "127.0.0.1",
+          port: address.port,
+          method: "POST",
+          path: "/mcp",
+          headers: {
+            authorization: "Bearer secret",
+            "content-type": "application/json",
+            "transfer-encoding": "chunked",
+          },
+        },
+        (response) => {
+          response.resume();
+          response.on("end", () => resolve({ status: response.statusCode }));
+        },
+      );
+      request.on("error", (error: Error) => resolve({ error }));
+      request.write(JSON.stringify({ jsonrpc: "2.0", method: "x".repeat(16) }));
+      request.end(JSON.stringify({ more: "payload pushing past the cap" }));
+    });
+    if (outcome.error) {
+      expect(outcome.error.message).toMatch(/ECONNRESET|socket hang up/);
+    } else {
+      expect(outcome.status).toBe(413);
+    }
+  });
+
   it("fails startup when MCP is enabled but the token variable is unset", async () => {
     await expect(
       createMcpApplication(plan({ token: { env: "MCP_TOKEN" } }), dependencies(adapter), {}),
@@ -160,6 +248,86 @@ describe("MCP application", () => {
         MCP_TOKEN: "",
       }),
     ).rejects.toThrow("MCP_TOKEN is missing or empty");
+  });
+
+  it("fails startup when the token variable resolves to an unresolved placeholder", async () => {
+    await expect(
+      createMcpApplication(plan({ token: { env: "MCP_TOKEN" } }), dependencies(adapter), {
+        MCP_TOKEN: "${OTHER_VAR}",
+      }),
+    ).rejects.toThrow("unresolved placeholder");
+  });
+
+  it("redacts secrets from get_sandbox_info output", async () => {
+    const app = await createMcpApplication(
+      plan({
+        environment: {
+          DB_PASSWORD: "hunter2",
+          DATABASE_URL: "postgres://user:pass@db:5432/app",
+          PUBLIC_SETTING: "visible",
+        },
+        serviceConnection: { url: "postgres://admin:hunter2@db:5432/app" },
+      }),
+      dependencies(adapter),
+    );
+    const info = resultText(await app.invoke("get_sandbox_info"));
+    expect(info).not.toContain("hunter2");
+    expect(info).not.toContain("user:pass");
+    expect(info).toContain("***REDACTED***");
+    expect(info).toContain("visible");
+    await app.close();
+  });
+
+  it("records exec_command metadata without persisting command text", async () => {
+    const written: { type: string; data: Record<string, unknown> }[] = [];
+    const deps = dependencies(adapter);
+    const app = await createMcpApplication(plan({ allowExec: true }), {
+      ...deps,
+      events: {
+        write: async (type, data) => {
+          written.push({ type, data: { ...data } });
+        },
+        close: deps.events.close,
+      },
+    });
+    const command =
+      "psql --password=sekret && npm config set //registry/:_authToken=npm-token && curl -H X-Api-Key:api-key https://h";
+    await app.invoke("exec_command", { command });
+    const audit = written.find((event) => event.type === "tool.exec");
+    expect(audit).toBeDefined();
+    expect(audit?.data).toEqual({ commandBytes: Buffer.byteLength(command), timeoutMs: 30000 });
+    expect(audit?.data).not.toHaveProperty("command");
+    expect(JSON.stringify(audit)).not.toContain("sekret");
+    expect(JSON.stringify(audit)).not.toContain("npm-token");
+    expect(JSON.stringify(audit)).not.toContain("api-key");
+    await app.close();
+  });
+
+  it("returns a generic internal error and keeps details server-side", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const app = await createMcpApplication(
+        plan(),
+        dependencies({
+          ...adapter,
+          read: async () => {
+            throw new Error("boom with Authorization: Bearer sekret");
+          },
+        }),
+      );
+      const failure = await app.invoke("read_file", { path: "files:one.txt" }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(failure).toMatchObject({ code: -32603 });
+      expect((failure as { message: string }).message).not.toContain("sekret");
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Authorization: Bearer ***REDACTED***"),
+      );
+      await app.close();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("omits disabled tools and rejects direct calls", async () => {
@@ -188,7 +356,11 @@ describe("MCP application", () => {
       "file output",
     );
     expect(resultText(await app.invoke("exec_command", { command: "pwd" }))).toBe("command output");
-    expect(processRunner.execFile).toHaveBeenCalledWith("tail", ["-n", "10", "/tmp/worker.log"]);
+    expect(processRunner.execFile).toHaveBeenCalledWith("tail", [
+      "-n",
+      "10",
+      "/workspace/.biodome-build/logs/worker.log",
+    ]);
     expect(processRunner.execFile).toHaveBeenCalledWith("supervisorctl", [
       "-c",
       "/workspace/.biodome-build/supervisord.conf",

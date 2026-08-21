@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createPlan } from "../../../core/plan.js";
+import { createPlan, type SecretReference } from "../../../core/plan.js";
 import { RepositoryBuilder } from "../../../core/plan-builder/repositories.js";
 
 function makeBuilder() {
@@ -44,7 +44,7 @@ describe("RepositoryBuilder", () => {
       builder.add({
         name: "private",
         url: "https://example.com/private.git",
-        credentials: { token: "secret" },
+        credentials: { token: "secret" as unknown as SecretReference },
       }),
     ).toThrow();
   });

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import {
+  redactQueryTokens,
   redactSecrets,
+  redactString,
   SecretReferenceSchema,
   secretEnv,
   secretShellExpansion,
@@ -61,7 +63,51 @@ describe("redactSecrets", () => {
     });
   });
 
+  it("redacts private key, access key, and auth-prefixed keys", () => {
+    expect(
+      redactSecrets({
+        private_key: "-----BEGIN RSA PRIVATE KEY-----",
+        privateKeyPath: "/tmp/key.pem",
+        accessKeyId: "AKIA1234",
+        secretAccessKey: "wJalrXU",
+        authHeader: "Bearer tok",
+      }),
+    ).toEqual({
+      private_key: "***REDACTED***",
+      privateKeyPath: "***REDACTED***",
+      accessKeyId: "***REDACTED***",
+      secretAccessKey: "***REDACTED***",
+      authHeader: "***REDACTED***",
+    });
+  });
+
   it("preserves secret references as references", () => {
     expect(redactSecrets({ token: { env: "TOKEN" } })).toEqual({ token: { env: "TOKEN" } });
+  });
+});
+
+describe("redactString and redactQueryTokens", () => {
+  it("redacts credential-bearing query parameters", () => {
+    expect(redactString("https://example.com/cb?token=abc&x=1")).toBe(
+      "https://example.com/cb?token=***REDACTED***&x=1",
+    );
+    expect(redactQueryTokens("https://example.com/cb?sig=deadbeef")).toBe(
+      "https://example.com/cb?sig=***REDACTED***",
+    );
+    expect(redactQueryTokens("https://example.com/?api_key=k&access_token=t")).toBe(
+      "https://example.com/?api_key=***REDACTED***&access_token=***REDACTED***",
+    );
+  });
+
+  it("supports an alternate marker for error redaction", () => {
+    expect(redactQueryTokens("http://h/path?token=abc", "[REDACTED]")).toBe(
+      "http://h/path?token=[REDACTED]",
+    );
+  });
+
+  it("leaves ordinary query parameters untouched", () => {
+    expect(redactQueryTokens("https://example.com/?page=2&q=token%3Dx")).toBe(
+      "https://example.com/?page=2&q=token%3Dx",
+    );
   });
 });

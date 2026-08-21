@@ -76,7 +76,7 @@ export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}):
     lines.push("# Installed under /node_modules so the ESM server at");
     lines.push("# /workspace/.biodome-build/mcp/server.js can resolve it. /node_modules is on");
     lines.push("# the module resolution path and is not shadowed by the /workspace mount.");
-    lines.push("RUN npm install --prefix / @modelcontextprotocol/sdk");
+    lines.push("RUN npm install --prefix / @modelcontextprotocol/sdk@1.30.0 effect@4.0.0-beta.103");
     lines.push("");
 
     const proxySdks = mcpProxySdks(plan);

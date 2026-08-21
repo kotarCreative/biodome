@@ -64,4 +64,31 @@ describe("S3 volume adapter", () => {
     );
     expect(body.destroy).toHaveBeenCalledOnce();
   });
+
+  it("accepts well-formed http(s) endpoints", () => {
+    expect(() =>
+      createS3Adapter({ ...config, credentials: { endpoint: "https://s3.example.com" } }),
+    ).not.toThrow();
+    expect(() =>
+      createS3Adapter({ ...config, credentials: { endpoint: "http://localhost:9000" } }),
+    ).not.toThrow();
+  });
+
+  it("rejects non-http schemes and link-local or metadata endpoints", () => {
+    expect(() =>
+      createS3Adapter({ ...config, credentials: { endpoint: "ftp://files.example.com" } }),
+    ).toThrow("must use http or https");
+    expect(() =>
+      createS3Adapter({ ...config, credentials: { endpoint: "http://169.254.169.254" } }),
+    ).toThrow("not allowed");
+    expect(() =>
+      createS3Adapter({
+        ...config,
+        credentials: { endpoint: "http://metadata.google.internal:8080" },
+      }),
+    ).toThrow("not allowed");
+    expect(() =>
+      createS3Adapter({ ...config, credentials: { endpoint: "http://[fe80::1]:9000" } }),
+    ).toThrow("not allowed");
+  });
 });

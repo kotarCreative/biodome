@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, win32 } from "node:path";
 import { Effect } from "effect";
 import { buildPlanEffect, validatePlan } from "../../builder/index.js";
 import { addAppPackageEffect, removeAppPackageEffect } from "../../apps/package-manager.js";
@@ -9,12 +9,24 @@ import { PlanError } from "../../core/errors.js";
 import { detectStarterLanguages, generateStarterFeature } from "../helpers.js";
 
 const CONFIG_DIR = ".biodome";
+const BUILD_DIR = ".biodome-build";
+
+function ensureIgnored(rootDir: string): void {
+  const path = join(rootDir, ".gitignore");
+  const entry = `${BUILD_DIR}/`;
+  const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
+  if (!existing.split(/\r?\n/).includes(entry)) {
+    writeFileSync(path, `${existing}${existing && !existing.endsWith("\n") ? "\n" : ""}${entry}\n`);
+  }
+}
 
 export function initWorkflow(rootDir: string, bare: boolean) {
   return Effect.try({
     try: () => {
       const configDir = join(rootDir, CONFIG_DIR);
-      const projectName = rootDir.split("/").pop() || "project";
+      // win32.basename handles both separators on every platform so CI and
+      // local runs agree on the derived project name.
+      const projectName = win32.basename(rootDir) || "project";
       if (existsSync(configDir))
         throw new PlanError({ message: "Config directory .biodome already exists" });
       mkdirSync(configDir, { recursive: true });
@@ -40,6 +52,7 @@ export function initWorkflow(rootDir: string, bare: boolean) {
       );
       mkdirSync(join(configDir, "tasks"), { recursive: true });
       writeFileSync(join(configDir, "tasks", ".gitkeep"), "");
+      ensureIgnored(rootDir);
       return { message: `Initialized .biodome config for ${projectName}` };
     },
     catch: (error) =>

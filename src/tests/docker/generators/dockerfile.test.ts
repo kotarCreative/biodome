@@ -103,6 +103,7 @@ describe("generateDockerfile", () => {
 
     const dockerfile = generateDockerfile(plan);
     expect(dockerfile).toContain("@modelcontextprotocol/sdk");
+    expect(dockerfile).toContain("effect@4.0.0-beta.103");
     expect(dockerfile).not.toContain("@aws-sdk/client-s3");
     expect(dockerfile).not.toContain("@google-cloud/storage");
     expect(dockerfile).not.toContain("@azure/storage-blob");

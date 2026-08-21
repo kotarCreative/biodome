@@ -45,7 +45,7 @@ function eventFiles(rootDir: string, query: EventQuery): readonly string[] {
   return dirs
     .flatMap((dir) =>
       readdirSync(dir)
-        .filter((file) => /^events-.+\.jsonl$/.test(file))
+        .filter((file) => /^events-.+\.jsonl(?:\.\d+)?$/.test(file))
         .map((file) => join(dir, file)),
     )
     .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);

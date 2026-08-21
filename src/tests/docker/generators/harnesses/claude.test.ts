@@ -66,4 +66,32 @@ describe("generateClaudeHarnessFiles", () => {
       "const CAPTURE_PAYLOADS = true",
     );
   });
+
+  it("quotes model values with shell metacharacters in wrapper scripts", () => {
+    const plan = createPlan("test");
+    plan.runtime.claudeHarnesses.push({
+      name: "assistant",
+      type: "claude",
+      model: "model-a; curl evil",
+      telemetry: { enabled: false, path: "/workspace/events.jsonl" },
+      config: {},
+    });
+
+    const wrapper = generateClaudeHarnessFiles(plan)["claude-homes/assistant/claude"];
+    expect(wrapper).toContain("--model 'model-a; curl evil'");
+    const task = generateClaudeHarnessFiles(plan)["claude-homes/assistant/task"];
+    expect(task).toContain("export CLAUDE_MODEL='model-a; curl evil'");
+  });
+
+  it("rejects harness names that are not safe identifiers", () => {
+    const plan = createPlan("test");
+    plan.runtime.claudeHarnesses.push({
+      name: "claude-$(id)",
+      type: "claude",
+      telemetry: { enabled: false, path: "/workspace/events.jsonl" },
+      config: {},
+    });
+
+    expect(() => generateClaudeHarnessFiles(plan)).toThrow(/Invalid harness name/);
+  });
 });

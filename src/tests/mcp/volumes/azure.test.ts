@@ -60,4 +60,11 @@ describe("Azure volume adapter", () => {
     );
     expect(download).not.toHaveBeenCalled();
   });
+
+  it("rejects configurations without account or container via typed errors", () => {
+    const { account: _account, ...withoutAccount } = config;
+    expect(() => createAzureAdapter(withoutAccount)).toThrow("requires an account");
+    const { container: _container, ...withoutContainer } = config;
+    expect(() => createAzureAdapter(withoutContainer)).toThrow("requires a container");
+  });
 });

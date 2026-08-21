@@ -44,6 +44,9 @@ describe("generateStartupScript", () => {
     const script = generateStartupScript(plan)!;
     expect(script).toContain("cd /workspace/apps/api");
     expect(script).toContain("env DATABASE_URL='postgres://db' python manage.py migrate");
+    expect(script).toContain(
+      "chown --reference=/workspace/.biodome-build /workspace/.biodome-build/logs",
+    );
     expect(script.indexOf("supervisord -c")).toBeLessThan(script.indexOf("repo-sync-api"));
     expect(script.indexOf("repo-sync-api")).toBeLessThan(script.indexOf("start all"));
     expect(script.indexOf("start all")).toBeLessThan(script.indexOf("announce"));
@@ -89,5 +92,33 @@ describe("generateStartupScript", () => {
     const script = generateStartupScript(plan)!;
     expect(script.indexOf("start postgres-server")).toBeLessThan(script.indexOf("migrate"));
     expect(script).toContain("healthchecks/postgres-server.sh");
+  });
+
+  it("rejects hook names that are not safe identifiers", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "hook-$(curl evil)",
+      command: ["sh", "setup.sh"],
+      ports: [],
+      environment: {},
+      mode: "oneshot",
+      startOn: "start.pre",
+    });
+
+    expect(() => generateStartupScript(plan)).toThrow(/Invalid hook name/);
+  });
+
+  it("rejects environment variable names that are not safe identifiers", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "setup",
+      command: ["sh", "setup.sh"],
+      ports: [],
+      environment: { "A; curl evil": "x" },
+      mode: "oneshot",
+      startOn: "start.pre",
+    });
+
+    expect(() => generateStartupScript(plan)).toThrow(/Invalid environment variable name/);
   });
 });

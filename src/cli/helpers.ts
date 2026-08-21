@@ -3,7 +3,6 @@ import type { PlatformError } from "effect/PlatformError";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { validateConfigEffect } from "../builder/index.js";
 import { Plan } from "../core/plan.js";
 import type { SandboxRuntime } from "../core/runtime.js";
 import {
@@ -25,10 +24,6 @@ function platformErrorMessage(error: PlatformError): string {
 
 function isKnownSandboxError(error: unknown): error is RuntimeError | PlanError {
   return error instanceof RuntimeError || error instanceof PlanError;
-}
-
-export function resolveProjectName(rootDir: string): string {
-  return Effect.runSync(validateConfigEffect(rootDir)).project.name;
 }
 
 export function runSafe(program: Effect.Effect<void, SandboxError, never>): Promise<void> {
@@ -58,7 +53,7 @@ export const runHooks = Effect.fnUntraced(
         command: hook.command,
         location,
       });
-      yield* Effect.logInfo(`[hook] ${hook.name} (${point})`);
+      yield* Effect.sync(() => console.log(`[hook] ${hook.name} (${point})`));
 
       if (location === "host") {
         const [cmd, ...args] = hook.command;

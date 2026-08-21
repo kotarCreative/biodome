@@ -4,13 +4,18 @@ import { buildxImageDigest, createAwsEcsDriver, type AwsClients } from "../../ru
 import type { RuntimeTarget } from "../../core/plan.js";
 import type { Plan } from "../../core/plan.js";
 import type { RuntimeOperationInput } from "../../runtime/driver.js";
+import type { BuildManifest } from "../../runtime/build-manifest.js";
 import { RuntimeError } from "../../core/errors.js";
 import { NoOpEventStoreLive, type EventStore } from "../../core/events.js";
 import { tmpdir } from "node:os";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { runtimeLayout } from "../../runtime/layout.js";
+
+// The driver resolves the execution role from the host environment and fails
+// fast when it is missing; tests use a stand-in ARN.
+process.env.ECS_EXECUTION_ROLE_ARN ??= "arn:aws:iam::123456789012:role/execution";
 
 function makeEcrClient(sendFn?: ReturnType<typeof vi.fn>) {
   return {
@@ -86,12 +91,15 @@ const samplePlan: Plan = {
       port: 0,
       allowExec: false,
       allowProcessControl: false,
-      maxReadBytes: 0,
-      maxWriteBytes: 0,
-      maxListEntries: 0,
-      providerConnectTimeoutMs: 0,
-      providerRequestTimeoutMs: 0,
-      providerCatalogConcurrency: 0,
+      commandTimeoutMs: 30000,
+      commandStdoutMaxBytes: 1048576,
+      commandStderrMaxBytes: 1048576,
+      maxReadBytes: 1048576,
+      maxWriteBytes: 2097152,
+      maxListEntries: 100,
+      providerConnectTimeoutMs: 10000,
+      providerRequestTimeoutMs: 30000,
+      providerCatalogConcurrency: 4,
     },
   },
   runtime: {
@@ -111,27 +119,38 @@ const samplePlan: Plan = {
     codexHarnesses: [],
     claudeHarnesses: [],
     llmProviders: [],
+    applications: [],
+    contributions: [],
   },
 };
 
-function makeInput(overrides?: Partial<RuntimeOperationInput>): RuntimeOperationInput {
+function makeBuildManifest(): BuildManifest {
+  return {
+    schemaVersion: 1,
+    target: sampleTarget.name,
+    driver: "aws-ecs",
+    deploymentId: "test-deploy-001",
+    imageRef: `123456789012.dkr.ecr.us-east-1.amazonaws.com/test-repo@sha256:${"a".repeat(64)}`,
+    digest: `sha256:${"a".repeat(64)}`,
+    contentId: "test-content",
+    createdAt: new Date().toISOString(),
+    provider: {},
+  };
+}
+
+/** Operation input carrying the manifest that start/job operations require. */
+type ManifestBackedInput = RuntimeOperationInput & { buildManifest: BuildManifest };
+
+function makeInput(
+  overrides?: Omit<Partial<RuntimeOperationInput>, "buildManifest">,
+): ManifestBackedInput {
   return {
     rootDir: "/tmp/root",
     outputDir: "/tmp/output",
     plan: samplePlan,
     target: sampleTarget,
     deploymentId: "test-deploy-001",
-    buildManifest: {
-      schemaVersion: 1,
-      target: sampleTarget.name,
-      driver: "aws-ecs",
-      deploymentId: "test-deploy-001",
-      imageRef: `123456789012.dkr.ecr.us-east-1.amazonaws.com/test-repo@sha256:${"a".repeat(64)}`,
-      digest: `sha256:${"a".repeat(64)}`,
-      contentId: "test-content",
-      createdAt: new Date().toISOString(),
-      provider: {},
-    },
+    buildManifest: makeBuildManifest(),
     ...overrides,
   };
 }
@@ -212,6 +231,29 @@ describe("createAwsEcsDriver", () => {
           }),
         ),
       ).toThrow(/does not support backing service containers/);
+    });
+
+    it("rejects plans with host-env passthrough variables", () => {
+      const driver = createAwsEcsDriver(makeClients());
+      const planWithPassthrough: Plan = {
+        ...samplePlan,
+        runtime: {
+          ...samplePlan.runtime,
+          envVars: [
+            { key: "API_TOKEN", scope: "runtime", from: { env: "API_TOKEN" }, required: true },
+          ],
+        },
+      };
+      expect(() =>
+        Effect.runSync(
+          driver.render({
+            rootDir: "/tmp/root",
+            outputDir: "/tmp/output",
+            plan: planWithPassthrough,
+            target: sampleTarget,
+          }),
+        ),
+      ).toThrow(/does not support host-env passthrough yet.*API_TOKEN/s);
     });
 
     it("renders plans with process-hosted services", () => {
@@ -348,6 +390,23 @@ describe("createAwsEcsDriver", () => {
 
       await expect(run(driver.start(makeInput()))).rejects.toThrow(RuntimeError);
     });
+
+    it("deregisters the task definition when RunTask fails", async () => {
+      const ecsSend = vi
+        .fn()
+        .mockResolvedValueOnce({
+          taskDefinition: { taskDefinitionArn: "arn:aws:ecs:...:task-def/test-deploy:1" },
+        })
+        .mockRejectedValueOnce(new Error("subnet not found"))
+        .mockResolvedValueOnce({});
+      const driver = createAwsEcsDriver(makeClients({ ecsSend }));
+
+      await expect(run(driver.start(makeInput()))).rejects.toThrow(/Failed to run ECS task/);
+      expect(ecsSend).toHaveBeenCalledTimes(3);
+      expect(ecsSend.mock.calls[2][0].input.taskDefinition).toBe(
+        "arn:aws:ecs:...:task-def/test-deploy:1",
+      );
+    });
   });
 
   describe("stop", () => {
@@ -433,7 +492,7 @@ describe("createAwsEcsDriver", () => {
             makeInput({ state: makeState({ taskArn: "arn:aws:ecs:...:task/running" }) }),
           ),
         ),
-      ).rejects.toThrow(/Failed to stop ECS task.*poll failed/);
+      ).rejects.toThrow(/Failed to query ECS task.*poll failed/);
     });
 
     it("returns RuntimeError when the task does not stop before timeout", async () => {
@@ -545,6 +604,75 @@ describe("createAwsEcsDriver", () => {
       }
     });
 
+    it("retries transient DescribeTasks errors instead of faking a timeout", async () => {
+      const ecsSend = vi
+        .fn()
+        .mockResolvedValueOnce({
+          taskDefinition: { taskDefinitionArn: "arn:aws:ecs:...:task-def/exec:1" },
+        })
+        .mockResolvedValueOnce({ tasks: [{ taskArn: "arn:aws:ecs:...:task/exec-123" }] })
+        .mockRejectedValueOnce(new Error("throttled"))
+        .mockResolvedValueOnce({
+          tasks: [{ lastStatus: "STOPPED", containers: [{ exitCode: 3 }] }],
+        })
+        .mockResolvedValueOnce({});
+      const driver = createAwsEcsDriver(makeClients({ ecsSend }));
+
+      vi.useFakeTimers();
+      try {
+        const job = run(driver.runJob({ ...makeInput(), command: ["echo", "hello"] }));
+        await vi.runAllTimersAsync();
+        const result = await job;
+        expect(result.exitCode).toBe(3);
+        expect(result.timedOut).toBeFalsy();
+        expect(ecsSend).toHaveBeenCalledTimes(5);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("fails with a typed error after repeated DescribeTasks failures", async () => {
+      const ecsSend = vi
+        .fn()
+        .mockResolvedValueOnce({
+          taskDefinition: { taskDefinitionArn: "arn:aws:ecs:...:task-def/exec:1" },
+        })
+        .mockResolvedValueOnce({ tasks: [{ taskArn: "arn:aws:ecs:...:task/exec-123" }] })
+        .mockRejectedValue(new Error("api down"));
+      const driver = createAwsEcsDriver(makeClients({ ecsSend }));
+
+      vi.useFakeTimers();
+      try {
+        const result = run(driver.runJob({ ...makeInput(), command: ["echo", "hello"] }));
+        const assertion = expect(result).rejects.toThrow(
+          /Failed to poll ECS exec task.*DescribeTasks errors.*api down/s,
+        );
+        await vi.runAllTimersAsync();
+        await assertion;
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("fails with a typed error when the task disappears mid-run", async () => {
+      const ecsSend = vi
+        .fn()
+        .mockResolvedValueOnce({
+          taskDefinition: { taskDefinitionArn: "arn:aws:ecs:...:task-def/exec:1" },
+        })
+        .mockResolvedValueOnce({ tasks: [{ taskArn: "arn:aws:ecs:...:task/exec-123" }] })
+        .mockResolvedValueOnce({
+          tasks: [],
+          failures: [{ arn: "task", reason: "MISSING" }],
+        })
+        .mockResolvedValue({});
+      const driver = createAwsEcsDriver(makeClients({ ecsSend }));
+
+      await expect(
+        run(driver.runJob({ ...makeInput(), command: ["echo", "hello"] })),
+      ).rejects.toThrow(/disappeared from the cluster/);
+    });
+
     it("rejects artifact tasks without an artifact bucket before cloud calls", async () => {
       const ecsSend = vi.fn();
       const driver = createAwsEcsDriver(makeClients({ ecsSend }));
@@ -601,6 +729,39 @@ describe("createAwsEcsDriver", () => {
         /without validated deployment state/,
       );
     });
+
+    it("reports a missing task as stopped", async () => {
+      const ecsSend = vi.fn().mockResolvedValueOnce({
+        tasks: [],
+        failures: [{ arn: "task", reason: "MISSING" }],
+      });
+      const driver = createAwsEcsDriver(makeClients({ ecsSend }));
+      const result = await run(
+        driver.status(makeInput({ state: makeState({ taskArn: "arn:aws:ecs:...:task/gone" }) })),
+      );
+      expect(result.state).toBe("stopped");
+      expect(result.message).toMatch(/missing/i);
+    });
+
+    it("fails with a typed error when the DescribeTasks query fails", async () => {
+      const ecsSend = vi.fn().mockRejectedValueOnce(new Error("access denied"));
+      const driver = createAwsEcsDriver(makeClients({ ecsSend }));
+      await expect(
+        run(
+          driver.status(makeInput({ state: makeState({ taskArn: "arn:aws:ecs:...:task/abc" }) })),
+        ),
+      ).rejects.toThrow(/Failed to query ECS task.*access denied/s);
+    });
+
+    it("fails with a typed error when the task is absent without MISSING", async () => {
+      const ecsSend = vi.fn().mockResolvedValueOnce({ tasks: [], failures: [] });
+      const driver = createAwsEcsDriver(makeClients({ ecsSend }));
+      await expect(
+        run(
+          driver.status(makeInput({ state: makeState({ taskArn: "arn:aws:ecs:...:task/abc" }) })),
+        ),
+      ).rejects.toThrow(/absent without a MISSING failure/);
+    });
   });
 
   describe("logs", () => {
@@ -622,6 +783,30 @@ describe("createAwsEcsDriver", () => {
       const result = await run(driver.logs(makeInput()));
       expect(result).toBeUndefined();
       expect(cwSend).toHaveBeenCalledTimes(2);
+    });
+
+    it("propagates CloudWatch API failures instead of reporting empty logs", async () => {
+      const cwSend = vi.fn().mockRejectedValueOnce(new Error("AccessDeniedException"));
+      const driver = createAwsEcsDriver(makeClients({ cwSend }));
+
+      await expect(run(driver.logs(makeInput()))).rejects.toThrow(
+        /Failed to list CloudWatch log streams.*CloudWatch Logs access.*AccessDeniedException/s,
+      );
+    });
+
+    it("skips log streams without a name", async () => {
+      const cwSend = vi
+        .fn()
+        .mockResolvedValueOnce({
+          logStreams: [{}, { logStreamName: "test-deploy-001/stream1" }],
+        })
+        .mockResolvedValueOnce({ events: [{ timestamp: 1000, message: "hello" }] });
+      const driver = createAwsEcsDriver(makeClients({ cwSend }));
+
+      const result = await run(driver.logs(makeInput()));
+      expect(result).toBeUndefined();
+      expect(cwSend).toHaveBeenCalledTimes(2);
+      expect(cwSend.mock.calls[1][0].input.logStreamName).toBe("test-deploy-001/stream1");
     });
   });
 

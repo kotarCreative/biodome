@@ -4,10 +4,23 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
-import { executeTask, harnessTaskCommand, type TaskResult } from "../../core/task-runner.js";
+import {
+  executeTask,
+  harnessTaskCommand,
+  shouldRunCleanup,
+  type TaskResult,
+} from "../../core/task-runner.js";
 import { Plan, createPlan } from "../../core/plan.js";
 import type {
   RuntimeDriver,
+  RenderableDriver,
+  AvailableDriver,
+  BuildableDriver,
+  StartableDriver,
+  StoppableDriver,
+  ExecutableDriver,
+  ArtifactDriver,
+  StatusDriver,
   CommandResult,
   Artifact,
   DeploymentState,
@@ -29,7 +42,18 @@ function fakeEventStore(): EventStore {
   };
 }
 
-function createFakeDriver(overrides?: Partial<RuntimeDriver>): RuntimeDriver {
+/** Full driver surface executeTask may exercise on a task-capable backend. */
+type TestDriver = RuntimeDriver &
+  RenderableDriver &
+  AvailableDriver &
+  BuildableDriver &
+  StartableDriver &
+  StoppableDriver &
+  ExecutableDriver &
+  ArtifactDriver &
+  StatusDriver;
+
+function createFakeDriver(overrides?: Partial<TestDriver>): TestDriver {
   return {
     id: "fake-driver",
     capabilities: capabilitiesOf(
@@ -186,8 +210,10 @@ describe("executeTask", () => {
     const plan = planWithTask();
     const result = await Effect.runPromise(runTask(driver, plan));
     expect(result.exitCode).toBe(0);
-    expect(result.artifacts).toBeDefined();
-    expect(result.artifacts[0].path).toBe("review.md");
+    const artifacts = result.artifacts;
+    expect(artifacts).toBeDefined();
+    if (artifacts === undefined) throw new Error("expected artifacts to be collected");
+    expect(artifacts[0].path).toBe("review.md");
   });
 
   it("executes validation commands after the agent", async () => {
@@ -422,5 +448,22 @@ describe("executeTask", () => {
     await expect(Effect.runPromise(effect)).rejects.toThrow(/timed out after 1s/);
     expect(emitted.filter((type) => type === "task.failed")).toHaveLength(1);
     expect(emitted).not.toContain("task.completed");
+  });
+});
+
+describe("shouldRunCleanup", () => {
+  it("always cleans up regardless of exit code", () => {
+    expect(shouldRunCleanup("always", 0)).toBe(true);
+    expect(shouldRunCleanup("always", 1)).toBe(true);
+  });
+
+  it("cleans up on success only for a zero exit code", () => {
+    expect(shouldRunCleanup("on-success", 0)).toBe(true);
+    expect(shouldRunCleanup("on-success", 1)).toBe(false);
+  });
+
+  it("never cleans up when cleanup is disabled", () => {
+    expect(shouldRunCleanup("never", 0)).toBe(false);
+    expect(shouldRunCleanup("never", 1)).toBe(false);
   });
 });

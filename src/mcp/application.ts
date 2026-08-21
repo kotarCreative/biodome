@@ -12,6 +12,7 @@ import {
 import { authenticateBearer } from "./auth.js";
 import { createFileMcpEventSink } from "./event-sink.js";
 import { createProcessRunner, type ProcessRunner } from "./command-runner.js";
+import { redactString } from "../core/redaction.js";
 import type { McpPlan } from "./plan.js";
 import { resolvePlanSecret } from "./plan.js";
 import { filterProviderTools } from "./provider-tools.js";
@@ -47,12 +48,88 @@ export interface McpApplicationDependencies {
   readonly events: McpEventSink;
   readonly uuid: () => string;
   readonly now: () => Date;
+  /** Override for tests; defaults to 10 MiB. */
+  readonly maxRequestBodyBytes?: number;
 }
 export interface McpApplication {
   readonly handler: http.RequestListener;
   readonly tools: readonly ToolDefinition[];
   invoke(name: string, arguments_?: ToolArguments): Promise<TextResult>;
   close(): Promise<void>;
+}
+
+const DEFAULT_MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024;
+
+export interface McpApplicationOptions {
+  /** Exact Host header values permitted when DNS-rebinding protection is enabled. */
+  readonly allowedHosts?: readonly string[];
+}
+
+function payloadTooLarge(
+  response: http.ServerResponse,
+  request: http.IncomingMessage,
+  maxBytes: number,
+): void {
+  const body = JSON.stringify({
+    jsonrpc: "2.0",
+    error: {
+      code: ErrorCode.InvalidRequest,
+      message: `Request body exceeds the ${maxBytes} byte limit`,
+    },
+    id: null,
+  });
+  if (response.headersSent) {
+    request.destroy();
+    return;
+  }
+  response.writeHead(413, { "Content-Type": "application/json" });
+  response.end(body, () => request.destroy());
+}
+
+// Read the full request body under a hard byte cap so oversized payloads are
+// rejected before transport dispatch, regardless of framing (content-length
+// or chunked). The parsed body is then handed to the transport explicitly.
+function readBodyWithCap(
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+  maxBytes: number,
+): Promise<{ readonly ok: true; readonly body: string } | { readonly ok: false }> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let received = 0;
+    let settled = false;
+    const finish = (
+      result: { readonly ok: true; readonly body: string } | { readonly ok: false },
+    ) => {
+      if (!settled) {
+        settled = true;
+        resolve(result);
+      }
+    };
+    request.on("data", (chunk: Buffer) => {
+      received += chunk.length;
+      if (received <= maxBytes) {
+        chunks.push(chunk);
+        return;
+      }
+      request.removeAllListeners("data");
+      request.removeAllListeners("end");
+      request.resume();
+      payloadTooLarge(response, request, maxBytes);
+      finish({ ok: false });
+    });
+    request.once("end", () =>
+      finish({ ok: true, body: Buffer.concat(chunks, received).toString("utf8") }),
+    );
+    request.once("error", () => {
+      request.destroy();
+      finish({ ok: false });
+    });
+  });
+}
+
+function positiveIntOr(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 function asVolume(config: McpPlan["volumes"][number]): VolumeConfig {
@@ -114,6 +191,7 @@ export async function createMcpApplication(
   plan: McpPlan,
   dependencies: McpApplicationDependencies,
   environment: NodeJS.ProcessEnv = process.env,
+  options: McpApplicationOptions = {},
 ): Promise<McpApplication> {
   const token = resolvePlanSecret(plan.mcp.token, environment);
   if (plan.mcp.enabled === true && (!token || token.length === 0)) {
@@ -123,9 +201,17 @@ export async function createMcpApplication(
         : "MCP is enabled but no environment-backed token is configured",
     );
   }
-  const maxReadBytes = plan.mcp.maxReadBytes ?? 1048576;
-  const maxWriteBytes = plan.mcp.maxWriteBytes ?? 2097152;
-  const maxListEntries = plan.mcp.maxListEntries ?? 100;
+  if (token && /^\$\{.*\}$/.test(token)) {
+    throw new Error(
+      plan.mcp.token && "env" in plan.mcp.token
+        ? `MCP token environment variable ${plan.mcp.token.env} contains an unresolved placeholder`
+        : "MCP token contains an unresolved placeholder",
+    );
+  }
+  // Schema validation bounds these; the clamps defend against plans that bypass decoding.
+  const maxReadBytes = positiveIntOr(plan.mcp.maxReadBytes, 1048576);
+  const maxWriteBytes = positiveIntOr(plan.mcp.maxWriteBytes, 2097152);
+  const maxListEntries = positiveIntOr(plan.mcp.maxListEntries, 100);
   const skipped = buildUpstreams(plan, environment).skipped;
   const volumeTools = createVolumeTools(plan.volumes.map(asVolume), dependencies.volumeAdapters, {
     read: maxReadBytes,
@@ -142,6 +228,7 @@ export async function createMcpApplication(
         plan.mcp.allowExec === true,
         plan.mcp.allowProcessControl === true,
         plan.mcp.commandTimeoutMs ?? 30000,
+        (type, data) => dependencies.events.write(type, data),
       ),
       ...volumeTools.tools,
     ],
@@ -166,10 +253,11 @@ export async function createMcpApplication(
       if (error instanceof McpError) throw error;
       if (error instanceof VolumeAccessError)
         throw new McpError(ErrorCode.InvalidParams, error.message);
-      throw new McpError(
-        ErrorCode.InternalError,
-        error instanceof Error ? error.message : String(error),
-      );
+      // Never forward raw failure text to clients: log a redacted detail
+      // server-side and return a generic internal error.
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error(`[biodome-mcp] tool ${name} failed: ${redactString(detail)}`);
+      throw new McpError(ErrorCode.InternalError, `Tool "${name}" failed`);
     }
   };
   const server = new Server(
@@ -182,7 +270,12 @@ export async function createMcpApplication(
   server.setRequestHandler(CallToolRequestSchema, async (request) =>
     invoke(request.params.name, request.params.arguments ?? {}),
   );
-  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: dependencies.uuid });
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: dependencies.uuid,
+    ...(options.allowedHosts && options.allowedHosts.length > 0
+      ? { enableDnsRebindingProtection: true, allowedHosts: [...options.allowedHosts] }
+      : {}),
+  });
   await server.connect(transport);
   return {
     tools,
@@ -198,7 +291,34 @@ export async function createMcpApplication(
         response.end(JSON.stringify({ error: "unauthorized" }));
         return;
       }
-      await transport.handleRequest(request, response);
+      if (request.method !== "POST") {
+        await transport.handleRequest(request, response);
+        return;
+      }
+      const maxRequestBodyBytes =
+        dependencies.maxRequestBodyBytes ?? DEFAULT_MAX_REQUEST_BODY_BYTES;
+      const contentLength = Number(request.headers["content-length"]);
+      if (Number.isInteger(contentLength) && contentLength > maxRequestBodyBytes) {
+        payloadTooLarge(response, request, maxRequestBodyBytes);
+        return;
+      }
+      const read = await readBodyWithCap(request, response, maxRequestBodyBytes);
+      if (!read.ok) return;
+      let parsedBody: unknown;
+      try {
+        parsedBody = JSON.parse(read.body);
+      } catch {
+        response.writeHead(400, { "Content-Type": "application/json" });
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            error: { code: ErrorCode.ParseError, message: "Parse error: Invalid JSON" },
+            id: null,
+          }),
+        );
+        return;
+      }
+      await transport.handleRequest(request, response, parsedBody);
     },
     close: async () => {
       await dependencies.providers.close();

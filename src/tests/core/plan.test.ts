@@ -11,8 +11,10 @@ import {
   TaskSchema,
   DeploymentPlanSchema,
   EnvSpecSchema,
+  ServiceOptionsSchema,
   PlanSchema,
   VolumeSpecSchema,
+  McpConfigSchema,
   createPlan,
 } from "../../core/plan.js";
 
@@ -216,6 +218,51 @@ describe("EnvSpecSchema", () => {
   });
 });
 
+describe("ServiceOptionsSchema credentials", () => {
+  it("accepts literal and env-referenced user passwords", () => {
+    const literal = Schema.decodeSync(ServiceOptionsSchema)({
+      users: [{ name: "myapp", password: "devpassword" }],
+    });
+    expect(literal.users?.[0]?.password).toBe("devpassword");
+
+    const referenced = Schema.decodeSync(ServiceOptionsSchema)({
+      users: [{ name: "myapp", password: { env: "MY_PG_PASSWORD" } }],
+    });
+    expect(referenced.users?.[0]?.password).toEqual({ env: "MY_PG_PASSWORD" });
+  });
+
+  it("accepts a top-level password reference", () => {
+    const decoded = Schema.decodeSync(ServiceOptionsSchema)({
+      password: { env: "MY_PG_PASSWORD" },
+    });
+    expect(decoded.password).toEqual({ env: "MY_PG_PASSWORD" });
+  });
+
+  it("rejects malformed environment references", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(ServiceOptionsSchema)({
+        users: [{ name: "myapp", password: { env: "" } }],
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(ServiceOptionsSchema)({
+        users: [{ name: "myapp", password: { env: "123_BAD" } }],
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(ServiceOptionsSchema)({
+        users: [{ name: "myapp", password: {} }],
+      }),
+    ).toThrow();
+  });
+
+  it("still requires a password on declared users", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(ServiceOptionsSchema)({ users: [{ name: "myapp" }] }),
+    ).toThrow();
+  });
+});
+
 describe("VolumeSpecSchema", () => {
   const common = { name: "data", target: "/workspace/data" };
 
@@ -229,7 +276,7 @@ describe("VolumeSpecSchema", () => {
     { ...common, type: "webdav", url: "https://example.com" },
     { ...common, type: "dropbox", path: "/data" },
     { ...common, type: "gdrive", path: "/data" },
-  ])("validates a $type volume", (volume) => {
+  ] as const)("validates a $type volume", (volume) => {
     expect(Schema.decodeSync(VolumeSpecSchema)(volume)).toMatchObject(volume);
   });
 
@@ -243,9 +290,12 @@ describe("VolumeSpecSchema", () => {
     { ...common, type: "webdav" },
     { ...common, type: "dropbox" },
     { ...common, type: "gdrive" },
-  ])("rejects a $type volume without provider fields", (volume) => {
-    expect(() => Schema.decodeSync(VolumeSpecSchema)(volume)).toThrow();
-  });
+  ] as Array<Record<string, unknown>>)(
+    "rejects a $type volume without provider fields",
+    (volume) => {
+      expect(() => Schema.decodeUnknownSync(VolumeSpecSchema)(volume)).toThrow();
+    },
+  );
 });
 
 describe("RuntimeTargetSchema", () => {
@@ -352,5 +402,31 @@ describe("PlanSchema", () => {
 
     const decoded = Schema.decodeSync(PlanSchema)(JSON.parse(JSON.stringify(plan)));
     expect(decoded).toEqual(plan);
+  });
+});
+
+describe("McpConfigSchema volume IO limits", () => {
+  const decode = (limits: Record<string, unknown>) =>
+    Schema.decodeUnknownSync(McpConfigSchema)({ enabled: false, ...limits });
+
+  it("accepts finite positive integer limits", () => {
+    expect(decode({ maxReadBytes: 1024, maxWriteBytes: 2048, maxListEntries: 50 })).toMatchObject({
+      maxReadBytes: 1024,
+      maxWriteBytes: 2048,
+      maxListEntries: 50,
+    });
+  });
+
+  it("rejects NaN, negative, fractional, and unbounded limits", () => {
+    for (const key of ["maxReadBytes", "maxWriteBytes", "maxListEntries"]) {
+      expect(() => decode({ [key]: Number.NaN })).toThrow();
+      expect(() => decode({ [key]: -1 })).toThrow();
+      expect(() => decode({ [key]: 1.5 })).toThrow();
+      expect(() => decode({ [key]: 10485761 })).toThrow();
+    }
+  });
+
+  it("accepts the documented maximum of 10 MiB", () => {
+    expect(decode({ maxReadBytes: 10485760 })).toMatchObject({ maxReadBytes: 10485760 });
   });
 });

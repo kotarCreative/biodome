@@ -14,13 +14,47 @@ import {
   encodeCursor,
   readBounded,
   rejectOversized,
+  VolumeAccessError,
 } from "./adapter.js";
+
+// Endpoints must be plain HTTP(S) and must never point at link-local ranges
+// where cloud metadata services live.
+function validatedEndpoint(endpoint: string | undefined): string | undefined {
+  if (!endpoint) return undefined;
+  const parsed = new URL(endpoint);
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new VolumeAccessError(`S3 endpoint must use http or https: ${redactEndpoint(endpoint)}`);
+  }
+  if (isDeniedHost(parsed.hostname)) {
+    throw new VolumeAccessError(
+      `S3 endpoint host is not allowed: ${redactEndpoint(parsed.hostname)}`,
+    );
+  }
+  return endpoint;
+}
+
+function isDeniedHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "metadata.google.internal" || host.endsWith(".internal")) return true;
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (ipv4) {
+    return (
+      (ipv4[1] === "169" && ipv4[2] === "254") || // link-local, incl. cloud metadata
+      (ipv4[1] === "0" && ipv4[2] === "0") // this-network
+    );
+  }
+  return host === "::1" || host.startsWith("fe80:");
+}
+
+function redactEndpoint(value: string): string {
+  return value.replace(/(\/\/)[^@\s]+@/g, "$1***REDACTED***@");
+}
 
 export function createS3Adapter(config: VolumeConfig): VolumeAdapter {
   const credentials = resolveCredentials(config.credentials);
   const client = new S3Client({
     region: credentials.region || "us-east-1",
-    endpoint: credentials.endpoint,
+    endpoint: validatedEndpoint(credentials.endpoint),
     credentials:
       credentials.accessKeyId && credentials.secretAccessKey
         ? {
@@ -45,6 +79,7 @@ export function createS3Adapter(config: VolumeConfig): VolumeAdapter {
   return {
     async list(path, options) {
       const full = fullPath(path);
+      const scope = { kind: "s3", volumeName: config.name, path };
       const files: FileInfo[] = [];
       const response = await client.send(
         new ListObjectsV2Command({
@@ -52,7 +87,7 @@ export function createS3Adapter(config: VolumeConfig): VolumeAdapter {
           Prefix: full,
           Delimiter: "/",
           MaxKeys: options.limit,
-          ContinuationToken: decodeCursor(options.cursor),
+          ContinuationToken: decodeCursor(options.cursor, scope),
         }),
       );
 
@@ -87,7 +122,7 @@ export function createS3Adapter(config: VolumeConfig): VolumeAdapter {
         files,
         nextCursor:
           response.IsTruncated && response.NextContinuationToken
-            ? encodeCursor(response.NextContinuationToken)
+            ? encodeCursor(response.NextContinuationToken, scope)
             : undefined,
       };
     },

@@ -48,7 +48,7 @@ biodome events --run <runId>
 biodome events --limit 50
 ```
 
-Queries return at most 100 events by default and accept up to 1,000 with `--limit`. Run-filtered queries address only the matching run files. If a historical JSONL line is malformed, the command reports its filename and line number while returning valid events from other lines.
+Queries return at most 100 events by default and accept up to 1,000 with `--limit`. Run-filtered queries address only the matching run files; unfiltered queries also read rotated segments of the newest files. If a historical JSONL line is malformed, the command reports its filename and line number while returning valid events from other lines.
 
 ## Documentation
 

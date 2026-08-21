@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { agentTaskCommand, builtInAgentAdapters, resolveAgent } from "../../agents/index.js";
 import { createPlan, type Plan } from "../../core/plan.js";
+import { runtimeLayout } from "../../runtime/layout.js";
 
 function planFor(type: "pi" | "claude" | "codex" | "opencode"): Plan {
   const plan = createPlan("agents-test");
@@ -79,5 +80,41 @@ describe("agent adapters", () => {
     const plan = planFor("opencode");
     plan.runtime.agentHarnesses[0].type = "custom-agent";
     expect(() => resolveAgent(plan, "agent")).toThrow(/No agent adapter is registered/);
+  });
+
+  it.each([
+    ["pi", "pi-homes"],
+    ["claude", "claude-homes"],
+    ["codex", "codex-homes"],
+    ["opencode", "opencode-homes"],
+  ] as const)("emits %s commands byte-equivalent to the pre-factory adapter", (type, home) => {
+    const { adapter, harness } = resolveAgent(planFor(type), "agent");
+    const layout = runtimeLayout("", "local").container;
+    const inputs = [
+      { name: "agent", prompt: "Review the code" },
+      { name: "worker-1", prompt: "" },
+      { name: "pair review", prompt: "Fix the flaky test\nthen rerun" },
+    ] as const;
+
+    for (const input of inputs) {
+      expect(
+        adapter.command({
+          harness: { ...harness, name: input.name },
+          prompt: input.prompt,
+          layout,
+        }),
+      ).toEqual([
+        `/workspace/.biodome-build/targets/local/${home}/${input.name}/task`,
+        input.prompt,
+      ]);
+    }
+  });
+
+  it("fails loudly instead of falling back when the plan has no deployment target", () => {
+    const plan = planFor("pi");
+    plan.deployment = undefined;
+    expect(() => agentTaskCommand(plan, "agent", "Review the code")).toThrow(
+      /no deployment target/,
+    );
   });
 });

@@ -65,7 +65,7 @@ describe("generatePlanJson", () => {
       url: "http://localhost:8000",
       port: 8000,
       credentials: {
-        username: "admin",
+        username: { env: "DJANGO_ADMIN_USERNAME" },
         password: { env: "DJANGO_ADMIN_PASSWORD" },
       },
       metadata: { framework: "django" },
@@ -77,7 +77,7 @@ describe("generatePlanJson", () => {
     expect(json.endpoints[0].url).toBe("http://localhost:8000");
     expect(json.endpoints[0].port).toBe(8000);
     // Env references stay as references — the secret is never written to disk.
-    expect(json.endpoints[0].credentials.username).toBe("admin");
+    expect(json.endpoints[0].credentials.username).toEqual({ env: "DJANGO_ADMIN_USERNAME" });
     expect(json.endpoints[0].credentials.password).toEqual({ env: "DJANGO_ADMIN_PASSWORD" });
     expect(json.endpoints[0].metadata).toEqual({ framework: "django" });
   });
@@ -210,7 +210,7 @@ describe("volume serialization", () => {
       allowedPaths: ["**/*.pdf"],
       credentials: {
         accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
-        secretAccessKey: "literal-secret",
+        secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
       },
     });
 
@@ -222,7 +222,7 @@ describe("volume serialization", () => {
     expect(volume.readOnly).toBe(true);
     expect(volume.allowedPaths).toEqual(["**/*.pdf"]);
     expect(volume.credentials.accessKeyId).toEqual({ env: "AWS_ACCESS_KEY_ID" });
-    expect(volume.credentials.secretAccessKey).toBe("literal-secret");
+    expect(volume.credentials.secretAccessKey).toEqual({ env: "AWS_SECRET_ACCESS_KEY" });
   });
 
   it("includes non-proxy local volumes without credentials", () => {

@@ -140,7 +140,7 @@ export function addAppPackageEffect(
       const dir = biodomeDir(rootDir);
       ensureManifest(dir);
       ensureIgnored(rootDir);
-      runner.run(["install", "--save", spec], dir);
+      runner.run(["install", "--ignore-scripts", "--save", spec], dir);
       return validateInstalledMetadata(dir, spec);
     },
     catch: (error) => packageManagerError("install", error),

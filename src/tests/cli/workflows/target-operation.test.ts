@@ -1,24 +1,46 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { capabilitiesOf } from "../../../core/capabilities.js";
 import { RuntimeError } from "../../../core/errors.js";
 import { NoOpEventStoreLive } from "../../../core/events.js";
 import { createPlan } from "../../../core/plan.js";
-import type { RuntimeDriver } from "../../../runtime/driver.js";
+import type {
+  AvailableDriver,
+  BuildableDriver,
+  ExecutableDriver,
+  RenderableDriver,
+  RestartDriver,
+  RuntimeDriver,
+  StartableDriver,
+  StatusDriver,
+  StoppableDriver,
+} from "../../../runtime/driver.js";
 import { createTargetOperation } from "../../../cli/target-operation.js";
 import {
   buildWorkflow,
   downWorkflow,
   execWorkflow,
   logsWorkflow,
+  psWorkflow,
   restartWorkflow,
+  statusWorkflow,
   upWorkflow,
 } from "../../../cli/workflows/target.js";
 import { targetValidateWorkflow } from "../../../cli/workflows/config.js";
+import { createBuildManifest, writeBuildManifest } from "../../../runtime/build-manifest.js";
 import { writeState } from "../../../runtime/state.js";
+
+type TestDriver = RuntimeDriver &
+  RenderableDriver &
+  AvailableDriver &
+  BuildableDriver &
+  StartableDriver &
+  StoppableDriver &
+  ExecutableDriver &
+  StatusDriver;
 
 function driver(
   capabilities = capabilitiesOf(
@@ -27,7 +49,7 @@ function driver(
     "lifecycle.stop",
     "status.read",
   ),
-): RuntimeDriver {
+): TestDriver {
   return {
     id: "fake",
     capabilities,
@@ -103,7 +125,7 @@ describe("target workflows", () => {
   });
 
   it("rejects unsupported local target requirements before availability checks", async () => {
-    const runtimeDriver: RuntimeDriver = { ...driver(), id: "docker-compose" };
+    const runtimeDriver = { ...driver(), id: "docker-compose" };
     const ensureAvailable = vi.fn(() => Effect.void);
     runtimeDriver.ensureAvailable = ensureAvailable;
     const deps = dependencies(runtimeDriver);
@@ -152,6 +174,65 @@ describe("target workflows", () => {
     ).rejects.toBeInstanceOf(RuntimeError);
   });
 
+  it("keeps biodome exec on the in-place path and never launches one-shot jobs", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "biodome-exec-"));
+    try {
+      writeState(rootDir, "local", {
+        driver: "fake",
+        deploymentId: "deployment",
+        resourceIds: {},
+        createdAt: new Date().toISOString(),
+      });
+      const digest = `sha256:${"a".repeat(64)}`;
+      writeBuildManifest(
+        rootDir,
+        "local",
+        createBuildManifest({
+          target: "local",
+          driver: "fake",
+          deploymentId: "deployment",
+          digest,
+          contentId: digest,
+        }),
+      );
+
+      const runJob = vi.fn(() =>
+        Effect.succeed({ exitCode: 0, stdout: "", stderr: "", durationMs: 0 }),
+      );
+      const jobOnly = {
+        ...driver(capabilitiesOf("lifecycle.build", "lifecycle.start")),
+        id: "fake-job",
+        capabilities: capabilitiesOf("job.run"),
+        runJob,
+      } as unknown as TestDriver;
+      await expect(
+        Effect.runPromise(
+          execWorkflow(rootDir, "local", ["true"], dependencies(jobOnly)).pipe(
+            Effect.provide(NoOpEventStoreLive("test")),
+          ),
+        ),
+      ).rejects.toThrow(/in-place command execution/);
+      expect(runJob).not.toHaveBeenCalled();
+
+      const exec = vi.fn(() =>
+        Effect.succeed({ exitCode: 0, stdout: "", stderr: "", durationMs: 0 }),
+      );
+      const inPlace = {
+        ...driver(capabilitiesOf("lifecycle.build", "lifecycle.start")),
+        capabilities: capabilitiesOf("exec.inplace"),
+        exec,
+      };
+      await Effect.runPromise(
+        execWorkflow(rootDir, "local", ["true"], dependencies(inPlace)).pipe(
+          Effect.provide(NoOpEventStoreLive("test")),
+        ),
+      );
+      expect(exec).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("validates deployment state before stopping", async () => {
     const rootDir = mkdtempSync(join(tmpdir(), "biodome-down-"));
     try {
@@ -159,9 +240,11 @@ describe("target workflows", () => {
       const runtimeDriver = driver();
       runtimeDriver.stop = stop;
       const deps = dependencies(runtimeDriver);
-      await expect(Effect.runPromise(downWorkflow(rootDir, "local", deps))).rejects.toThrow(
-        "No deployment state found",
-      );
+      await expect(
+        Effect.runPromise(
+          downWorkflow(rootDir, "local", deps).pipe(Effect.provide(NoOpEventStoreLive("test"))),
+        ),
+      ).rejects.toThrow("No deployment state found");
       expect(stop).not.toHaveBeenCalled();
 
       writeState(rootDir, "local", {
@@ -185,7 +268,7 @@ describe("target workflows", () => {
     const logs = vi.fn(() => Effect.void);
     const runtimeDriver = driver(
       capabilitiesOf("lifecycle.build", "lifecycle.start", "lifecycle.stop", "logs.stream"),
-    ) as RuntimeDriver & { logs: typeof logs };
+    ) as TestDriver & { logs: typeof logs };
     runtimeDriver.logs = logs;
 
     await expect(
@@ -202,18 +285,37 @@ describe("target workflows", () => {
     const restarted: string[] = [];
     const runtimeDriver = driver(
       capabilitiesOf("lifecycle.build", "lifecycle.start", "lifecycle.stop", "process.signal"),
-    ) as RuntimeDriver & {
-      restart: (input: { processName: string }) => ReturnType<typeof Effect.void>;
-    };
+    ) as TestDriver & RestartDriver;
     runtimeDriver.restart = ({ processName }) =>
       Effect.sync(() => {
         restarted.push(processName);
       });
     const deps = dependencies(runtimeDriver);
     deps.plan.runtime.processes.push(
-      { name: "web", command: ["web"], ports: [], environment: {}, mode: "daemon" },
-      { name: "worker", command: ["worker"], ports: [], environment: {}, mode: "daemon" },
-      { name: "setup", command: ["setup"], ports: [], environment: {}, mode: "oneshot" },
+      {
+        name: "web",
+        command: ["web"],
+        ports: [],
+        environment: {},
+        mode: "daemon",
+        startOn: "start.post",
+      },
+      {
+        name: "worker",
+        command: ["worker"],
+        ports: [],
+        environment: {},
+        mode: "daemon",
+        startOn: "start.post",
+      },
+      {
+        name: "setup",
+        command: ["setup"],
+        ports: [],
+        environment: {},
+        mode: "oneshot",
+        startOn: "start.post",
+      },
     );
 
     const rootDir = mkdtempSync(join(tmpdir(), "biodome-restart-"));
@@ -254,7 +356,7 @@ describe("target workflows", () => {
     };
     const baseDriver = driver();
     const render = vi.fn(baseDriver.render);
-    const runtimeDriver: RuntimeDriver = { ...baseDriver, id: "aws-ecs", render };
+    const runtimeDriver = { ...baseDriver, id: "aws-ecs", render };
     const deps = {
       plan,
       buildTargetPlan: vi.fn(() => Effect.succeed(plan)),
@@ -265,5 +367,64 @@ describe("target workflows", () => {
       /incompatible with provider/,
     );
     expect(render).not.toHaveBeenCalled();
+  });
+
+  it("reads status through the injected driver for ps and status workflows", async () => {
+    const runtimeDriver = driver();
+    const status = vi.fn(() =>
+      Effect.succeed({ state: "running" as const, message: "all healthy" }),
+    );
+    runtimeDriver.status = status;
+    const deps = dependencies(runtimeDriver);
+
+    const rootDir = mkdtempSync(join(tmpdir(), "biodome-ps-"));
+    try {
+      writeState(rootDir, "local", {
+        driver: "fake",
+        deploymentId: "deployment",
+        resourceIds: {},
+        createdAt: new Date().toISOString(),
+      });
+      writeBuildManifest(
+        rootDir,
+        "local",
+        createBuildManifest({
+          target: "local",
+          driver: "fake",
+          deploymentId: "deployment",
+          digest: `sha256:${"a".repeat(64)}`,
+          contentId: `sha256:${"a".repeat(64)}`,
+        }),
+      );
+      await expect(
+        Effect.runPromise(
+          psWorkflow(rootDir, "local", deps).pipe(Effect.provide(NoOpEventStoreLive("test"))),
+        ),
+      ).resolves.toEqual({ status: { state: "running", message: "all healthy" } });
+
+      const result = await Effect.runPromise(
+        statusWorkflow(rootDir, "local", deps).pipe(Effect.provide(NoOpEventStoreLive("test"))),
+      );
+      expect(result.status).toEqual({ state: "running", message: "all healthy" });
+      expect(result.hasProcessStatus).toBe(false);
+      expect(status).toHaveBeenCalledTimes(2);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects ps and status for drivers without status.read", async () => {
+    const runtimeDriver = driver(capabilitiesOf());
+    const deps = dependencies(runtimeDriver);
+    await expect(
+      Effect.runPromise(
+        psWorkflow("/project", "local", deps).pipe(Effect.provide(NoOpEventStoreLive("test"))),
+      ),
+    ).rejects.toThrow('Driver "fake" does not support status.read');
+    await expect(
+      Effect.runPromise(
+        statusWorkflow("/project", "local", deps).pipe(Effect.provide(NoOpEventStoreLive("test"))),
+      ),
+    ).rejects.toThrow('Driver "fake" does not support status.read');
   });
 });

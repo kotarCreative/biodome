@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { redactQueryTokens } from "../core/redaction.js";
 
 export interface UpstreamProvider {
   name: string;
@@ -67,8 +68,7 @@ function redactError(error: unknown, provider: UpstreamProvider): string {
     /(authorization|proxy-authorization)\s*[:=]\s*[^,;\r\n]+/gi,
     "$1: [REDACTED]",
   );
-  message = message.replace(/([?&](?:access_token|api[_-]?key|token)=)[^&#\s]+/gi, "$1[REDACTED]");
-  return message;
+  return redactQueryTokens(message, "[REDACTED]");
 }
 
 export class UpstreamRegistry {
@@ -245,33 +245,42 @@ export class UpstreamRegistry {
 
   async describe(qualified: string): Promise<CatalogEntry> {
     const { provider: providerName } = parseQualified(qualified);
-    const cached = this.completedCatalog?.find((entry) => entry.qualified === qualified);
-    if (cached) return cached;
-
     const provider = this.provider(providerName);
-    const client = await this.ensureConnected(providerName);
-    const result = await this.request(providerName, client, client.listTools());
-    const tool = result.tools?.find(
-      (candidate) => `${providerName}.${candidate.name}` === qualified,
-    );
-    if (!tool) throw new Error(`Tool "${qualified}" not found in provider "${providerName}"`);
-    return {
-      provider: provider.name,
-      tool: tool.name,
-      qualified,
-      description: tool.description ?? "",
-      inputSchema: tool.inputSchema,
-    };
+    try {
+      const cached = this.completedCatalog?.find((entry) => entry.qualified === qualified);
+      if (cached) return cached;
+
+      const client = await this.ensureConnected(providerName);
+      const result = await this.request(providerName, client, client.listTools());
+      const tool = result.tools?.find(
+        (candidate) => `${providerName}.${candidate.name}` === qualified,
+      );
+      if (!tool) throw new Error(`Tool "${qualified}" not found in provider "${providerName}"`);
+      return {
+        provider: provider.name,
+        tool: tool.name,
+        qualified,
+        description: tool.description ?? "",
+        inputSchema: tool.inputSchema,
+      };
+    } catch (error) {
+      throw new Error(redactError(error, provider));
+    }
   }
 
   async call(qualified: string, args: unknown): Promise<unknown> {
     const { provider: providerName, tool } = parseQualified(qualified);
-    const client = await this.ensureConnected(providerName);
-    return this.request(
-      providerName,
-      client,
-      client.callTool({ name: tool, arguments: (args as Record<string, unknown>) ?? {} }),
-    );
+    const provider = this.provider(providerName);
+    try {
+      const client = await this.ensureConnected(providerName);
+      return await this.request(
+        providerName,
+        client,
+        client.callTool({ name: tool, arguments: (args as Record<string, unknown>) ?? {} }),
+      );
+    } catch (error) {
+      throw new Error(redactError(error, provider));
+    }
   }
 
   getErrors(): ProviderError[] {

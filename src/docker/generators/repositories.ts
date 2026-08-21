@@ -1,9 +1,10 @@
 import type { Plan, Repo } from "../../core/plan.js";
-import { shellQuote } from "./shell.js";
+import { assertIdentifier, shellQuote } from "./shell.js";
 
 export function generateRepoScripts(plan: Plan): Record<string, string> {
   const scripts: Record<string, string> = {};
   for (const repo of plan.runtime.repos) {
+    assertIdentifier(repo.name, "repo name");
     scripts[`${repo.name}.sh`] = repoSyncScript(repo, plan);
   }
   return scripts;
@@ -17,6 +18,7 @@ function repoSyncScript(repo: Repo, plan: Plan): string {
   const knownHosts = repo.credentials?.knownHosts;
 
   if (tokenRef) {
+    assertIdentifier(tokenRef.env, "credential environment variable name");
     lines.push(
       `if [ -z "$${tokenRef.env}" ]; then echo "Repo ${repo.name}: ${tokenRef.env} is not set"; exit 1; fi`,
     );
@@ -32,6 +34,7 @@ function repoSyncScript(repo: Repo, plan: Plan): string {
   }
 
   if (sshKeyRef) {
+    assertIdentifier(sshKeyRef.env, "credential environment variable name");
     lines.push(
       `if [ -z "$${sshKeyRef.env}" ]; then echo "Repo ${repo.name}: ${sshKeyRef.env} is not set"; exit 1; fi`,
     );

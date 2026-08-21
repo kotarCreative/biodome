@@ -53,7 +53,7 @@ describe("MCP command runner", () => {
       stderrMaxBytes: 32,
     });
 
-    await expect(runner.exec(`${node} -e "process.stdout.write('shell')"`)).resolves.toEqual({
+    await expect(runner.exec(`${node} -e "process.stdout.write('shell')"`, {})).resolves.toEqual({
       stdout: "shell",
       stderr: "",
     });

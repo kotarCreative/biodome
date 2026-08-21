@@ -1,6 +1,6 @@
 import type { PiHarness, Plan } from "../../../core/plan.js";
-import { generatedRuntimeDir } from "../shell.js";
-import { taskArtifactUploadLines, telemetryWriterModule, telemetryWriterPath } from "./shared.js";
+import { assertIdentifier, generatedRuntimeDir, shellQuote } from "../shell.js";
+import { taskWrapperScript, telemetryWriterModule, telemetryWriterPath } from "./shared.js";
 
 export function generatePiHarnessFiles(plan: Plan): Record<string, string> {
   const files: Record<string, string> = {};
@@ -8,6 +8,7 @@ export function generatePiHarnessFiles(plan: Plan): Record<string, string> {
     files["telemetry/writer.cjs"] = telemetryWriterModule();
   }
   for (const harness of plan.runtime.piHarnesses) {
+    assertIdentifier(harness.name, "harness name");
     const homeDir = `pi-homes/${harness.name}`;
     files[`${homeDir}/settings.json`] = piSettings(harness, plan);
     files[`${homeDir}/pi`] = piWrapperScript(harness, plan);
@@ -45,14 +46,15 @@ function piSettings(harness: PiHarness, plan?: Plan): string {
 
 function piWrapperScript(harness: PiHarness, plan?: Plan): string {
   const homeDir = `${generatedRuntimeDir(plan)}/pi-homes/${harness.name}`;
-  const envExports: string[] = [`export PI_CODING_AGENT_DIR=${homeDir}`];
+  const envExports: string[] = [`export PI_CODING_AGENT_DIR=${shellQuote(homeDir)}`];
   if (harness.apiKey && typeof harness.apiKey === "object" && "env" in harness.apiKey) {
+    assertIdentifier(harness.apiKey.env, "API key environment variable name");
     envExports.push(`export ${harness.apiKey.env}="$${harness.apiKey.env}"`);
   }
 
   const args: string[] = [];
   if (harness.tools && harness.tools.length > 0) {
-    args.push(`--tools ${harness.tools.join(",")}`);
+    args.push(`--tools ${shellQuote(harness.tools.join(","))}`);
   }
 
   return [
@@ -113,19 +115,15 @@ function piTelemetryExtension(harness: PiHarness, plan: Plan): string {
 
 function piTaskScript(harness: PiHarness, plan?: Plan): string {
   const homeDir = `${generatedRuntimeDir(plan)}/pi-homes/${harness.name}`;
-  const lines: string[] = [
-    "#!/bin/sh",
-    `# Auto-generated Pi task wrapper for ${harness.name}`,
-    "set -e",
-    "",
-    `export PI_CODING_AGENT_DIR=${homeDir}`,
-  ];
+  const setupLines: string[] = [`export PI_CODING_AGENT_DIR=${shellQuote(homeDir)}`];
   if (harness.apiKey && typeof harness.apiKey === "object" && "env" in harness.apiKey) {
-    lines.push(`export ${harness.apiKey.env}="$${harness.apiKey.env}"`);
+    assertIdentifier(harness.apiKey.env, "API key environment variable name");
+    setupLines.push(`export ${harness.apiKey.env}="$${harness.apiKey.env}"`);
   }
-  lines.push("");
-  lines.push(`pi -p "$@"`);
-  lines.push(...taskArtifactUploadLines());
-  lines.push("");
-  return lines.join("\n");
+  return taskWrapperScript({
+    tool: "Pi",
+    harnessName: harness.name,
+    setupLines,
+    commandLines: [`pi -p "$@"`],
+  });
 }

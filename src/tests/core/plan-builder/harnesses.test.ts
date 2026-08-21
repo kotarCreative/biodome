@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EnvSpec, LanguageOptions, ProcessSpec } from "../../../core/feature.js";
-import { createPlan } from "../../../core/plan.js";
+import { createPlan, type SecretReference } from "../../../core/plan.js";
 import { type HarnessDependencies, HarnessBuilder } from "../../../core/plan-builder/harnesses.js";
 
 function makeBuilder(overrides: Partial<HarnessDependencies> = {}) {
@@ -159,7 +159,9 @@ describe("HarnessBuilder", () => {
     ]);
     expect(processes).toEqual([]);
     expect(() => builder.addPiHarness({ name: "coder" })).toThrow(/Duplicate Pi harness name/);
-    expect(() => builder.addPiHarness({ name: "literal", apiKey: "secret" })).toThrow();
+    expect(() =>
+      builder.addPiHarness({ name: "literal", apiKey: "secret" as unknown as SecretReference }),
+    ).toThrow();
   });
 
   it("normalizes Codex defaults and contributes an isolated daemon process", () => {
@@ -195,7 +197,12 @@ describe("HarnessBuilder", () => {
     expect(environments).toEqual([
       { key: "OPENAI_API_KEY", spec: { from: { env: "OPENAI_API_KEY" } } },
     ]);
-    expect(() => builder.addCodexHarness({ name: "invalid", apiKey: "secret" })).toThrow();
+    expect(() =>
+      builder.addCodexHarness({
+        name: "invalid",
+        apiKey: "secret" as unknown as SecretReference,
+      }),
+    ).toThrow();
     expect(() => builder.addCodexHarness({ name: "invalid-port", port: 70000 })).toThrow(
       /integer between 1 and 65535/,
     );
@@ -250,7 +257,9 @@ describe("HarnessBuilder", () => {
     expect(() => builder.addClaudeHarness({ name: "assistant" })).toThrow(
       /Duplicate Claude harness name/,
     );
-    expect(() => builder.addClaudeHarness({ name: "literal", apiKey: "secret" })).toThrow();
+    expect(() =>
+      builder.addClaudeHarness({ name: "literal", apiKey: "secret" as unknown as SecretReference }),
+    ).toThrow();
   });
 
   it("preserves family-local names and propagates injected capability failures after recording", () => {

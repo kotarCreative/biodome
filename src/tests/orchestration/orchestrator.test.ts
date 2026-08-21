@@ -6,7 +6,17 @@ import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
 import { createPlan, type Plan } from "../../core/plan.js";
 import { capabilitiesOf } from "../../core/capabilities.js";
-import type { RuntimeDriver } from "../../runtime/driver.js";
+import type {
+  RuntimeDriver,
+  RenderableDriver,
+  AvailableDriver,
+  BuildableDriver,
+  StartableDriver,
+  StoppableDriver,
+  ExecutableDriver,
+  ArtifactDriver,
+  StatusDriver,
+} from "../../runtime/driver.js";
 import { EventStore, type EventStore as EventStoreService } from "../../core/events.js";
 import { orchestrateTask } from "../../orchestration/orchestrator.js";
 import { readRunRecordEffect } from "../../orchestration/run-store.js";
@@ -44,7 +54,18 @@ function taskPlan(): Plan {
   return plan;
 }
 
-function driver(): RuntimeDriver {
+/** Full driver surface orchestrateTask may exercise on a task-capable backend. */
+type TestDriver = RuntimeDriver &
+  RenderableDriver &
+  AvailableDriver &
+  BuildableDriver &
+  StartableDriver &
+  StoppableDriver &
+  ExecutableDriver &
+  ArtifactDriver &
+  StatusDriver;
+
+function driver(): TestDriver {
   return {
     id: "fake",
     capabilities: capabilitiesOf(
@@ -101,7 +122,7 @@ describe("orchestrateTask", () => {
   it("rejects incompatible providers before provisioning", async () => {
     const base = driver();
     const start = vi.fn(base.start);
-    const incompatible: RuntimeDriver = {
+    const incompatible: TestDriver = {
       ...base,
       capabilities: capabilitiesOf("exec.inplace"),
       start,

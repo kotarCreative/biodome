@@ -1,11 +1,12 @@
 import type { Plan, Process, ProcessHealthCheck } from "../../core/plan.js";
-import { generatedRuntimeDir, parseDuration, shellQuote } from "./shell.js";
+import { assertIdentifier, generatedRuntimeDir, parseDuration, shellQuote } from "./shell.js";
 
 export function generateHealthcheckScripts(plan: Plan): Record<string, string> {
   const scripts: Record<string, string> = {};
   const daemonProcesses = plan.runtime.processes.filter((p) => p.mode === "daemon");
   for (const proc of daemonProcesses) {
     if (proc.healthCheck) {
+      assertIdentifier(proc.name, "process name");
       scripts[`${proc.name}.sh`] = processHealthCheckScript(proc);
       scripts[`${proc.name}-monitor.sh`] = processHealthMonitorScript(proc, plan);
     }
@@ -31,6 +32,8 @@ function processHealthMonitorScript(proc: Process, plan: Plan): string {
   const interval = proc.healthCheck.interval || "5s";
   const retries = proc.healthCheck.retries ?? 3;
   const startPeriod = proc.healthCheck.startPeriod || "5s";
+  const checkScript = shellQuote(`${generatedRuntimeDir(plan)}/healthchecks/${proc.name}.sh`);
+  const config = shellQuote(`${generatedRuntimeDir(plan)}/supervisord.conf`);
   return (
     [
       "#!/bin/sh",
@@ -38,12 +41,12 @@ function processHealthMonitorScript(proc: Process, plan: Plan): string {
       `sleep ${startPeriod}`,
       "failures=0",
       "while true; do",
-      `  if sh ${generatedRuntimeDir(plan)}/healthchecks/${proc.name}.sh >/dev/null 2>&1; then`,
+      `  if sh ${checkScript} >/dev/null 2>&1; then`,
       "    failures=0",
       "  else",
       "    failures=$((failures + 1))",
       `    if [ $failures -ge ${retries} ]; then`,
-      `      supervisorctl -c ${generatedRuntimeDir(plan)}/supervisord.conf restart ${proc.name}`,
+      `      supervisorctl -c ${config} restart ${proc.name}`,
       "      failures=0",
       "    fi",
       "  fi",
@@ -57,7 +60,7 @@ function aggregateHealthCheckScript(plan: Plan): string {
   const daemonProcesses = plan.runtime.processes.filter((p) => p.mode === "daemon");
   const checks = daemonProcesses
     .filter((p) => p.healthCheck)
-    .map((p) => `sh ${generatedRuntimeDir(plan)}/healthchecks/${p.name}.sh`);
+    .map((p) => `sh ${shellQuote(`${generatedRuntimeDir(plan)}/healthchecks/${p.name}.sh`)}`);
   if (checks.length === 0) {
     return ["#!/bin/sh", "# Auto-generated aggregate health check", "exit 0"].join("\n") + "\n";
   }
@@ -77,6 +80,8 @@ function shellHealthCheck(hc: ProcessHealthCheck): string {
     case "tcp":
       return `nc -z -w ${timeoutSeconds} localhost ${hc.port || 80}`;
     default:
-      return `curl -fsS --max-time ${timeoutSeconds} ${hc.url || `http://localhost:${hc.port || 80}`}`;
+      return `curl -fsS --max-time ${timeoutSeconds} ${shellQuote(
+        hc.url || `http://localhost:${hc.port || 80}`,
+      )}`;
   }
 }

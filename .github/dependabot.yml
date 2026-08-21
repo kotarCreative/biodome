@@ -1,0 +1,21 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      otel:
+        patterns:
+          - "@opentelemetry/*"
+      aws-sdk:
+        patterns:
+          - "@aws-sdk/*"
+    ignore:
+      # Beta Effect stack is upgraded deliberately, not automatically.
+      - dependency-name: "effect"
+      - dependency-name: "@effect/*"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

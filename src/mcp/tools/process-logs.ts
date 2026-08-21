@@ -7,7 +7,18 @@ export type { ProcessRunner } from "../command-runner.js";
 export interface ServiceProbe {
   (host: string, port: number): Promise<boolean>;
 }
+export type McpAuditSink = (type: string, data: Readonly<Record<string, unknown>>) => Promise<void>;
+// generateSupervisordConf writes every supervised log under
+// <runtime-dir>/logs and injects this variable into each program's supervisord
+// environment. Generator code is not shipped into the container's MCP runtime,
+// so the name/value pair is pinned by tests on both sides.
+const SUPERVISOR_LOG_DIR_ENV = "BIODOME_LOG_DIR";
+const FALLBACK_SUPERVISOR_LOG_DIR = "/workspace/.biodome-build/logs";
 const validName = (name: string) => /^[A-Za-z0-9_.-]+$/.test(name) && name !== "." && name !== "..";
+
+function supervisorLogFile(name: string): string {
+  return `${process.env[SUPERVISOR_LOG_DIR_ENV] || FALLBACK_SUPERVISOR_LOG_DIR}/${name}.log`;
+}
 export function createProcessLogTools(
   plan: McpPlan,
   runner: ProcessRunner,
@@ -15,6 +26,7 @@ export function createProcessLogTools(
   allowExec: boolean,
   allowProcessControl: boolean,
   commandTimeoutMs: number,
+  audit: McpAuditSink,
 ): readonly ToolDefinition[] {
   const status = async () => {
     try {
@@ -75,7 +87,7 @@ export function createProcessLogTools(
         if (!validName(name))
           throw new McpError(ErrorCode.InvalidParams, "process_name must match [A-Za-z0-9_.-]+");
         const lines = typeof args.lines === "number" ? Math.min(Math.max(1, args.lines), 500) : 50;
-        const file = `/tmp/${name}.log`;
+        const file = supervisorLogFile(name);
         try {
           return text((await runner.execFile("tail", ["-n", String(lines), file])).stdout);
         } catch (error) {
@@ -140,7 +152,7 @@ export function createProcessLogTools(
           {
             name: "exec_command",
             description:
-              "Run an arbitrary command inside the dev container. All executions are logged to stdout for auditing.",
+              "Run an arbitrary command inside the dev container. Execution metadata is recorded in the MCP event log without command text.",
             inputSchema: {
               type: "object",
               properties: { command: { type: "string" }, timeout: { type: "number" } },
@@ -149,11 +161,15 @@ export function createProcessLogTools(
             handler: async (args: ToolArguments) => {
               const command = typeof args.command === "string" ? args.command : "";
               if (!command) throw new McpError(ErrorCode.InvalidParams, "command is required");
+              const userTimeoutMs =
+                typeof args.timeout === "number" && Number.isFinite(args.timeout)
+                  ? Math.min(Math.max(1, args.timeout * 1000), commandTimeoutMs)
+                  : commandTimeoutMs;
+              await audit("tool.exec", {
+                commandBytes: Buffer.byteLength(command),
+                timeoutMs: userTimeoutMs,
+              });
               try {
-                const userTimeoutMs =
-                  typeof args.timeout === "number" && Number.isFinite(args.timeout)
-                    ? Math.min(Math.max(1, args.timeout * 1000), commandTimeoutMs)
-                    : commandTimeoutMs;
                 const result = await runner.exec(command, {
                   timeoutMs: userTimeoutMs,
                   cwd: "/workspace",

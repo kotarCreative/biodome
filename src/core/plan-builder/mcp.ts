@@ -40,6 +40,8 @@ const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const AUTHENTICATED_MCP_CLIENT_TYPES = new Set(["opencode", "codex"]);
 
 export class McpBuilder {
+  private tokenStrengthAdvised = false;
+
   constructor(
     private readonly plan: Plan,
     private readonly layout: McpLayout,
@@ -117,6 +119,15 @@ export class McpBuilder {
       // (and every supervised process) receives the value from the host.
       if (!this.plan.runtime.envVars.some((entry) => entry.key === configuredToken.env)) {
         this.capabilities.addEnv(configuredToken.env, { from: { env: configuredToken.env } });
+      }
+      // The token value is not known at plan time, so advise once per build
+      // that it must be high-entropy: it authenticates every MCP call,
+      // including exec_command when allowExec is enabled.
+      if (!this.tokenStrengthAdvised) {
+        this.tokenStrengthAdvised = true;
+        console.warn(
+          `[biodome] MCP token env var "${configuredToken.env}" gates exec_command; set it to a high-entropy random secret`,
+        );
       }
     }
 

@@ -8,6 +8,7 @@ import {
   dockerSandboxDriver,
 } from "../../runtime/docker-sandbox.js";
 import { createPlan } from "../../core/plan.js";
+import { NoOpEventStoreLive } from "../../core/events.js";
 import { Effect } from "effect";
 
 describe("Docker Sandboxes argument builders", () => {
@@ -140,13 +141,15 @@ describe("Docker Sandbox capabilities", () => {
     const target = { name: "local", driver: "docker-sandbox" as const, options: {} };
     await expect(
       Effect.runPromise(
-        dockerSandboxDriver.status({
-          rootDir: "/project",
-          outputDir: "/project/.biodome-build/targets/local",
-          plan,
-          target,
-          deploymentId: "deployment",
-        }),
+        dockerSandboxDriver
+          .status({
+            rootDir: "/project",
+            outputDir: "/project/.biodome-build/targets/local",
+            plan,
+            target,
+            deploymentId: "deployment",
+          })
+          .pipe(Effect.provide(NoOpEventStoreLive("test"))),
       ),
     ).rejects.toThrow(/requires validated deployment state/);
   });

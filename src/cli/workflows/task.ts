@@ -44,7 +44,9 @@ export function runTaskWorkflow(rootDir: string, targetName: string, taskName: s
       });
     }
     yield* driver.ensureAvailable(deployment.target);
-    yield* Effect.logInfo(`Running task "${taskName}" against sandbox "${targetName}"`);
+    yield* Effect.sync(() =>
+      console.log(`Running task "${taskName}" against sandbox "${targetName}"`),
+    );
     return yield* orchestrateTask(rootDir, plan, driver);
   });
 }
