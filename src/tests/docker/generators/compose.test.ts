@@ -35,7 +35,10 @@ describe("generateCompose", () => {
     });
 
     const compose = generateCompose(plan);
-    expect(compose).toContain("8000:8000");
+    // Published ports must bind to host loopback only, never all interfaces.
+    expect(compose).toContain("- 127.0.0.1:8000:8000");
+    expect(compose).toMatch(/ports:\n\s+- 127\.0\.0\.1:/);
+    expect(compose).not.toMatch(/^\s+- \d+:\d+$/m);
     expect(compose).toContain("healthcheck:");
     expect(compose).toContain("sh /workspace/.biodome-build/healthchecks/all.sh");
     expect(compose).not.toContain("sleep infinity");

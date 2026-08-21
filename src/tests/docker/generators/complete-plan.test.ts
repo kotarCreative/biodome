@@ -250,8 +250,9 @@ describe("complete-plan artifact regression", () => {
       workspace: "../..",
     });
     expect(compose).toContain("complete-dev:latest");
-    expect(compose).toContain("3000:3000");
-    expect(compose).toContain("5432:5432");
+    // Ports publish on host loopback only.
+    expect(compose).toContain("127.0.0.1:3000:3000");
+    expect(compose).toContain("127.0.0.1:5432:5432");
     expect(compose).toContain("sh /workspace/.biodome-build/targets/local/healthchecks/all.sh");
     expect(compose).toContain("./data:/workspace/data");
     expect(compose).toContain("node_modules:/workspace/node_modules");

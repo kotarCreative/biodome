@@ -172,10 +172,10 @@ function devService(plan: Plan, paths: ComposePaths): ComposeService {
     const ports: string[] = [];
     const seen = new Set<string>();
     const collectPort = (p: { host: number; container: number }): void => {
-      // The MCP server exposes action tools (exec_command, restart_process),
-      // so publish it only on host loopback rather than all interfaces.
-      const isMcpPort = plan.build.mcpEnabled && p.host === plan.build.mcpPort;
-      const mapping = isMcpPort ? `127.0.0.1:${p.host}:${p.container}` : `${p.host}:${p.container}`;
+      // Published ports bind to host loopback so dev servers, backing
+      // services, and the MCP server (which exposes action tools such as
+      // exec_command) are never reachable from other machines on the network.
+      const mapping = `127.0.0.1:${p.host}:${p.container}`;
       if (seen.has(mapping)) return;
       seen.add(mapping);
       ports.push(mapping);

@@ -17,7 +17,7 @@ describe("app contract end to end", () => {
       expect.arrayContaining(["api:http", "web:http"]),
     );
     expect(plan.runtime.contributions.length).toBeGreaterThan(0);
-    expect(generateCompose(plan)).toContain("3100:3100");
+    expect(generateCompose(plan)).toContain("127.0.0.1:3100:3100");
     const taskPlan = await buildTaskPlan(demo, "local", "smoke", { dryRun: true });
     expect(compileExecutionPlan(taskPlan).project).toBe("apps-demo");
   });

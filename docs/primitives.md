@@ -4,7 +4,7 @@ Primitives are the building blocks of a biodome. You add them through the contex
 
 ## `addProcess(spec)`
 
-Declares a long-running process managed by `supervisord` inside the dev container. Daemon processes are started automatically when the container starts, expose ports, and can have health checks.
+Declares a long-running process managed by `supervisord` inside the dev container. Daemon processes are started automatically when the container starts, expose ports on host loopback (`127.0.0.1`), and can have health checks.
 
 ```javascript
 export default function django(ctx) {
@@ -139,9 +139,10 @@ export default function services(ctx) {
 }
 ```
 
-Each service's declared port is published from the dev container so host
-tooling keeps working; inside the environment the service is reachable on
-`localhost`.
+Each service's declared port is published from the dev container on host
+loopback (`127.0.0.1`) so host tooling keeps working and the port is never
+reachable from other machines; inside the environment the service is reachable
+on `localhost`.
 
 ## `addEndpoint(spec)`
 
