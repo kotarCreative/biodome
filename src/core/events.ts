@@ -217,7 +217,21 @@ export function createFileEventStore(options: FileEventStoreOptions): EventStore
   const maxFiles = options.maxFiles ?? DEFAULT_MAX_LOG_FILES;
   let sequence = 0;
   let closed = false;
-  let bytes = existsSync(path) ? statSync(path).size : 0;
+  let bytes = 0;
+  // A log inherited from a previous run may carry stale permissions; normalize
+  // once instead of chmod-ing after every append. Files created here get
+  // 0o600 directly from appendFileSync.
+  const preExisting = existsSync(path);
+  if (preExisting) {
+    bytes = statSync(path).size;
+    try {
+      chmodSync(path, 0o600);
+    } catch {
+      // Best effort; the store still functions with inherited permissions.
+    }
+  }
+  let dirReady = false;
+  let pruned = false;
   let writes = Promise.resolve();
 
   const defaultScope = (override?: EventScope): EventScope => ({
@@ -227,11 +241,13 @@ export function createFileEventStore(options: FileEventStoreOptions): EventStore
   });
 
   const ensureDir = () => {
+    if (dirReady) return;
     const dir = dirname(path);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
     chmodSync(dir, 0o700);
+    dirReady = true;
   };
 
   const prune = () => {
@@ -279,15 +295,21 @@ export function createFileEventStore(options: FileEventStoreOptions): EventStore
           }
           renameSync(path, `${path}.1`);
           bytes = 0;
+          // Rotated files may exceed the retention cap; re-check on this write.
+          pruned = false;
         }
       } catch {
         // Best-effort rotation; write anyway on error.
       }
     }
     appendFileSync(path, line, { mode: 0o600 });
-    chmodSync(path, 0o600);
     bytes += lineBytes;
-    prune();
+    // Pruning scans the whole log directory, so it runs once per store and
+    // again only when a rotation adds a new rotated file.
+    if (!pruned) {
+      prune();
+      pruned = true;
+    }
   };
 
   const emit: EventStore["emit"] = <T extends EventType>(
