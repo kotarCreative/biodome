@@ -362,6 +362,8 @@ Use `value` for non-secret configuration you're happy to see in the built image 
 
 For `aws-ecs` deployments, prefer `{ secretArn }` over literals: ECS injects the value from Secrets Manager or SSM Parameter Store when the task starts, so nothing sensitive persists in the task definition (or its revision history). The execution role needs `secretsmanager:GetSecretValue` (and `kms:Decrypt` when the secret uses a customer-managed KMS key) or `ssm:GetParameter*` on the referenced ARN. Service credentials such as the Postgres password accept the same reference (`addService("postgres", { password: { secretArn } })`) and are injected under their container environment name automatically.
 
+One ARN-backed variable can back every other primitive that resolves secrets from the container environment: declare `ctx.addEnv("ACME_TOKEN", { from: { secretArn } })` once, then reference `{ env: "ACME_TOKEN" }` in repository credentials, volume credentials, provider options, or harness API keys. Where those primitives would normally declare the passthrough themselves (e.g. `apiKey: { env: "VAR" }`), an existing declaration for the same variable wins instead of conflicting.
+
 ## `addVolume(spec)`
 
 Mounts data into Docker-based targets as a live read/write access point. Supports local bind mounts and cloud or network storage via `rclone`. No files are copied into the container. AWS ECS does not support mounted volumes.

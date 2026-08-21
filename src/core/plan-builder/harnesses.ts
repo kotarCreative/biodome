@@ -35,6 +35,7 @@ export interface HarnessDependencies {
   addLanguageSnippet(snippet: string): void;
   addProcess(spec: ProcessSpec): void;
   addEnv(key: string, spec: EnvSpec): void;
+  hasEnv(key: string): boolean;
 }
 
 type TelemetrySpec = {
@@ -199,7 +200,9 @@ export class HarnessBuilder {
   }
 
   private addApiKeyEnv(apiKey: { env: string } | undefined): void {
-    if (apiKey) {
+    if (apiKey && !this.dependencies.hasEnv(apiKey.env)) {
+      // The user may have declared this variable already (e.g. an AWS secret
+      // ARN reference); their declaration wins, we only ensure one exists.
       this.dependencies.addEnv(apiKey.env, { from: { env: apiKey.env } });
     }
   }

@@ -27,6 +27,11 @@ function sameFrom(
 export class EnvironmentBuilder {
   constructor(private readonly plan: Plan) {}
 
+  /** Whether any declaration (literal or reference) exists for this key. */
+  has(key: string): boolean {
+    return this.plan.runtime.envVars.some((envVar) => envVar.key === key);
+  }
+
   add(key: string, spec: EnvSpec): void {
     if (typeof key !== "string" || !envKeyPattern.test(key)) {
       throw new ValidationError({ message: `Env ${key}: key must match ${envKeyPattern.source}` });

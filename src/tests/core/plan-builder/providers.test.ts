@@ -3,9 +3,12 @@ import type { EnvSpec } from "../../../core/feature.js";
 import { createPlan, type SecretReference } from "../../../core/plan.js";
 import { ProviderBuilder } from "../../../core/plan-builder/providers.js";
 
-function makeBuilder(addEnv: (key: string, spec: EnvSpec) => void = () => undefined) {
+function makeBuilder(
+  addEnv: (key: string, spec: EnvSpec) => void = () => undefined,
+  hasEnv: (key: string) => boolean = () => false,
+) {
   const plan = createPlan("test");
-  return { plan, builder: new ProviderBuilder(plan, addEnv) };
+  return { plan, builder: new ProviderBuilder(plan, addEnv, hasEnv) };
 }
 
 describe("ProviderBuilder", () => {
@@ -184,5 +187,25 @@ describe("ProviderBuilder", () => {
 
     expect(plan.runtime.providers).toHaveLength(1);
     expect(plan.runtime.llmProviders).toHaveLength(1);
+  });
+
+  it("skips the credential env declaration when the variable is already declared", () => {
+    const declarations: Array<{ key: string; spec: EnvSpec }> = [];
+    // e.g. the user declared an AWS secret ARN-backed passthrough themselves.
+    const { plan, builder } = makeBuilder(
+      (key, spec) => declarations.push({ key, spec }),
+      (key) => key === "LMSTUDIO_API_KEY",
+    );
+
+    builder.addLlmProvider({
+      name: "lmstudio",
+      options: { apiKey: { env: "LMSTUDIO_API_KEY" } },
+      models: {},
+    });
+
+    expect(declarations).toEqual([]);
+    expect(plan.runtime.llmProviders[0].options).toEqual({
+      apiKey: { env: "LMSTUDIO_API_KEY" },
+    });
   });
 });

@@ -77,13 +77,14 @@ export class PlanBuilder {
       (name) => this.build.addAptPackage(name),
       addProcess,
     );
-    this.providers = new ProviderBuilder(this.plan, addEnv);
+    this.providers = new ProviderBuilder(this.plan, addEnv, (key) => this.environment.has(key));
     this.harnesses = new HarnessBuilder(this.plan, layout, {
       addLanguage,
       addAptPackage: (name) => this.build.addAptPackage(name),
       addLanguageSnippet: (snippet) => this.build.addLanguageSnippet(snippet),
       addProcess,
       addEnv,
+      hasEnv: (key) => this.environment.has(key),
     });
     this.mcp = new McpBuilder(this.plan, layout, {
       addLanguage,

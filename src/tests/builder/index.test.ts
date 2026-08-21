@@ -121,6 +121,32 @@ describe("buildPlan", () => {
     expect(JSON.stringify(plan)).not.toContain('POSTGRES_PASSWORD":');
   });
 
+  it("lets an AWS secret ARN-backed env var satisfy harness and provider references", async () => {
+    const dir = join("/tmp", "sandbox-test-" + Date.now());
+    const secretArn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:key-AbCdEf";
+    createProject(dir, {
+      ".biodome/config.json": JSON.stringify({ project: { name: "arn-refs" } }),
+      ".biodome/features/agents.mjs": `
+        export default function agents(ctx) {
+          ctx.addEnv("ANTHROPIC_API_KEY", { from: { secretArn: "${secretArn}" } });
+          ctx.addClaudeHarness({ name: "assistant", apiKey: { env: "ANTHROPIC_API_KEY" } });
+          ctx.addLlmProvider({
+            name: "anthropic",
+            options: { apiKey: { env: "ANTHROPIC_API_KEY" } },
+            models: {},
+          });
+        }
+      `,
+    });
+
+    // The harness and provider both desugar to env declarations for the same
+    // variable; the user's ARN-backed declaration must win without conflict.
+    const plan = await buildPlan(dir);
+    expect(plan.runtime.envVars).toEqual([
+      { key: "ANTHROPIC_API_KEY", scope: "runtime", from: { secretArn } },
+    ]);
+  });
+
   it("executes arbitrary commands in features", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     createProject(dir, {

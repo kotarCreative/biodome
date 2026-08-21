@@ -17,6 +17,7 @@ function makeBuilder(overrides: Partial<HarnessDependencies> = {}) {
     addLanguageSnippet: (snippet) => snippets.push(snippet),
     addProcess: (spec) => processes.push(spec),
     addEnv: (key, spec) => environments.push({ key, spec }),
+    hasEnv: (key) => environments.some((entry) => entry.key === key),
     ...overrides,
   };
   return {
@@ -116,6 +117,25 @@ describe("HarnessBuilder", () => {
           value: "Bearer ${MCP_TOKEN}",
         },
       },
+    });
+  });
+
+  it("does not redeclare an API-key env var that already has a declaration", () => {
+    const { builder, environments } = makeBuilder();
+    // Simulates a user-declared AWS secret ARN-backed passthrough for the
+    // same variable; the harness reference must not overwrite or conflict.
+    environments.push({
+      key: "ANTHROPIC_API_KEY",
+      spec: {
+        from: { secretArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:key-AbCdEf" },
+      },
+    });
+
+    builder.addPiHarness({ name: "coder", apiKey: { env: "ANTHROPIC_API_KEY" } });
+
+    expect(environments).toHaveLength(1);
+    expect(environments[0].spec).toEqual({
+      from: { secretArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:key-AbCdEf" },
     });
   });
 

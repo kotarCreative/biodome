@@ -22,6 +22,7 @@ import type {
 import { ValidationError } from "../errors.js";
 
 type AddEnv = (key: string, spec: EnvSpec) => void;
+type HasEnv = (key: string) => boolean;
 
 function validatePort(value: unknown, label: string): void {
   if (value === undefined) return;
@@ -45,6 +46,7 @@ export class ProviderBuilder {
   constructor(
     private readonly plan: Plan,
     private readonly addEnv: AddEnv,
+    private readonly hasEnv: HasEnv = () => false,
   ) {}
 
   addEndpoint(spec: EndpointSpec): void {
@@ -223,7 +225,11 @@ export class ProviderBuilder {
     }
     for (const value of Object.values(provider.options)) {
       if (value !== undefined && typeof value === "object" && "env" in value) {
-        this.addEnv(value.env, { from: { env: value.env } });
+        // A declaration the user made already wins (e.g. an AWS secret ARN
+        // reference backing this variable); only ensure one exists otherwise.
+        if (!this.hasEnv(value.env)) {
+          this.addEnv(value.env, { from: { env: value.env } });
+        }
       }
     }
     this.plan.runtime.llmProviders.push(provider);
