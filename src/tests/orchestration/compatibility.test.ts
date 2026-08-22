@@ -192,6 +192,7 @@ describe("validateCompatibility", () => {
   it("blocks required artifacts whose transport the provider lacks", () => {
     const executionPlan = plan([]);
     executionPlan.task.workspace = { strategy: "upload" };
+    executionPlan.task.network.allow = [];
     executionPlan.task.artifacts = [{ path: "review.md", required: true, transport: "local" }];
 
     const report = validateCompatibility(executionPlan, providerProfile(createAwsEcsDriver()));
@@ -205,5 +206,35 @@ describe("validateCompatibility", () => {
         reason: 'transport "local" is not supported by this provider',
       },
     ]);
+  });
+
+  it("rejects network allowlists and bind workspaces on AWS ECS before any call", () => {
+    const executionPlan = plan([]);
+    executionPlan.task.workspace = { strategy: "bind" };
+    executionPlan.task.network.allow = ["api.example.test:443"];
+
+    const report = validateCompatibility(executionPlan, providerProfile(createAwsEcsDriver()));
+
+    expect(report.compatible).toBe(false);
+    expect(report.missing).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "workspace", subject: 'workspace strategy "bind"' }),
+        expect.objectContaining({
+          kind: "network",
+          subject: "network allowlist",
+          reason: "provider does not enforce destination allowlists",
+        }),
+      ]),
+    );
+  });
+
+  it("accepts an upload workspace with plain egress networking on AWS ECS", () => {
+    const executionPlan = plan([]);
+    executionPlan.task.workspace = { strategy: "upload" };
+    executionPlan.task.network.allow = [];
+
+    expect(
+      validateCompatibility(executionPlan, providerProfile(createAwsEcsDriver())).compatible,
+    ).toBe(true);
   });
 });

@@ -68,6 +68,8 @@ export interface DeploymentState {
   createdAt: string;
   schemaVersion?: number;
   target?: string;
+  /** Lifecycle phase for drivers that record identity before waiting. */
+  status?: "provisioning" | "running" | "failed";
 }
 
 export interface CommandResult {

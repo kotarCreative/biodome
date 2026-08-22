@@ -181,8 +181,9 @@ describe("runtime artifacts", () => {
         region: "us-east-1",
         cluster: "test",
         repository: "example/repository",
-        executionRoleArn: "arn:aws:iam::123:role/execution",
+        executionRoleArn: { env: "ECS_EXECUTION_ROLE_ARN" },
         subnets: ["subnet-1"],
+        securityGroups: ["sg-1"],
       },
     };
     const plan = createPlan("artifacts");

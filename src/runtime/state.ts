@@ -10,6 +10,8 @@ import { join, dirname } from "node:path";
 import { targetBuildDir } from "./output.js";
 import { ValidationError } from "../core/errors.js";
 
+export type DeploymentStatusPhase = "provisioning" | "running" | "failed";
+
 export interface DeploymentState {
   schemaVersion: number;
   target: string;
@@ -17,6 +19,8 @@ export interface DeploymentState {
   deploymentId: string;
   createdAt: string;
   resourceIds: Record<string, string>;
+  /** Lifecycle phase recorded by drivers that persist identity before waiting. */
+  status?: DeploymentStatusPhase;
 }
 
 const CURRENT_SCHEMA_VERSION = 1;
@@ -93,7 +97,11 @@ function isDeploymentState(value: unknown): value is DeploymentState {
     typeof state.resourceIds === "object" &&
     state.resourceIds !== null &&
     !Array.isArray(state.resourceIds) &&
-    Object.values(state.resourceIds).every((id) => typeof id === "string")
+    Object.values(state.resourceIds).every((id) => typeof id === "string") &&
+    (state.status === undefined ||
+      state.status === "provisioning" ||
+      state.status === "running" ||
+      state.status === "failed")
   );
 }
 
@@ -116,6 +124,7 @@ export function writeState(
     deploymentId: state.deploymentId,
     createdAt: state.createdAt,
     resourceIds: state.resourceIds,
+    ...(state.status ? { status: state.status } : {}),
   };
 
   const tmpPath = path + ".tmp";

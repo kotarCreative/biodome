@@ -1,6 +1,14 @@
 import { Schema } from "effect";
 import { RuntimeError } from "../core/errors.js";
 
+/**
+ * The one workspace source ECS supports: the repository content is uploaded as
+ * part of the immutable image build context and materialized at /workspace.
+ * Host bind strategies are impossible on Fargate; clone/snapshot require a
+ * cloud-side fetch step that is not designed yet.
+ */
+export const ECS_WORKSPACE_STRATEGY = "upload";
+
 export interface AwsEcsOptions {
   region: string;
   cluster: string;
@@ -12,13 +20,23 @@ export interface AwsEcsOptions {
   assignPublicIp?: boolean;
   cpu?: number;
   memoryMiB?: number;
-  ttl?: string;
+  workspace?: { strategy: typeof ECS_WORKSPACE_STRATEGY };
+  /**
+   * Cluster capacity provider for task placement, e.g. "FARGATE_SPOT" or a
+   * custom EC2 Spot capacity provider. When omitted tasks use Fargate
+   * on-demand via launchType.
+   */
+  capacityProvider?: string;
   artifactBucket?: { env: string } | string;
   artifactPrefix?: string;
 }
 
 const EnvRefSchema = Schema.Struct({
   env: Schema.String.check(Schema.isMinLength(1)),
+});
+
+const WorkspaceSchema = Schema.Struct({
+  strategy: Schema.Literals([ECS_WORKSPACE_STRATEGY]),
 });
 
 export const AwsEcsOptionsSchema = Schema.Struct({
@@ -32,7 +50,8 @@ export const AwsEcsOptionsSchema = Schema.Struct({
   assignPublicIp: Schema.optional(Schema.Boolean),
   cpu: Schema.optional(Schema.Number),
   memoryMiB: Schema.optional(Schema.Number),
-  ttl: Schema.optional(Schema.String),
+  workspace: Schema.optional(WorkspaceSchema),
+  capacityProvider: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
   artifactBucket: Schema.optional(
     Schema.Union([EnvRefSchema, Schema.String.check(Schema.isMinLength(1))]),
   ),
@@ -75,7 +94,32 @@ export function validateFargateCpuMemory(cpu: number, memoryMiB: number): void {
 export const FARGATE_SUPPORTED_CPU = new Set(Object.keys(FARGATE_CPU_MEMORY).map(Number));
 
 export function validateAwsEcsOptions(raw: unknown): AwsEcsOptions {
-  const decoded = Schema.decodeUnknownSync(AwsEcsOptionsSchema)(raw);
+  // `ttl` was removed as a locked decision: a host-side timer is not a
+  // lifecycle guarantee in the cloud, so accepting it silently would promise
+  // expiry ECS never performs.
+  if (
+    raw !== null &&
+    typeof raw === "object" &&
+    "ttl" in raw &&
+    (raw as Record<string, unknown>).ttl !== undefined
+  ) {
+    throw new RuntimeError({
+      message:
+        'The aws-ecs target no longer accepts the "ttl" option. Cloud-side task expiry is not implemented; remove ttl and stop tasks explicitly with "biodome down".',
+    });
+  }
+
+  let decoded: AwsEcsOptions;
+  try {
+    decoded = Schema.decodeUnknownSync(AwsEcsOptionsSchema)(raw) as AwsEcsOptions;
+  } catch (error) {
+    if (error instanceof RuntimeError) throw error;
+    throw new RuntimeError({
+      message: `Invalid aws-ecs target options: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    });
+  }
 
   if (decoded.subnets.length === 0) {
     throw new RuntimeError({ message: "At least one subnet is required for ECS" });
@@ -88,30 +132,5 @@ export function validateAwsEcsOptions(raw: unknown): AwsEcsOptions {
   const memoryMiB = decoded.memoryMiB ?? 2048;
   validateFargateCpuMemory(cpu, memoryMiB);
 
-  return decoded as AwsEcsOptions;
-}
-
-export function validateTtl(ttl: string | undefined): number | undefined {
-  if (!ttl) return undefined;
-  const match = /^(\d+)(s|m|h)$/.exec(ttl);
-  if (!match) {
-    throw new RuntimeError({
-      message: `Invalid ECS TTL "${ttl}". Use positive integer + s/m/h (e.g. "30m", "1h")`,
-    });
-  }
-  const num = parseInt(match[1], 10);
-  if (num <= 0) {
-    throw new RuntimeError({ message: `ECS TTL must be positive: "${ttl}"` });
-  }
-  const unit = match[2];
-  switch (unit) {
-    case "s":
-      return num;
-    case "m":
-      return num * 60;
-    case "h":
-      return num * 3600;
-    default:
-      throw new RuntimeError({ message: `Unknown TTL unit: ${unit}` });
-  }
+  return decoded;
 }

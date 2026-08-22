@@ -19,10 +19,10 @@
 - [~] Provider-neutral runtime execution contracts (Plan 03) — durable `BuildManifest`, state validation, and scoped events are implemented; provider-profile support and the in-place exec / one-shot job split need finalization.
 - [~] Bounded MCP I/O (Plan 06) — configurable command limits and a spawn-based runner are implemented; telemetry queue hardening and upstream abort propagation remain.
 - [~] Event observability (Plan 07) — bounded, target-scoped event logs and CLI queries are implemented; lifecycle-event equivalence across all drivers and redaction defaults need finalization.
+- [~] AWS ECS production hardening (Plan 05) — immutable digest-addressed images, workspace materialization, non-root task identities, bounded startup polling with rollback, classified AWS errors, idempotent stop, validated S3 artifact collection, and Fargate Spot placement are implemented and unit-tested. The opt-in live integration proof (`BIODOME_AWS_INTEGRATION=1 npm run test:integration`) still needs a credentialed run.
 
 ## Upcoming
 
-- [ ] AWS ECS production hardening and integration proof (Plan 05)
 - [ ] Security release documentation and automation (Plan 08)
 - [ ] Stable package and startup performance budgets (Plan 09)
 

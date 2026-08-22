@@ -44,8 +44,12 @@ export const DRIVER_SUPPORT: Readonly<Record<string, DriverSupportDeclaration>> 
   "aws-ecs": {
     // Services are part of the single dev image and are therefore supported.
     processServiceKinds: ["postgres", "redis"],
+    // The repository is uploaded as part of the immutable image build context.
     workspaceStrategies: ["upload"],
+    // Fargate awsvpc tasks always have egress; no host networking exists.
     networkModes: ["egress"],
+    // Security groups cannot express per-destination allowlists.
+    networkAllowlist: false,
     secretExposures: ["environment", "request-proxy", "agent-forwarding"],
     artifactTransports: ["s3"],
   },

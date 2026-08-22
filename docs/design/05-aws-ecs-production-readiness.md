@@ -1,6 +1,12 @@
 # Plan 05: Make AWS ECS Production-Ready
 
-Status: proposed. Priority: P0. Dependencies: Plans 03 and 04.
+Status: partial. Priority: P0. Dependencies: Plans 03 and 04.
+
+> Implemented on branch `feat/ecs-production-readiness`: every implementation
+> step below is in place and unit-tested. The one outstanding acceptance
+> criterion is running the opt-in integration workflow against a real AWS
+> account (`BIODOME_AWS_INTEGRATION=1 npm run test:integration`), which requires
+> live credentials and an ECR repository.
 
 ## Objective
 
