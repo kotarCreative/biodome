@@ -87,10 +87,10 @@ export class HarnessBuilder {
     this.dependencies.addLanguage("node", { version: "20" });
     this.dependencies.addAptPackage("curl");
     this.dependencies.addAptPackage("ca-certificates");
-    this.dependencies.addAptPackage("unzip");
-    this.dependencies.addLanguageSnippet("RUN npm install -g opencode-ai");
+    // opencode ships as a self-contained compiled binary, so no separate bun
+    // runtime is required. curl stays: the generated http healthcheck uses it.
     this.dependencies.addLanguageSnippet(
-      "RUN curl -fsSL -o /tmp/bun-install.sh https://bun.sh/install && bash /tmp/bun-install.sh && rm /tmp/bun-install.sh && ln -sf /root/.bun/bin/bun /usr/local/bin/bun",
+      "RUN --mount=type=cache,target=/root/.npm npm install -g opencode-ai",
     );
     this.dependencies.addProcess({
       name: `opencode-agent-${validated.name}`,
@@ -130,7 +130,9 @@ export class HarnessBuilder {
     this.plan.runtime.piHarnesses.push(harness);
 
     this.dependencies.addLanguage("node", { version: "20" });
-    this.dependencies.addLanguageSnippet("RUN npm install -g @earendil-works/pi-coding-agent");
+    this.dependencies.addLanguageSnippet(
+      "RUN --mount=type=cache,target=/root/.npm npm install -g @earendil-works/pi-coding-agent",
+    );
     this.addApiKeyEnv(harness.apiKey);
   }
 
@@ -158,7 +160,9 @@ export class HarnessBuilder {
 
     this.dependencies.addLanguage("node", { version: "20" });
     this.dependencies.addAptPackage("git");
-    this.dependencies.addLanguageSnippet("RUN npm install -g @openai/codex");
+    this.dependencies.addLanguageSnippet(
+      "RUN --mount=type=cache,target=/root/.npm npm install -g @openai/codex",
+    );
     this.dependencies.addProcess({
       name: `codex-agent-${validated.name}`,
       command: ["sh", `${this.paths.codexHomes}/${validated.name}/start.sh`],
@@ -195,7 +199,9 @@ export class HarnessBuilder {
 
     this.dependencies.addLanguage("node", { version: "20" });
     this.dependencies.addAptPackage("git");
-    this.dependencies.addLanguageSnippet("RUN npm install -g @anthropic-ai/claude-code");
+    this.dependencies.addLanguageSnippet(
+      "RUN --mount=type=cache,target=/root/.npm npm install -g @anthropic-ai/claude-code",
+    );
     this.addApiKeyEnv(harness.apiKey);
   }
 

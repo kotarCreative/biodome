@@ -234,7 +234,7 @@ export function loadAppsEffect(
         for (const declaration of declarations) {
           if (!isAppRecipe(declaration.default)) continue;
           for (const reference of appReferencesFromOptions(declaration.default.options)) {
-            const endpointName = `${reference.app}:${reference.endpoint}`;
+            const endpointName = `${reference.app}-${reference.endpoint}`;
             if (!plan.hasEndpoint(endpointName)) {
               throw new ValidationError({
                 message: `Application "${declaration.name}" references endpoint "${reference.app}.${reference.endpoint}", which is not declared`,

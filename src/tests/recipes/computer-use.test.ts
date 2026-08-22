@@ -13,8 +13,8 @@ import {
 describe("computer-use recipe", () => {
   it("installs browser automation and records its target dependency", async () => {
     const plan = new PlanBuilder("/tmp/computer-use", "test");
-    plan.context.addProcess({ name: "web:web", command: ["npm", "start"], port: 3000 });
-    plan.context.addEndpoint({ name: "web:http", port: 3000 });
+    plan.context.addProcess({ name: "web-web", command: ["npm", "start"], port: 3000 });
+    plan.context.addEndpoint({ name: "web-http", port: 3000 });
     const recipe = computerUse({
       baseUrl: "http://localhost:3000",
       target: app("web").endpoint("http"),
@@ -37,7 +37,7 @@ describe("computer-use recipe", () => {
     plan.finalize();
     const result = plan.getPlan();
 
-    expect(application.dependencies).toEqual(["web:http"]);
+    expect(application.dependencies).toEqual(["web-http"]);
     const install = result.build.languageSnippets.join("\n");
     expect(install).toContain("agent-browser-linux-x64");
     expect(install).toContain("chromium");
@@ -101,7 +101,7 @@ describe("manualQaTask", () => {
     const task = manualQaTask({
       harness: "tester",
       instructions: "Verify the new checkout validation and its mobile error state.",
-      requiredProcesses: ["web:web"],
+      requiredProcesses: ["web-web"],
     });
 
     expect(task.artifacts).toEqual(COMPUTER_USE_ARTIFACTS);
@@ -111,7 +111,7 @@ describe("manualQaTask", () => {
     expect(task.prompt).toContain("new checkout validation");
     expect(task.prompt).toContain("Do not modify application source code");
     expect(task.prompt).toContain("run test -s for every declared artifact");
-    expect(task.requiredProcesses).toEqual(["web:web"]);
+    expect(task.requiredProcesses).toEqual(["web-web"]);
     expect(task.validationCommands).toBeUndefined();
   });
 

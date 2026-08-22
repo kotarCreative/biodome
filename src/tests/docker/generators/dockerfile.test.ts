@@ -90,8 +90,8 @@ describe("generateDockerfile", () => {
 
   it("assigns image-borne workspace ownership to the runtime identity", () => {
     const dockerfile = generateDockerfile(createPlan("my-app"));
-    expect(dockerfile).toContain("RUN chown -R biodome:biodome /workspace");
-    expect(dockerfile).toContain("RUN chmod -R g+rX /workspace");
+    expect(dockerfile).toContain("RUN chown -R biodome:biodome /workspace \\");
+    expect(dockerfile).toContain("&& chmod -R g+rX /workspace");
   });
 
   it("copies target-scoped generated files for image-only runtimes", () => {

@@ -16,14 +16,14 @@ describe("app formatting", () => {
       declarationPath: ".biodome/apps/api.mjs",
       repositories: ["api"],
       hooks: [],
-      processes: ["api:web"],
-      endpoints: ["api:http"],
+      processes: ["api-web"],
+      endpoints: ["api-http"],
       requiredServices: [],
       dependencies: [],
     });
     plan.runtime.contributions.push({
       kind: "process",
-      qualifiedName: "api:web",
+      qualifiedName: "api-web",
       source: {
         application: "api",
         recipe: "@test/api",

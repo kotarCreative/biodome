@@ -59,10 +59,9 @@ describe("HarnessBuilder", () => {
       },
     ]);
     expect(languages).toEqual([{ name: "node", options: { version: "20" } }]);
-    expect(packages).toEqual(["curl", "ca-certificates", "unzip"]);
+    expect(packages).toEqual(["curl", "ca-certificates"]);
     expect(snippets).toEqual([
-      "RUN npm install -g opencode-ai",
-      expect.stringContaining("https://bun.sh/install"),
+      "RUN --mount=type=cache,target=/root/.npm npm install -g opencode-ai",
     ]);
     expect(processes).toEqual([
       {
@@ -173,7 +172,9 @@ describe("HarnessBuilder", () => {
       },
     });
     expect(languages).toEqual([{ name: "node", options: { version: "20" } }]);
-    expect(snippets).toEqual(["RUN npm install -g @earendil-works/pi-coding-agent"]);
+    expect(snippets).toEqual([
+      "RUN --mount=type=cache,target=/root/.npm npm install -g @earendil-works/pi-coding-agent",
+    ]);
     expect(environments).toEqual([
       { key: "ANTHROPIC_API_KEY", spec: { from: { env: "ANTHROPIC_API_KEY" } } },
     ]);
@@ -200,7 +201,9 @@ describe("HarnessBuilder", () => {
     });
     expect(languages).toEqual([{ name: "node", options: { version: "20" } }]);
     expect(packages).toEqual(["git"]);
-    expect(snippets).toEqual(["RUN npm install -g @openai/codex"]);
+    expect(snippets).toEqual([
+      "RUN --mount=type=cache,target=/root/.npm npm install -g @openai/codex",
+    ]);
     expect(processes).toEqual([
       {
         name: "codex-agent-coder",
@@ -269,7 +272,9 @@ describe("HarnessBuilder", () => {
     });
     expect(languages).toEqual([{ name: "node", options: { version: "20" } }]);
     expect(packages).toEqual(["git"]);
-    expect(snippets).toEqual(["RUN npm install -g @anthropic-ai/claude-code"]);
+    expect(snippets).toEqual([
+      "RUN --mount=type=cache,target=/root/.npm npm install -g @anthropic-ai/claude-code",
+    ]);
     expect(environments).toEqual([
       { key: "ANTHROPIC_API_KEY", spec: { from: { env: "ANTHROPIC_API_KEY" } } },
     ]);

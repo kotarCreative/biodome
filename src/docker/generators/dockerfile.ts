@@ -117,14 +117,14 @@ export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}):
 
   if (aptPackages.length > 0) {
     lines.push("# Install system packages + service CLI clients.");
-    lines.push("# Cache mounts prevent re-downloading the apt index every rebuild.");
+    lines.push("# Cache mounts keep the apt index and downloaded archives warm across");
+    lines.push("# rebuilds; their contents stay outside image layers, so no cleanup");
+    lines.push("# step is needed (deleting them here would force a full re-download).");
     lines.push("RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\");
     lines.push("    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \\");
-    lines.push("    apt-get update && apt-get install -y --no-install-recommends \\");
-    for (const pkg of aptPackages) {
-      lines.push(`    ${pkg} \\`);
-    }
-    lines.push("    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*");
+    lines.push(
+      `    apt-get update && apt-get install -y --no-install-recommends ${aptPackages.join(" \\\n    ")}`,
+    );
     lines.push("");
   }
 
@@ -133,14 +133,18 @@ export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}):
     lines.push("# Installed under /node_modules so the ESM server at");
     lines.push("# /workspace/.biodome-build/mcp/server.js can resolve it. /node_modules is on");
     lines.push("# the module resolution path and is not shadowed by the /workspace mount.");
-    lines.push("RUN npm install --prefix / @modelcontextprotocol/sdk@1.30.0 effect@4.0.0-beta.103");
+    lines.push(
+      "RUN --mount=type=cache,target=/root/.npm npm install --prefix / @modelcontextprotocol/sdk@1.30.0 effect@4.0.0-beta.103",
+    );
     lines.push("");
 
     const proxySdks = mcpProxySdks(plan);
     if (proxySdks.length > 0) {
       lines.push("# Install provider SDKs for MCP proxy volumes.");
       lines.push("# Only the SDKs actually used by declared proxy volumes are installed.");
-      lines.push(`RUN npm install --prefix / ${proxySdks.join(" ")}`);
+      lines.push(
+        `RUN --mount=type=cache,target=/root/.npm npm install --prefix / ${proxySdks.join(" ")}`,
+      );
       lines.push("");
     }
   }
@@ -188,6 +192,17 @@ export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}):
     lines.push("");
   }
 
+  if (plan.deployment?.target.driver === "aws-ecs") {
+    // Remote providers have no host bind mount: the repository workspace is
+    // uploaded as the build context and materialized inside the immutable
+    // image. Excluded trees (.git, node_modules, .env, ...) stay out via
+    // .dockerignore; dependency artifacts copied above are not shadowed.
+    // Generated target files are layered on top afterwards.
+    lines.push("# Materialize the declared upload workspace inside the image.");
+    lines.push("COPY . /workspace/");
+    lines.push("");
+  }
+
   if (options.generatedFilesPath) {
     lines.push("# Copy target-scoped runtime files required without a host workspace mount.");
     lines.push(`COPY ${generatedFilesPath}/ ${generatedRuntimeDir(plan)}/`);
@@ -212,12 +227,13 @@ export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}):
   if (runtimeIdentity) {
     // Image-borne workspace content (dependency installs, generated runtime
     // files) belongs to the workload identity. Bind-mounted host sources are
-    // handled by the startup script without touching host ownership.
+    // handled by the startup script without touching host ownership. A single
+    // RUN keeps it to one tree walk over /workspace.
     lines.push("# Assign ownership only to image-borne workspace and generated paths.");
     lines.push(
-      `RUN chown -R ${shellWord(`${runtimeIdentity.user}:${runtimeIdentity.group}`)} /workspace`,
+      `RUN chown -R ${shellWord(`${runtimeIdentity.user}:${runtimeIdentity.group}`)} /workspace \\`,
     );
-    lines.push(`RUN chmod -R g+rX /workspace`);
+    lines.push(`    && chmod -R g+rX /workspace`);
     lines.push("");
   }
 

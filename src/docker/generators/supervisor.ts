@@ -47,6 +47,16 @@ function supervisorUser(plan: Plan, proc: Plan["runtime"]["processes"][number]):
   return identityForProcess(plan, proc).user;
 }
 
+/**
+ * True for in-container database servers. Their readiness is gated by the
+ * startup script's bootstrap health wait, so supervisord should mark them
+ * RUNNING immediately instead of blocking `supervisorctl start` on the
+ * default one-second startsecs window.
+ */
+function isServiceServer(plan: Plan, proc: Plan["runtime"]["processes"][number]): boolean {
+  return plan.runtime.services.some((candidate) => `${candidate.name}-server` === proc.name);
+}
+
 export function generateSupervisordConf(plan: Plan): string {
   const daemonProcesses = plan.runtime.processes.filter((p) => p.mode === "daemon");
   if (daemonProcesses.length === 0) {
@@ -99,6 +109,12 @@ export function generateSupervisordConf(plan: Plan): string {
     lines.push("autostart=false");
     lines.push("autorestart=true");
     lines.push("startretries=10");
+    if (isServiceServer(plan, proc)) {
+      // Readiness is gated by the startup script's bootstrap health wait;
+      // marking RUNNING immediately avoids a fixed startsecs delay on every
+      // cold start.
+      lines.push("startsecs=0");
+    }
     lines.push(`stdout_logfile=${logDir}/${proc.name}.log`);
     lines.push(`stderr_logfile=${logDir}/${proc.name}.log`);
     // Expose the log dir to managed processes so the biodome-mcp server can

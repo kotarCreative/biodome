@@ -13,13 +13,13 @@ exports[`Docker generator snapshots > matches for multi-daemon with workingDir +
 FROM node:20-slim AS base
 
 # Install system packages + service CLI clients.
-# Cache mounts prevent re-downloading the apt index every rebuild.
+# Cache mounts keep the apt index and downloaded archives warm across
+# rebuilds; their contents stay outside image layers, so no cleanup
+# step is needed (deleting them here would force a full re-download).
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \\
-    apt-get update && apt-get install -y --no-install-recommends \\
-    netcat-openbsd \\
-    supervisor \\
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+    apt-get update && apt-get install -y --no-install-recommends netcat-openbsd \\
+    supervisor
 
 # Non-root runtime identities: user workloads never run as root.
 # supervisord starts as root only to initialize paths and setuid programs.
@@ -51,8 +51,8 @@ FROM base AS dev
 WORKDIR /workspace
 
 # Assign ownership only to image-borne workspace and generated paths.
-RUN chown -R biodome:biodome /workspace
-RUN chmod -R g+rX /workspace
+RUN chown -R biodome:biodome /workspace \\
+    && chmod -R g+rX /workspace
 
 # Copy the managed-process startup script.
 COPY .biodome-build/startup.sh /workspace/.biodome-build/startup.sh
@@ -211,8 +211,8 @@ ENV PATH=/workspace/.venv/bin:$PATH
 COPY --from=deps /workspace/node_modules /workspace/node_modules
 
 # Assign ownership only to image-borne workspace and generated paths.
-RUN chown -R biodome:biodome /workspace
-RUN chmod -R g+rX /workspace
+RUN chown -R biodome:biodome /workspace \\
+    && chmod -R g+rX /workspace
 
 USER biodome
 
@@ -299,8 +299,8 @@ FROM base AS dev
 WORKDIR /workspace
 
 # Assign ownership only to image-borne workspace and generated paths.
-RUN chown -R biodome:biodome /workspace
-RUN chmod -R g+rX /workspace
+RUN chown -R biodome:biodome /workspace \\
+    && chmod -R g+rX /workspace
 
 USER biodome
 
@@ -354,14 +354,14 @@ exports[`Docker generator snapshots > matches for node + postgres + daemon 1`] =
 FROM node:20-slim AS base
 
 # Install system packages + service CLI clients.
-# Cache mounts prevent re-downloading the apt index every rebuild.
+# Cache mounts keep the apt index and downloaded archives warm across
+# rebuilds; their contents stay outside image layers, so no cleanup
+# step is needed (deleting them here would force a full re-download).
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \\
-    apt-get update && apt-get install -y --no-install-recommends \\
-    curl \\
+    apt-get update && apt-get install -y --no-install-recommends curl \\
     postgresql \\
-    supervisor \\
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+    supervisor
 
 # Non-root runtime identities: user workloads never run as root.
 # supervisord starts as root only to initialize paths and setuid programs.
@@ -393,8 +393,8 @@ FROM base AS dev
 WORKDIR /workspace
 
 # Assign ownership only to image-borne workspace and generated paths.
-RUN chown -R biodome:biodome /workspace
-RUN chmod -R g+rX /workspace
+RUN chown -R biodome:biodome /workspace \\
+    && chmod -R g+rX /workspace
 
 # Copy the managed-process startup script.
 COPY .biodome-build/startup.sh /workspace/.biodome-build/startup.sh
@@ -499,13 +499,13 @@ exports[`Docker generator snapshots > matches for php + composer + vendor volume
 FROM php:8.3-cli AS base
 
 # Install system packages + service CLI clients.
-# Cache mounts prevent re-downloading the apt index every rebuild.
+# Cache mounts keep the apt index and downloaded archives warm across
+# rebuilds; their contents stay outside image layers, so no cleanup
+# step is needed (deleting them here would force a full re-download).
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \\
-    apt-get update && apt-get install -y --no-install-recommends \\
-    curl \\
-    supervisor \\
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+    apt-get update && apt-get install -y --no-install-recommends curl \\
+    supervisor
 
 # Non-root runtime identities: user workloads never run as root.
 # supervisord starts as root only to initialize paths and setuid programs.
@@ -543,8 +543,8 @@ WORKDIR /workspace
 COPY --from=deps /workspace/vendor /workspace/vendor
 
 # Assign ownership only to image-borne workspace and generated paths.
-RUN chown -R biodome:biodome /workspace
-RUN chmod -R g+rX /workspace
+RUN chown -R biodome:biodome /workspace \\
+    && chmod -R g+rX /workspace
 
 # Copy the managed-process startup script.
 COPY .biodome-build/startup.sh /workspace/.biodome-build/startup.sh
@@ -648,13 +648,13 @@ exports[`Docker generator snapshots > matches for python + venv + redis 1`] = `
 FROM python:3.12-slim AS base
 
 # Install system packages + service CLI clients.
-# Cache mounts prevent re-downloading the apt index every rebuild.
+# Cache mounts keep the apt index and downloaded archives warm across
+# rebuilds; their contents stay outside image layers, so no cleanup
+# step is needed (deleting them here would force a full re-download).
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \\
-    apt-get update && apt-get install -y --no-install-recommends \\
-    redis-server \\
-    supervisor \\
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+    apt-get update && apt-get install -y --no-install-recommends redis-server \\
+    supervisor
 
 # Non-root runtime identities: user workloads never run as root.
 # supervisord starts as root only to initialize paths and setuid programs.
@@ -693,8 +693,8 @@ COPY --from=deps /workspace/.venv /workspace/.venv
 ENV PATH=/workspace/.venv/bin:$PATH
 
 # Assign ownership only to image-borne workspace and generated paths.
-RUN chown -R biodome:biodome /workspace
-RUN chmod -R g+rX /workspace
+RUN chown -R biodome:biodome /workspace \\
+    && chmod -R g+rX /workspace
 
 USER biodome
 

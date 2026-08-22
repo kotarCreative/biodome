@@ -34,13 +34,13 @@ describe("application builder", () => {
       path: "/workspace/apps/backend",
     });
     expect(result.runtime.processes.map((item) => item.name)).toEqual(
-      expect.arrayContaining(["backend:migrate", "backend:web"]),
+      expect.arrayContaining(["backend-migrate", "backend-web"]),
     );
-    expect(result.runtime.processes.find((item) => item.name === "backend:web")?.workingDir).toBe(
+    expect(result.runtime.processes.find((item) => item.name === "backend-web")?.workingDir).toBe(
       "/workspace/apps/backend",
     );
-    expect(result.runtime.endpoints[0]).toMatchObject({ name: "backend:http", port: 8000 });
-    expect(metadata.processes).toEqual(["backend:web"]);
+    expect(result.runtime.endpoints[0]).toMatchObject({ name: "backend-http", port: 8000 });
+    expect(metadata.processes).toEqual(["backend-web"]);
   });
 
   it("allows the same local process name in two apps and rejects local duplicates", () => {
@@ -51,8 +51,8 @@ describe("application builder", () => {
     expect(() => first.builder.addProcess("web", { command: ["again"] })).toThrow(
       "Duplicate process",
     );
-    expect(finalized(first.plan).runtime.processes[0].name).toBe("api:web");
-    expect(finalized(second.plan).runtime.processes[0].name).toBe("worker:web");
+    expect(finalized(first.plan).runtime.processes[0].name).toBe("api-web");
+    expect(finalized(second.plan).runtime.processes[0].name).toBe("worker-web");
   });
 
   it("binds application environment variables to declared service environment keys", () => {
@@ -102,15 +102,11 @@ describe("application builder", () => {
     );
   });
 
-  it("allows qualified process names only when an endpoint references a process", () => {
-    const { plan, builder } = app();
-    plan.context.addProcess({ name: "other:web", command: ["node"], port: 4300 });
+  it(`rejects ":" references in endpoint process options`, () => {
+    const { builder } = app();
 
-    builder.exposeEndpoint("other-web", { process: "other:web" });
-
-    expect(finalized(plan).runtime.endpoints[0]).toMatchObject({
-      name: "backend:other-web",
-      port: 4300,
-    });
+    expect(() => builder.exposeEndpoint("http", { process: "other:web" })).toThrow(
+      'Application "backend" reference must not contain ":"',
+    );
   });
 });

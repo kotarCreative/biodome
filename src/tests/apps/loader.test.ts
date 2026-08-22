@@ -35,7 +35,7 @@ describe("implicit app loader", () => {
     const plan = await buildPlan(root);
     expect(plan.runtime.applications.map((entry) => entry.name)).toEqual(["backend", "z-frontend"]);
     expect(plan.runtime.processes.map((entry) => entry.name)).toEqual(
-      expect.arrayContaining(["backend:web", "z-frontend:web"]),
+      expect.arrayContaining(["backend-web", "z-frontend-web"]),
     );
   });
 
@@ -122,7 +122,7 @@ describe("implicit app loader", () => {
     expect(plan.runtime.contributions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          qualifiedName: "api:web",
+          qualifiedName: "api-web",
           source: expect.objectContaining({ recipe: "@test/api", recipeVersion: "1.2.3" }),
         }),
       ]),

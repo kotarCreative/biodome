@@ -17,7 +17,10 @@ function postgresFiles(service: Service): Record<string, string> {
       'PGDATA="/tmp/biodome-postgres"',
       'if [ ! -s "$PGDATA/PG_VERSION" ]; then',
       '  mkdir -p -m 0700 "$PGDATA"',
-      `  "$PG_BIN/initdb" -D "$PGDATA" --auth=trust --encoding=UTF8 --locale=C`,
+      // --no-sync matches the fsync=off disposable posture below and roughly
+      // halves initdb wall time, which runs on every container cold start
+      // because PGDATA lives under /tmp.
+      `  "$PG_BIN/initdb" -D "$PGDATA" --auth=trust --encoding=UTF8 --locale=C --no-sync`,
       "fi",
       "# Disposable task database: favor low resource use and fast writes over durability.",
       `exec "$PG_BIN/postgres" -D "$PGDATA" -p 5432 -c max_connections=20 -c shared_buffers=32MB -c work_mem=1MB -c maintenance_work_mem=16MB -c effective_cache_size=64MB -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c wal_level=minimal -c max_wal_senders=0 -c max_wal_size=32MB -c min_wal_size=32MB -c autovacuum=off -c jit=off`,
@@ -30,8 +33,11 @@ function postgresFiles(service: Service): Record<string, string> {
       "set -e",
       'PG_BIN="$(pg_config --bindir)"',
       ': "${POSTGRES_PASSWORD:=postgres}"',
+      // Safety net only: the startup script already gates on the bootstrap
+      // health check before running this hook, so poll fast instead of adding
+      // up to a full second of quantization.
       'until "$PG_BIN/pg_isready" -h 127.0.0.1 -p 5432 -U postgres >/dev/null 2>&1; do',
-      "  sleep 1",
+      "  sleep 0.1",
       "done",
       // initdb runs with --auth=trust, so psql can connect over loopback TCP
       // from the runtime identity; expanding the password here keeps every

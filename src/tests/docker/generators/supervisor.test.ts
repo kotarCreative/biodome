@@ -256,4 +256,42 @@ describe("generateSupervisordConf", () => {
       "[program:db-server]\ncommand=sh /workspace/.biodome-build/services/db.sh\nuser=postgres",
     );
   });
+
+  it("marks service servers RUNNING immediately; readiness is gated by the bootstrap health wait", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.services.push({
+      name: "db",
+      type: "postgres",
+      environment: {},
+      ports: [],
+    });
+    plan.runtime.processes.push(
+      {
+        name: "db-server",
+        command: ["sh", "/workspace/.biodome-build/services/db.sh"],
+        ports: [],
+        environment: {},
+        mode: "daemon",
+        startOn: "start.post",
+        bootstrap: true,
+      },
+      {
+        name: "web",
+        command: ["node", "server.js"],
+        ports: [],
+        environment: {},
+        mode: "daemon",
+        startOn: "start.post",
+      },
+    );
+
+    const conf = generateSupervisordConf(plan);
+    const dbSection = conf.slice(
+      conf.indexOf("[program:db-server]"),
+      conf.indexOf("[program:web]"),
+    );
+    expect(dbSection).toContain("startsecs=0");
+    const webSection = conf.slice(conf.indexOf("[program:web]"));
+    expect(webSection).not.toContain("startsecs=0");
+  });
 });

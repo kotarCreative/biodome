@@ -145,32 +145,50 @@ function hookCommand(hook: Process): string {
 )`;
 }
 
+/**
+ * Emits lifecycle hooks in strict declaration order: each hook runs to
+ * completion before the next begins, so ordered lifecycle steps (init role,
+ * then migrate, then seed...) are guaranteed. A failed hook warns loudly but
+ * does not abort sandbox startup — process-level recovery belongs to
+ * supervisord restarts and health checks.
+ */
 function emitHooks(lines: string[], hooks: Process[]): void {
   for (const hook of hooks) {
     assertIdentifier(hook.name, "hook name");
     lines.push(`echo "[hook] ${hook.name}" >&2`);
-    lines.push(hookCommand(hook));
+    // The `if` guard keeps a failing hook from tripping `set -e`.
+    lines.push(`if ! ${hookCommand(hook)}; then`);
+    lines.push(
+      `  echo ${shellQuote(`biodome: WARNING: hook "${hook.name}" failed; continuing startup`)} >&2`,
+    );
+    lines.push("fi");
     lines.push("");
   }
 }
 
 const SUPERVISOR_READY_TIMEOUT_SECONDS = 60;
 const BOOTSTRAP_HEALTH_TIMEOUT_SECONDS = 300;
+// Poll granularity for bounded waits: supervisord and in-container services
+// become ready within tens of milliseconds, so 1-second sleeps dominated cold
+// start with pure quantization delay.
+const WAIT_POLL_INTERVAL = "0.1";
+const WAIT_POLLS_PER_SECOND = 10;
 
 /** Emits a bounded wait loop so a never-ready condition fails loudly instead of hanging forever. */
 function boundedWait(
   lines: string[],
   options: { condition: string; timeoutSeconds: number; failureMessage: string },
 ): void {
+  const maxAttempts = options.timeoutSeconds * WAIT_POLLS_PER_SECOND;
   lines.push(
     "wait_attempts=0",
     `until ${options.condition}; do`,
     "  wait_attempts=$((wait_attempts + 1))",
-    `  if [ "$wait_attempts" -ge ${options.timeoutSeconds} ]; then`,
+    `  if [ "$wait_attempts" -ge ${maxAttempts} ]; then`,
     `    echo ${shellQuote(`biodome: ${options.failureMessage}`)} >&2`,
     "    exit 1",
     "  fi",
-    "  sleep 1",
+    `  sleep ${WAIT_POLL_INTERVAL}`,
     "done",
   );
 }
@@ -198,7 +216,15 @@ function startBootstrapProcesses(lines: string[], plan: Plan): void {
   for (const process of plan.runtime.processes) {
     if (process.mode !== "daemon" || !process.bootstrap) continue;
     assertIdentifier(process.name, "process name");
-    lines.push(`supervisorctl -c ${config} start ${shellQuote(process.name)}`);
+    // A nonzero exit here means supervisord rejected the spawn outright (bad
+    // command, missing file); failing immediately is louder than burning the
+    // full health timeout below.
+    lines.push(
+      `if ! supervisorctl -c ${config} start ${shellQuote(process.name)}; then`,
+      `  echo ${shellQuote(`biodome: failed to launch bootstrap process "${process.name}"`)} >&2`,
+      "  exit 1",
+      "fi",
+    );
     if (process.healthCheck) {
       boundedWait(lines, {
         condition: `sh ${shellQuote(`${generatedRuntimeDir(plan)}/healthchecks/${process.name}.sh`)} >/dev/null 2>&1`,
@@ -235,8 +261,14 @@ export function generateStartupScript(plan: Plan): string | undefined {
   startSupervisor(lines, plan);
   startBootstrapProcesses(lines, plan);
   emitHooks(lines, preHooks);
+  // supervisorctl reports a nonzero status when any single process fails to
+  // spawn; that must not tear down the whole sandbox, since every other
+  // managed process (and supervisord's own restart logic) is still healthy.
   lines.push(
-    `supervisorctl -c ${shellQuote(`${generatedRuntimeDir(plan)}/supervisord.conf`)} start all`,
+    `if ! supervisorctl -c ${shellQuote(`${generatedRuntimeDir(plan)}/supervisord.conf`)} start all; then`,
+    "  echo 'biodome: WARNING: one or more managed processes failed to start;' >&2",
+    "  echo 'biodome: WARNING: check the supervisor logs for details' >&2",
+    "fi",
     "",
   );
   emitHooks(lines, postHooks);

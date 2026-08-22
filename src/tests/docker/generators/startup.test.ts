@@ -224,4 +224,99 @@ describe("generateStartupScript", () => {
 
     expect(() => generateStartupScript(plan)).toThrow(/Invalid environment variable name/);
   });
+
+  it("runs lifecycle hooks strictly in declaration order", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push(
+      {
+        name: "init-role",
+        command: ["sh", "role.sh"],
+        ports: [],
+        environment: {},
+        mode: "oneshot",
+        startOn: "start.pre",
+      },
+      {
+        name: "migrate",
+        command: ["sh", "migrate.sh"],
+        ports: [],
+        environment: {},
+        mode: "oneshot",
+        startOn: "start.pre",
+      },
+      {
+        name: "seed",
+        command: ["sh", "seed.sh"],
+        ports: [],
+        environment: {},
+        mode: "oneshot",
+        startOn: "start.pre",
+      },
+    );
+
+    const script = generateStartupScript(plan)!;
+    // Each hook's failure guard precedes the next hook's launch, so no hook
+    // can start before the previous one has finished.
+    const initGuard = script.indexOf('hook "init-role" failed');
+    const migrateLaunch = script.indexOf("[hook] migrate");
+    const migrateGuard = script.indexOf('hook "migrate" failed');
+    const seedLaunch = script.indexOf("[hook] seed");
+    expect(initGuard).toBeGreaterThan(-1);
+    expect(migrateLaunch).toBeGreaterThan(initGuard);
+    expect(migrateGuard).toBeGreaterThan(migrateLaunch);
+    expect(seedLaunch).toBeGreaterThan(migrateGuard);
+    expect(script).not.toContain("&\nhook_pid");
+  });
+
+  it("continues startup when a lifecycle hook fails instead of aborting the sandbox", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "flaky",
+      command: ["false"],
+      ports: [],
+      environment: {},
+      mode: "oneshot",
+      startOn: "start.pre",
+    });
+
+    const script = generateStartupScript(plan)!;
+    expect(script).toContain("'biodome: WARNING: hook \"flaky\" failed; continuing startup' >&2");
+  });
+
+  it("warns instead of exiting when a managed process fails to start with `start all`", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "api",
+      command: ["node", "missing.js"],
+      ports: [],
+      environment: {},
+      mode: "daemon",
+      startOn: "start.post",
+    });
+
+    const script = generateStartupScript(plan)!;
+    const startAll = script.indexOf("start all");
+    expect(startAll).toBeGreaterThan(-1);
+    expect(script.slice(startAll)).toMatch(/WARNING: one or more managed processes failed/);
+    expect(script.slice(startAll)).not.toContain("set -e");
+  });
+
+  it("polls bounded waits at sub-second granularity with scaled attempt budgets", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "db-server",
+      command: ["sh", "db.sh"],
+      ports: [],
+      environment: {},
+      healthCheck: { type: "tcp", port: 5432 },
+      mode: "daemon",
+      startOn: "start.post",
+      bootstrap: true,
+    });
+
+    const script = generateStartupScript(plan)!;
+    expect(script).toContain("sleep 0.1");
+    expect(script).toContain("-ge 3000"); // BOOTSTRAP_HEALTH_TIMEOUT_SECONDS * 10
+    expect(script).toContain("-ge 600"); // SUPERVISOR_READY_TIMEOUT_SECONDS * 10
+  });
 });
