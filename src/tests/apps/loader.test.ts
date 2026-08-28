@@ -35,7 +35,7 @@ describe("implicit app loader", () => {
     const plan = await buildPlan(root);
     expect(plan.runtime.applications.map((entry) => entry.name)).toEqual(["backend", "z-frontend"]);
     expect(plan.runtime.processes.map((entry) => entry.name)).toEqual(
-      expect.arrayContaining(["backend-web", "z-frontend-web"]),
+      expect.arrayContaining(["app-7-backend-web", "app-10-z-frontend-web"]),
     );
   });
 
@@ -95,6 +95,30 @@ describe("implicit app loader", () => {
     expect(builder.getPlan().runtime.processes).toEqual([]);
   });
 
+  it("does not let a colliding endpoint in another app satisfy a recipe reference", async () => {
+    const root = project({
+      ".biodome/config.json": JSON.stringify({ project: { name: "apps" } }),
+      ".biodome/apps/consumer.mjs": `
+        export default {
+          _tag: "AppRecipe",
+          id: "@test/collision-reference",
+          apiVersion: 1,
+          options: {
+            target: { _tag: "AppEndpointReference", app: "foo", endpoint: "bar-baz" },
+          },
+          expand() {},
+        };
+      `,
+      ".biodome/apps/foo.mjs": "export default function() {}",
+      ".biodome/apps/foo-bar.mjs":
+        'export default function(app) { app.exposeEndpoint("baz", { port: 4000 }); }',
+    });
+
+    await expect(buildPlan(root)).rejects.toThrow(
+      'Application "consumer" references endpoint "foo.bar-baz", which is not declared',
+    );
+  });
+
   it("records recipe versions in application metadata and contribution provenance", async () => {
     const root = project({
       ".biodome/config.json": JSON.stringify({ project: { name: "apps" } }),
@@ -122,7 +146,7 @@ describe("implicit app loader", () => {
     expect(plan.runtime.contributions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          qualifiedName: "api-web",
+          qualifiedName: "app-3-api-web",
           source: expect.objectContaining({ recipe: "@test/api", recipeVersion: "1.2.3" }),
         }),
       ]),

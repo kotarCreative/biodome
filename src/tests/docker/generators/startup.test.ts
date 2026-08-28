@@ -1,6 +1,34 @@
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createPlan } from "../../../core/plan.js";
 import { generateStartupScript } from "../../../docker/generators/startup.js";
+
+function generatedSection(script: string, startMarker: string, endMarker: string): string {
+  const start = script.indexOf(startMarker);
+  const end = script.indexOf(endMarker, start);
+  if (start < 0 || end < 0) throw new Error("Generated shell section not found");
+  return script.slice(start, end);
+}
+
+function generatedWait(script: string, failureMessage: string): string {
+  const message = script.indexOf(failureMessage);
+  const start = script.lastIndexOf("wait_deadline=", message);
+  const endMarker = "\ndone";
+  const end = script.indexOf(endMarker, message);
+  if (message < 0 || start < 0 || end < 0) throw new Error("Generated wait not found");
+  return script.slice(start, end + endMarker.length);
+}
+
+function executeShell(script: string, env: NodeJS.ProcessEnv = process.env) {
+  return spawnSync("/bin/sh", ["-c", `set -e\n${script}`], {
+    encoding: "utf8",
+    env,
+    timeout: 4_000,
+  });
+}
 
 describe("generateStartupScript", () => {
   it("starts supervisord before pre-start hooks and post-start hooks after all daemons", () => {
@@ -70,6 +98,32 @@ describe("generateStartupScript", () => {
     expect(script).toContain('elif [ "$(id -g biodome)" != "$BIODOME_RUNTIME_GID" ]; then');
     expect(script).toContain('groupmod -g "$BIODOME_RUNTIME_GID" biodome');
     expect(script).toContain('usermod -u "$BIODOME_RUNTIME_UID" biodome');
+  });
+
+  it("runs ECS job-mode commands as the runtime identity and shuts down services", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "api",
+      command: ["node", "server.js"],
+      ports: [],
+      environment: {},
+      mode: "daemon",
+      startOn: "start.post",
+    });
+
+    const script = generateStartupScript(plan)!;
+    expect(script).toContain("rm -f /workspace/.biodome-build/ready");
+    expect(script).toContain('if [ "${1:-}" = "--job" ]; then');
+    expect(script).toContain(
+      'setpriv --reuid="$BIODOME_RUNTIME_UID" --regid="$BIODOME_RUNTIME_GID" --clear-groups "$@" || job_status=$?',
+    );
+    expect(script).toContain(
+      "supervisorctl -c /workspace/.biodome-build/supervisord.conf shutdown",
+    );
+    expect(script).toContain('exit "$job_status"');
+    expect(script.indexOf("touch /workspace/.biodome-build/ready")).toBeLessThan(
+      script.indexOf('if [ "${1:-}" = "--job" ]'),
+    );
   });
 
   it("warns instead of failing when mapped ids collide with image accounts", () => {
@@ -166,7 +220,10 @@ describe("generateStartupScript", () => {
       startOn: "start.pre",
     });
 
-    expect(generateStartupScript(plan)).toContain("exec sleep infinity");
+    const script = generateStartupScript(plan)!;
+    expect(script).toContain("touch /workspace/.biodome-build/ready");
+    expect(script).toContain('if [ "${1:-}" = "--job" ]; then');
+    expect(script).toContain("exec sleep infinity");
   });
 
   it("starts and health-checks bootstrap processes before pre-start hooks", () => {
@@ -268,7 +325,7 @@ describe("generateStartupScript", () => {
     expect(script).not.toContain("&\nhook_pid");
   });
 
-  it("continues startup when a lifecycle hook fails instead of aborting the sandbox", () => {
+  it("aborts generated startup shell when a lifecycle hook command fails", () => {
     const plan = createPlan("my-app");
     plan.runtime.processes.push({
       name: "flaky",
@@ -280,28 +337,72 @@ describe("generateStartupScript", () => {
     });
 
     const script = generateStartupScript(plan)!;
-    expect(script).toContain("'biodome: WARNING: hook \"flaky\" failed; continuing startup' >&2");
+    const hook = generatedSection(script, 'echo "[hook] flaky"', "exec sleep infinity");
+    const result = executeShell(hook, { ...process.env, PATH: "/nonexistent" });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('biodome: hook "flaky" failed; aborting startup');
   });
 
-  it("warns instead of exiting when a managed process fails to start with `start all`", () => {
+  it("aborts generated startup shell when a lifecycle hook working directory is missing", () => {
     const plan = createPlan("my-app");
     plan.runtime.processes.push({
-      name: "api",
-      command: ["node", "missing.js"],
+      name: "setup",
+      command: ["true"],
       ports: [],
       environment: {},
-      mode: "daemon",
-      startOn: "start.post",
+      workingDir: "/biodome/does-not-exist",
+      mode: "oneshot",
+      startOn: "start.pre",
     });
 
     const script = generateStartupScript(plan)!;
-    const startAll = script.indexOf("start all");
-    expect(startAll).toBeGreaterThan(-1);
-    expect(script.slice(startAll)).toMatch(/WARNING: one or more managed processes failed/);
-    expect(script.slice(startAll)).not.toContain("set -e");
+    const hook = generatedSection(script, 'echo "[hook] setup"', "exec sleep infinity");
+    const result = executeShell(hook, { ...process.env, PATH: "/nonexistent" });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('biodome: hook "setup" failed; aborting startup');
   });
 
-  it("polls bounded waits at sub-second granularity with scaled attempt budgets", () => {
+  it("aborts generated startup shell when `supervisorctl start all` fails", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push(
+      {
+        name: "api",
+        command: ["node", "missing.js"],
+        ports: [],
+        environment: {},
+        mode: "daemon",
+        startOn: "start.post",
+      },
+      {
+        name: "after",
+        command: ["true"],
+        ports: [],
+        environment: {},
+        workingDir: "/tmp",
+        mode: "oneshot",
+        startOn: "start.post",
+      },
+    );
+
+    const script = generateStartupScript(plan)!;
+    const startAll = generatedSection(
+      script,
+      "if ! supervisorctl -c /workspace/.biodome-build/supervisord.conf start all",
+      'wait "$supervisord_pid"',
+    );
+    const result = executeShell(`supervisorctl() { return 1; }\n${startAll}`, {
+      ...process.env,
+      PATH: "/nonexistent",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("one or more managed processes failed to start");
+    expect(result.stderr).not.toContain("[hook] after");
+  });
+
+  it("bounds slow supervisor and bootstrap-health probes by elapsed wall-clock time", () => {
     const plan = createPlan("my-app");
     plan.runtime.processes.push({
       name: "db-server",
@@ -315,8 +416,39 @@ describe("generateStartupScript", () => {
     });
 
     const script = generateStartupScript(plan)!;
-    expect(script).toContain("sleep 0.1");
-    expect(script).toContain("-ge 3000"); // BOOTSTRAP_HEALTH_TIMEOUT_SECONDS * 10
-    expect(script).toContain("-ge 600"); // SUPERVISOR_READY_TIMEOUT_SECONDS * 10
+    const root = mkdtempSync(join(tmpdir(), "biodome-startup-wait-"));
+    const bin = join(root, "bin");
+    const healthcheck = join(root, "healthcheck.sh");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "supervisorctl"), "#!/bin/sh\nexec sleep 30\n");
+    writeFileSync(healthcheck, "#!/bin/sh\nexec sleep 30\n");
+    chmodSync(join(bin, "supervisorctl"), 0o755);
+    chmodSync(healthcheck, 0o755);
+
+    try {
+      const waits = [
+        generatedWait(script, "supervisord did not become ready within 60s").replace("+ 60", "+ 1"),
+        generatedWait(script, 'bootstrap process "db-server" did not become healthy within 300s')
+          .replace("+ 300", "+ 1")
+          .replace("/workspace/.biodome-build/healthchecks/db-server.sh", healthcheck),
+      ];
+
+      for (const wait of waits) {
+        const startedAt = performance.now();
+        const result = executeShell(wait, {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH ?? ""}`,
+        });
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain("did not become");
+        expect(performance.now() - startedAt).toBeLessThan(3_000);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+
+    expect(script).toContain('timeout -s KILL "$wait_remaining" supervisorctl');
+    expect(script).toContain('timeout -s KILL "$wait_remaining" sh');
+    expect(script).not.toContain("wait_attempts");
   });
 });

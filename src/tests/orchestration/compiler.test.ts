@@ -53,7 +53,7 @@ describe("compileExecutionPlan", () => {
       workspace: { strategy: "clone" },
       requiredServices: ["postgres"],
       requiredProcesses: ["api"],
-      artifacts: [{ path: "review.md", required: false }],
+      artifacts: [{ path: "review.md", required: true }],
     });
     expect(executionPlan.task.capabilities).toEqual([
       { capability: "exec.inplace", level: "required", reason: "agent tasks execute a command" },

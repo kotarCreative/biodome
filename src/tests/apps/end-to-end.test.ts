@@ -11,10 +11,10 @@ describe("app contract end to end", () => {
     const plan = await buildPlan(demo);
     expect(plan.runtime.applications.map((app) => app.name)).toEqual(["api", "web"]);
     expect(plan.runtime.processes.map((process) => process.name)).toEqual(
-      expect.arrayContaining(["api-web", "web-web"]),
+      expect.arrayContaining(["app-3-api-web", "app-3-web-web"]),
     );
     expect(plan.runtime.endpoints.map((endpoint) => endpoint.name)).toEqual(
-      expect.arrayContaining(["api-http", "web-http"]),
+      expect.arrayContaining(["app-3-api-http", "app-3-web-http"]),
     );
     expect(plan.runtime.contributions.length).toBeGreaterThan(0);
     expect(generateCompose(plan)).toContain("127.0.0.1:3100:3100");

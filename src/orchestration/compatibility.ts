@@ -5,6 +5,7 @@ import type {
   CapabilityRequirement,
   ExecutionPlan,
   SecretExposure,
+  WorkspaceRequirement,
 } from "./execution-plan.js";
 
 export type WorkspaceStrategy = "bind" | "clone" | "upload" | "snapshot";
@@ -22,6 +23,7 @@ export interface ProviderProfile {
   maxResources?: ResourceBounds;
   supportsTaskResources?: boolean;
   workspaceStrategies?: readonly WorkspaceStrategy[];
+  workspaceFields?: readonly (keyof Omit<WorkspaceRequirement, "strategy">)[];
   serviceKinds?: readonly string[];
   processServiceKinds?: readonly string[];
   networkModes?: readonly NetworkMode[];
@@ -111,15 +113,30 @@ function workspaceIssues(
   provider: ProviderProfile,
 ): CompatibilityIssue[] {
   if (!provider.workspaceStrategies || !workspace) return [];
-  if (provider.workspaceStrategies.includes(workspace.strategy)) return [];
-  return [
-    {
-      kind: "workspace",
-      level: "required",
-      subject: `workspace strategy "${workspace.strategy}"`,
-      reason: `provider supports ${provider.workspaceStrategies.join(", ")}`,
-    },
-  ];
+  if (!provider.workspaceStrategies.includes(workspace.strategy)) {
+    return [
+      {
+        kind: "workspace",
+        level: "required",
+        subject: `workspace strategy "${workspace.strategy}"`,
+        reason: `provider supports ${provider.workspaceStrategies.join(", ")}`,
+      },
+    ];
+  }
+  const workspaceFields = provider.workspaceFields;
+  if (!workspaceFields) return [];
+  return (["repository", "ref", "path"] as const).flatMap((field) =>
+    workspace[field] !== undefined && !workspaceFields.includes(field)
+      ? [
+          {
+            kind: "workspace" as const,
+            level: "required" as const,
+            subject: `workspace field "${field}"`,
+            reason: `provider ignores ${field} for workspace strategy "${workspace.strategy}"`,
+          },
+        ]
+      : [],
+  );
 }
 
 function serviceIssues(

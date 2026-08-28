@@ -1,6 +1,7 @@
 import { posix } from "node:path";
 import type { FeatureContext } from "../core/feature.js";
 import { ValidationError } from "../core/errors.js";
+import { qualifyAppPrimitive } from "./qualification.js";
 import { isServiceReference } from "./references.js";
 import type {
   AppEndpointOptions,
@@ -30,39 +31,11 @@ export interface ApplicationBuilderOptions {
 export interface ApplicationPlanAccess {
   serviceEnvironment(name: string): Record<string, string> | undefined;
   processPort(name: string): number | null | undefined;
-  hasEndpoint(name: string): boolean;
+  hasAppEndpoint(application: string, localName: string): boolean;
   recordApplication(application: Application): void;
   recordContribution(contribution: ContributionProvenance): void;
   sortApplications(): void;
   sortContributions(): void;
-}
-
-// App-qualified names use "-" as the separator. ":" is reserved by
-// supervisord's own `group:process` name syntax, which made generated
-// supervisorctl commands (restart, start) ambiguous, and the identifier
-// pattern used for plan validation rejects ":" outright.
-function qualifiedDeclaration(app: string, name: string): string {
-  if (!name)
-    throw new ValidationError({ message: "Application contribution requires a non-empty name" });
-  if (name.includes(":")) {
-    throw new ValidationError({
-      message: `Application "${app}" local declaration name must not contain ":": "${name}"`,
-    });
-  }
-  return `${app}-${name}`;
-}
-
-function qualifiedReference(app: string, name: string): string {
-  if (!name)
-    throw new ValidationError({ message: "Application contribution requires a non-empty name" });
-  if (name.includes(":")) {
-    throw new ValidationError({
-      message:
-        `Application "${app}" reference must not contain ":": "${name}"; ` +
-        `references resolve within the declaring application`,
-    });
-  }
-  return `${app}-${name}`;
 }
 
 function appPath(root: string, path: string | undefined): string {
@@ -183,11 +156,10 @@ export class ApplicationBuilderImpl implements ApplicationBuilder {
         message: `Application "${this.name}" references unknown application "${reference.app}" endpoint "${reference.endpoint}"`,
       });
     }
-    const dependency = `${reference.app}-${reference.endpoint}`;
+    const dependency = qualifyAppPrimitive(reference.app, reference.endpoint);
     if (!this.application.dependencies.includes(dependency))
       this.application.dependencies.push(dependency);
-    const endpointName = `${reference.app}-${reference.endpoint}`;
-    if (!this.plan.hasEndpoint(endpointName)) {
+    if (!this.plan.hasAppEndpoint(reference.app, reference.endpoint)) {
       throw new ValidationError({
         message: `Application "${this.name}" references endpoint "${reference.app}.${reference.endpoint}", which is not declared`,
       });
@@ -196,7 +168,7 @@ export class ApplicationBuilderImpl implements ApplicationBuilder {
   }
 
   addHook(name: string, options: AppHookOptions): HookRef {
-    const qualifiedName = qualifiedDeclaration(this.name, name);
+    const qualifiedName = qualifyAppPrimitive(this.name, name);
     this.checkLocal(this.localHooks, name, "hook");
     this.context.addHook({
       ...options,
@@ -209,7 +181,7 @@ export class ApplicationBuilderImpl implements ApplicationBuilder {
   }
 
   addProcess(name: string, options: AppProcessOptions): ProcessRef {
-    const qualifiedName = qualifiedDeclaration(this.name, name);
+    const qualifiedName = qualifyAppPrimitive(this.name, name);
     if (this.localProcesses.has(name)) {
       throw new ValidationError({
         message: `Duplicate process "${name}" in application "${this.name}"`,
@@ -228,10 +200,10 @@ export class ApplicationBuilderImpl implements ApplicationBuilder {
   }
 
   exposeEndpoint(name: string, options: AppEndpointOptions): EndpointRef {
-    const qualifiedName = qualifiedDeclaration(this.name, name);
+    const qualifiedName = qualifyAppPrimitive(this.name, name);
     this.checkLocal(this.localEndpoints, name, "endpoint");
     const processName = options.process;
-    const resolvedProcess = processName ? qualifiedReference(this.name, processName) : undefined;
+    const resolvedProcess = processName ? qualifyAppPrimitive(this.name, processName) : undefined;
     const processPort = resolvedProcess ? this.plan.processPort(resolvedProcess) : undefined;
     if (resolvedProcess && processPort === undefined) {
       throw new ValidationError({

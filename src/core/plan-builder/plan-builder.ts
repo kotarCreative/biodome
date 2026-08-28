@@ -1,4 +1,5 @@
 import type { ApplicationPlanAccess } from "../../apps/application-builder.js";
+import { qualifyAppPrimitive } from "../../apps/qualification.js";
 import { runtimeLayout } from "../../runtime/layout.js";
 import { createFeatureContext } from "../context.js";
 import type { FeatureContext } from "../feature.js";
@@ -175,7 +176,19 @@ export class PlanBuilder {
         const process = this.plan.runtime.processes.find((entry) => entry.name === name);
         return process ? (process.ports[0]?.container ?? null) : undefined;
       },
-      hasEndpoint: (name) => this.plan.runtime.endpoints.some((entry) => entry.name === name),
+      hasAppEndpoint: (application, localName) => {
+        const qualifiedName = qualifyAppPrimitive(application, localName);
+        return (
+          this.plan.runtime.endpoints.some((entry) => entry.name === qualifiedName) &&
+          this.plan.runtime.contributions.some(
+            (entry) =>
+              entry.kind === "endpoint" &&
+              entry.qualifiedName === qualifiedName &&
+              entry.source.application === application &&
+              entry.source.localName === localName,
+          )
+        );
+      },
       recordApplication: (application) => {
         this.mutate(() => this.plan.runtime.applications.push(application));
       },

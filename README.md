@@ -3,7 +3,8 @@
 Portable, repository-defined tasks for coding agents. Biodome compiles the
 environment, application services, task, agent harness, artifacts, and cleanup
 policy into a provider-neutral execution plan. A target selects where that plan
-runs: Docker Compose, Docker Sandboxes, AWS ECS, or a future provider.
+runs: Docker Compose, Docker Sandboxes, AWS ECS, or a future provider. AWS ECS
+remains experimental until its credentialed live acceptance workflow passes.
 
 See the [docs](docs/index.md) for full documentation.
 

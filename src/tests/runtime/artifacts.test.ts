@@ -182,6 +182,7 @@ describe("runtime artifacts", () => {
         cluster: "test",
         repository: "example/repository",
         executionRoleArn: { env: "ECS_EXECUTION_ROLE_ARN" },
+        workspace: { strategy: "upload" },
         subnets: ["subnet-1"],
         securityGroups: ["sg-1"],
       },
@@ -195,6 +196,7 @@ describe("runtime artifacts", () => {
       );
       rmSync(join(rootDir, ".biodome-build"), { recursive: true, force: true });
       rmSync(join(rootDir, ".dockerignore"), { force: true });
+      plan.deployment = { target: ecsTarget, deploymentId: "test-deployment" };
       const ecsFiles = Effect.runSync(
         createAwsEcsDriver().render({ rootDir, outputDir, plan, target: ecsTarget }),
       );
@@ -211,7 +213,11 @@ describe("runtime artifacts", () => {
         relativeFiles(composeFiles).filter(
           (file) => file !== ".biodome-build/targets/shared/docker-compose.yaml",
         ),
-      ).toEqual(relativeFiles(ecsFiles));
+      ).toEqual(
+        relativeFiles(ecsFiles).filter(
+          (file) => file !== ".biodome-build/targets/shared/Dockerfile.dockerignore",
+        ),
+      );
     } finally {
       rmSync(rootDir, { recursive: true, force: true });
     }

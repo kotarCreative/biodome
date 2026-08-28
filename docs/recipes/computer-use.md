@@ -68,7 +68,7 @@ Test the new checkout validation.
 - Verify declined-card and missing-address errors.
 - Confirm the form remains usable at mobile width.
 `,
-      requiredProcesses: ["web:web"],
+      requiredProcesses: ["app-3-web-web"],
       timeout: "30m",
     }),
   );

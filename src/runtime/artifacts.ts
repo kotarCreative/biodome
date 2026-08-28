@@ -117,6 +117,19 @@ export function renderCommonArtifacts(plan: Plan, layout: RuntimeLayout): readon
     ...generatedFiles(layout.host.projectRoot, layout.host.root, generateClaudeHarnessFiles(plan)),
   ];
 
+  if (plan.deployment?.target.driver === "aws-ecs") {
+    // A Dockerfile-specific ignore file takes precedence over a repository's
+    // own .dockerignore, so upload workspaces cannot accidentally bake local
+    // secrets or host dependency trees into the image.
+    files.push(
+      textFile(
+        layout.host.projectRoot,
+        `${layout.host.dockerfile}.dockerignore`,
+        generateDockerignore(layout.host.targetName),
+      ),
+    );
+  }
+
   const supervisord = generateSupervisordConf(plan);
   if (supervisord)
     files.push(textFile(layout.host.projectRoot, layout.host.supervisordConfig, supervisord));

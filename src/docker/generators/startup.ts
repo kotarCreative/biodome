@@ -132,15 +132,15 @@ function hookCommand(hook: Process): string {
   const invocation = environment.length > 0 ? `env ${environment.join(" ")} ${command}` : command;
   const workingDir = shellQuote(hook.workingDir ?? "/workspace");
   // Hooks are user-controlled workloads: run them as the mapped runtime
-  // identity instead of root. Bases without setpriv keep working with a loud
-  // warning rather than silently failing lifecycle hooks.
+  // identity instead of root. Root startup must fail closed when the image
+  // cannot perform the identity transition.
   return `(
-  cd ${workingDir}
+  cd ${workingDir} || exit 1
   if command -v setpriv >/dev/null 2>&1; then
     setpriv --reuid="$BIODOME_RUNTIME_UID" --regid="$BIODOME_RUNTIME_GID" --clear-groups ${invocation}
   else
-    echo 'biodome: WARNING: setpriv unavailable; running hook without identity drop' >&2
-    ${invocation}
+    echo 'biodome: setpriv unavailable; refusing to run a lifecycle hook as root' >&2
+    exit 1
   fi
 )`;
 }
@@ -148,19 +148,16 @@ function hookCommand(hook: Process): string {
 /**
  * Emits lifecycle hooks in strict declaration order: each hook runs to
  * completion before the next begins, so ordered lifecycle steps (init role,
- * then migrate, then seed...) are guaranteed. A failed hook warns loudly but
- * does not abort sandbox startup — process-level recovery belongs to
- * supervisord restarts and health checks.
+ * then migrate, then seed...) are guaranteed. A failed hook aborts startup so
+ * later hooks and managed workloads cannot run against partial initialization.
  */
 function emitHooks(lines: string[], hooks: Process[]): void {
   for (const hook of hooks) {
     assertIdentifier(hook.name, "hook name");
     lines.push(`echo "[hook] ${hook.name}" >&2`);
-    // The `if` guard keeps a failing hook from tripping `set -e`.
     lines.push(`if ! ${hookCommand(hook)}; then`);
-    lines.push(
-      `  echo ${shellQuote(`biodome: WARNING: hook "${hook.name}" failed; continuing startup`)} >&2`,
-    );
+    lines.push(`  echo ${shellQuote(`biodome: hook "${hook.name}" failed; aborting startup`)} >&2`);
+    lines.push("  exit 1");
     lines.push("fi");
     lines.push("");
   }
@@ -168,23 +165,26 @@ function emitHooks(lines: string[], hooks: Process[]): void {
 
 const SUPERVISOR_READY_TIMEOUT_SECONDS = 60;
 const BOOTSTRAP_HEALTH_TIMEOUT_SECONDS = 300;
-// Poll granularity for bounded waits: supervisord and in-container services
-// become ready within tens of milliseconds, so 1-second sleeps dominated cold
-// start with pure quantization delay.
 const WAIT_POLL_INTERVAL = "0.1";
-const WAIT_POLLS_PER_SECOND = 10;
 
-/** Emits a bounded wait loop so a never-ready condition fails loudly instead of hanging forever. */
+/** Emits a wall-clock-bounded wait whose individual probes cannot hang past the deadline. */
 function boundedWait(
   lines: string[],
   options: { condition: string; timeoutSeconds: number; failureMessage: string },
 ): void {
-  const maxAttempts = options.timeoutSeconds * WAIT_POLLS_PER_SECOND;
   lines.push(
-    "wait_attempts=0",
-    `until ${options.condition}; do`,
-    "  wait_attempts=$((wait_attempts + 1))",
-    `  if [ "$wait_attempts" -ge ${maxAttempts} ]; then`,
+    `wait_deadline=$(( $(date +%s) + ${options.timeoutSeconds} ))`,
+    "while :; do",
+    "  wait_now=$(date +%s)",
+    '  if [ "$wait_now" -ge "$wait_deadline" ]; then',
+    `    echo ${shellQuote(`biodome: ${options.failureMessage}`)} >&2`,
+    "    exit 1",
+    "  fi",
+    "  wait_remaining=$((wait_deadline - wait_now))",
+    `  if timeout -s KILL "$wait_remaining" ${options.condition}; then`,
+    "    break",
+    "  fi",
+    '  if [ "$(date +%s)" -ge "$wait_deadline" ]; then',
     `    echo ${shellQuote(`biodome: ${options.failureMessage}`)} >&2`,
     "    exit 1",
     "  fi",
@@ -238,6 +238,41 @@ function startBootstrapProcesses(lines: string[], plan: Plan): void {
   }
 }
 
+function emitJobMode(lines: string[], plan: Plan, shutdownSupervisor: boolean): void {
+  lines.push(
+    'if [ "${1:-}" = "--job" ]; then',
+    "  shift",
+    '  if [ "$#" -eq 0 ]; then',
+    "    echo 'biodome: --job requires a command' >&2",
+    "    exit 1",
+    "  fi",
+    "  job_status=0",
+    "  if command -v setpriv >/dev/null 2>&1; then",
+    '    setpriv --reuid="$BIODOME_RUNTIME_UID" --regid="$BIODOME_RUNTIME_GID" --clear-groups "$@" || job_status=$?',
+    "  else",
+    "    echo 'biodome: setpriv unavailable; refusing to run a job as root' >&2",
+    "    job_status=1",
+    "  fi",
+  );
+  if (shutdownSupervisor) {
+    lines.push(
+      `  supervisorctl -c ${shellQuote(`${generatedRuntimeDir(plan)}/supervisord.conf`)} shutdown >/dev/null 2>&1 || true`,
+      '  wait "$supervisord_pid" || true',
+    );
+  }
+  lines.push('  exit "$job_status"', "fi", "");
+}
+
+/** Whether this plan needs the generated container startup entrypoint. */
+export function needsStartupScript(plan: Plan): boolean {
+  return plan.runtime.processes.some(
+    (process) =>
+      process.mode === "daemon" ||
+      (process.mode === "oneshot" &&
+        (process.startOn === "start.pre" || process.startOn === "start.post")),
+  );
+}
+
 /** Runs container lifecycle hooks around supervisord without involving the host CLI. */
 export function generateStartupScript(plan: Plan): string | undefined {
   const preHooks = plan.runtime.processes.filter(
@@ -247,13 +282,20 @@ export function generateStartupScript(plan: Plan): string | undefined {
     (process) => process.mode === "oneshot" && process.startOn === "start.post",
   );
   const hasDaemons = plan.runtime.processes.some((process) => process.mode === "daemon");
-  if (!hasDaemons && preHooks.length === 0 && postHooks.length === 0) return undefined;
+  if (!needsStartupScript(plan)) return undefined;
 
-  const lines = ["#!/bin/sh", "set -e", ""];
+  const lines = [
+    "#!/bin/sh",
+    "set -e",
+    `rm -f ${shellQuote(`${generatedRuntimeDir(plan)}/ready`)}`,
+    "",
+  ];
   if (!hasDaemons) {
     initializeIdentities(lines, plan);
     emitHooks(lines, preHooks);
     emitHooks(lines, postHooks);
+    lines.push(`touch ${shellQuote(`${generatedRuntimeDir(plan)}/ready`)}`, "");
+    emitJobMode(lines, plan, false);
     lines.push("exec sleep infinity", "");
     return lines.join("\n");
   }
@@ -261,17 +303,16 @@ export function generateStartupScript(plan: Plan): string | undefined {
   startSupervisor(lines, plan);
   startBootstrapProcesses(lines, plan);
   emitHooks(lines, preHooks);
-  // supervisorctl reports a nonzero status when any single process fails to
-  // spawn; that must not tear down the whole sandbox, since every other
-  // managed process (and supervisord's own restart logic) is still healthy.
   lines.push(
     `if ! supervisorctl -c ${shellQuote(`${generatedRuntimeDir(plan)}/supervisord.conf`)} start all; then`,
-    "  echo 'biodome: WARNING: one or more managed processes failed to start;' >&2",
-    "  echo 'biodome: WARNING: check the supervisor logs for details' >&2",
+    "  echo 'biodome: one or more managed processes failed to start; check the supervisor logs for details' >&2",
+    "  exit 1",
     "fi",
     "",
   );
   emitHooks(lines, postHooks);
+  lines.push(`touch ${shellQuote(`${generatedRuntimeDir(plan)}/ready`)}`, "");
+  emitJobMode(lines, plan, true);
   lines.push('wait "$supervisord_pid"', "");
   return lines.join("\n");
 }

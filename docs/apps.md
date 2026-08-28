@@ -46,9 +46,12 @@ export default function backend(app) {
 }
 ```
 
-The resulting primitive names are `backend:migrate`, `backend:web`, and
-`backend:http`. The repository defaults to the name `backend` and path
-`/workspace/apps/backend`.
+App-local primitives use the collision-safe qualified form
+`app-<app-name-length>-<app-name>-<local-name>`. The resulting primitive names
+are `app-7-backend-migrate`, `app-7-backend-web`, and
+`app-7-backend-http`. Including the app-name length keeps names unambiguous when
+either component contains hyphens. The repository defaults to the name
+`backend` and path `/workspace/apps/backend`.
 
 `requireService()` can also map environment values exposed by a declared service
 into the application environment. The keys on the left are application variable

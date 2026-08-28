@@ -1,8 +1,9 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Effect, Result } from "effect";
+import { Effect, Exit, Result } from "effect";
 import { ECRClient, GetAuthorizationTokenCommand } from "@aws-sdk/client-ecr";
 import {
   ECSClient,
@@ -11,6 +12,9 @@ import {
   StopTaskCommand,
   DescribeTasksCommand,
   DeregisterTaskDefinitionCommand,
+  DeleteTaskDefinitionsCommand,
+  ListTasksCommand,
+  ListTaskDefinitionsCommand,
 } from "@aws-sdk/client-ecs";
 import type { Task, ContainerDefinition } from "@aws-sdk/client-ecs";
 import {
@@ -53,6 +57,7 @@ import { capabilitiesOf } from "../core/capabilities.js";
 import type { EventStore } from "../core/events.js";
 import { runtimeLayout } from "./layout.js";
 import { renderCommonArtifacts, writeArtifacts } from "./artifacts.js";
+import { needsStartupScript } from "../docker/generators/startup.js";
 import { TIMEOUT_EXIT_CODE, platformErrorMessage, runProcess, toRuntimeError } from "./proc.js";
 import { assertRelativeArtifactPath } from "./driver-kit.js";
 import { writeState, removeState } from "./state.js";
@@ -81,11 +86,77 @@ const DEFAULT_START_POLLING: EcsPollingPolicy = {
 /** Consecutive DescribeTasks failures tolerated while polling a job task. */
 const MAX_DESCRIBE_FAILURES = 5;
 const JOB_POLL_INTERVAL = "2 seconds";
+const MAX_RECONCILIATION_ATTEMPTS = 5;
 
 /** Hard cap on bytes downloaded per collected artifact object. */
 const MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
 
-const ARN_PREFIXES = ["arn:aws:secretsmanager:", "arn:aws:ssm:"];
+const SECRET_ARN = /^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b):(secretsmanager|ssm):/;
+const IMMUTABLE_IMAGE = /@sha256:[a-f0-9]{64}$/i;
+
+function hasAsyncIterator(value: unknown): value is AsyncIterable<unknown> {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    Symbol.asyncIterator in value &&
+    typeof value[Symbol.asyncIterator] === "function"
+  );
+}
+
+function hasByteArrayTransform(
+  value: unknown,
+): value is { transformToByteArray(): Promise<Uint8Array> } {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "transformToByteArray" in value &&
+    typeof value.transformToByteArray === "function"
+  );
+}
+
+/** Incrementally consume an SDK streaming body and stop at the byte cap. */
+export async function readArtifactBodyWithinLimit(
+  body: unknown,
+  artifactPath: string,
+  maxBytes = MAX_ARTIFACT_BYTES,
+): Promise<Uint8Array> {
+  if (hasAsyncIterator(body)) {
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for await (const value of body) {
+      const chunk =
+        typeof value === "string"
+          ? Buffer.from(value)
+          : value instanceof Uint8Array
+            ? value
+            : undefined;
+      if (!chunk) {
+        throw new RuntimeError({
+          message: `Artifact "${artifactPath}" returned an unsupported streaming body chunk`,
+        });
+      }
+      size += chunk.byteLength;
+      if (size > maxBytes) {
+        throw new RuntimeError({
+          message: `Artifact "${artifactPath}" streamed more than ${maxBytes} bytes, exceeding the collection limit`,
+        });
+      }
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks, size);
+  }
+
+  if (!hasByteArrayTransform(body)) {
+    throw new RuntimeError({ message: `Artifact "${artifactPath}" returned an unreadable body` });
+  }
+  const bytes = await body.transformToByteArray();
+  if (bytes.byteLength > maxBytes) {
+    throw new RuntimeError({
+      message: `Artifact "${artifactPath}" streamed ${bytes.byteLength} bytes, exceeding the ${maxBytes}-byte collection limit`,
+    });
+  }
+  return bytes;
+}
 
 function createDefaultClients(region: string): AwsClients {
   return {
@@ -94,6 +165,11 @@ function createDefaultClients(region: string): AwsClients {
     cloudwatch: new CloudWatchLogsClient({ region }),
     s3: new S3Client({ region }),
   };
+}
+
+function ecrAuthorizationCommand(options: AwsEcsOptions): GetAuthorizationTokenCommand {
+  const registryId = /^(\d{12})\.dkr\.ecr[.-]/.exec(options.repository)?.[1];
+  return new GetAuthorizationTokenCommand(registryId ? { registryIds: [registryId] } : {});
 }
 
 // --- AWS error classification (Plan 05 step 9) ---
@@ -157,6 +233,17 @@ function classifyAwsError(error: unknown): AwsFailureKind {
   return "unknown";
 }
 
+function awsRequestMayHaveCommitted(error: unknown): boolean {
+  if (classifyAwsError(error) === "transport") return true;
+  const name = awsErrorName(error);
+  return (
+    name === "InternalFailure" ||
+    name === "InternalServerError" ||
+    name === "ServerException" ||
+    name === "ServiceUnavailableException"
+  );
+}
+
 const FAILURE_LEAD: Record<AwsFailureKind, string> = {
   authorization: "AWS authorization failed",
   throttling: "AWS API throttled",
@@ -216,7 +303,8 @@ function describeEcsTask(
   taskArn: string,
 ): Effect.Effect<Task | undefined, RuntimeError> {
   return Effect.tryPromise({
-    try: () => ecs.send(new DescribeTasksCommand({ cluster, tasks: [taskArn] })),
+    try: (signal) =>
+      ecs.send(new DescribeTasksCommand({ cluster, tasks: [taskArn] }), { abortSignal: signal }),
     catch: (error) => awsOperationError(`querying ECS task ${taskArn}`, error),
   }).pipe(
     Effect.flatMap((response) => {
@@ -254,14 +342,18 @@ function terminalTaskError(taskArn: string, task: Task): RuntimeError {
   });
 }
 
-/** Best-effort ECS cleanup that reports tolerated failures without failing. */
+/** Run cleanup without masking the primary failure while retaining its outcome. */
 function bestEffortCleanup(
   operation: Effect.Effect<void, RuntimeError>,
   description: string,
-): Effect.Effect<void, never> {
+): Effect.Effect<boolean, never> {
   return operation.pipe(
+    Effect.as(true),
     Effect.catch((error) =>
-      Effect.sync(() => console.warn(`[biodome] ${description}: ${error.message}`)),
+      Effect.sync(() => {
+        console.warn(`[biodome] ${description}: ${error.message}`);
+        return false;
+      }),
     ),
   );
 }
@@ -271,21 +363,172 @@ function deregisterTaskDefinition(
   taskDefinitionArn: string,
 ): Effect.Effect<void, RuntimeError> {
   return Effect.tryPromise({
-    try: async () => {
-      await ecs.send(new DeregisterTaskDefinitionCommand({ taskDefinition: taskDefinitionArn }));
+    try: async (signal) => {
+      try {
+        await ecs.send(new DeregisterTaskDefinitionCommand({ taskDefinition: taskDefinitionArn }), {
+          abortSignal: signal,
+        });
+      } catch (error) {
+        if (
+          classifyAwsError(error) === "missing-resource" ||
+          /not found|does not exist/i.test(platformErrorMessage(error))
+        ) {
+          return;
+        }
+        throw error;
+      }
     },
     catch: (error) =>
       awsOperationError(`deregistering ECS task definition ${taskDefinitionArn}`, error),
   }).pipe(Effect.asVoid);
 }
 
+function deleteTaskDefinition(
+  ecs: ECSClient,
+  taskDefinitionArn: string,
+): Effect.Effect<void, RuntimeError> {
+  return Effect.tryPromise({
+    try: async (signal) =>
+      await ecs.send(new DeleteTaskDefinitionsCommand({ taskDefinitions: [taskDefinitionArn] }), {
+        abortSignal: signal,
+      }),
+    catch: (error) => awsOperationError(`deleting ECS task definition ${taskDefinitionArn}`, error),
+  }).pipe(
+    Effect.flatMap((response) => {
+      const failures = (response?.failures ?? []).filter((failure) => failure.reason !== "MISSING");
+      if (failures.length === 0) return Effect.void;
+      return Effect.fail(
+        new RuntimeError({
+          message: `Failed to delete ECS task definition ${taskDefinitionArn}: ${failures
+            .map((failure) => failure.reason ?? failure.detail ?? "unknown failure")
+            .join("; ")}`,
+        }),
+      );
+    }),
+  );
+}
+
+function releaseTaskDefinition(
+  ecs: ECSClient,
+  taskDefinitionArn: string,
+): Effect.Effect<void, RuntimeError> {
+  return Effect.gen(function* () {
+    yield* deregisterTaskDefinition(ecs, taskDefinitionArn);
+    yield* deleteTaskDefinition(ecs, taskDefinitionArn);
+  });
+}
+
+function discoverFamilyResources(
+  ecs: ECSClient,
+  cluster: string,
+  family: string,
+): Effect.Effect<{ taskArns: string[]; taskDefinitionArns: string[] }, RuntimeError> {
+  return Effect.tryPromise({
+    try: async (signal) => {
+      const listTasks = async (desiredStatus: "RUNNING" | "STOPPED") => {
+        const taskArns: string[] = [];
+        let nextToken: string | undefined;
+        do {
+          const response = await ecs.send(
+            new ListTasksCommand({ cluster, family, desiredStatus, nextToken }),
+            { abortSignal: signal },
+          );
+          taskArns.push(...(response.taskArns ?? []));
+          nextToken = response.nextToken;
+        } while (nextToken);
+        return taskArns;
+      };
+      const listTaskDefinitions = async () => {
+        const taskDefinitionArns: string[] = [];
+        let nextToken: string | undefined;
+        do {
+          const response = await ecs.send(
+            new ListTaskDefinitionsCommand({
+              familyPrefix: family,
+              status: "ACTIVE",
+              sort: "DESC",
+              nextToken,
+            }),
+            { abortSignal: signal },
+          );
+          taskDefinitionArns.push(...(response.taskDefinitionArns ?? []));
+          nextToken = response.nextToken;
+        } while (nextToken);
+        return taskDefinitionArns;
+      };
+      const [running, stopped, definitions] = await Promise.all([
+        listTasks("RUNNING"),
+        listTasks("STOPPED"),
+        listTaskDefinitions(),
+      ]);
+      return {
+        taskArns: [...running, ...stopped],
+        taskDefinitionArns: definitions.filter((arn) =>
+          arn.includes(`:task-definition/${family}:`),
+        ),
+      };
+    },
+    catch: (error) => awsOperationError(`reconciling ECS resources for family ${family}`, error),
+  });
+}
+
+function discoverFamilyResourcesEventually(
+  ecs: ECSClient,
+  cluster: string,
+  family: string,
+  expected: "task" | "task-definition",
+  intervalMs: number,
+): Effect.Effect<{ taskArns: string[]; taskDefinitionArns: string[] }, RuntimeError> {
+  return Effect.gen(function* () {
+    for (let attempt = 1; attempt <= MAX_RECONCILIATION_ATTEMPTS; attempt++) {
+      const resources = yield* discoverFamilyResources(ecs, cluster, family);
+      const found =
+        expected === "task"
+          ? resources.taskArns.length > 0
+          : resources.taskDefinitionArns.length > 0;
+      if (found) return resources;
+      if (attempt < MAX_RECONCILIATION_ATTEMPTS) {
+        yield* Effect.sleep(`${Math.max(1, intervalMs)} millis`);
+      }
+    }
+    return yield* new RuntimeError({
+      message: `Could not confirm whether AWS created an ECS ${expected} for family ${family} after a lost response`,
+    });
+  });
+}
+
 function stopEcsTask(ecs: ECSClient, cluster: string, taskArn: string, reason: string) {
   return Effect.tryPromise({
-    try: async () => {
-      await ecs.send(new StopTaskCommand({ cluster, task: taskArn, reason }));
+    try: async (signal) => {
+      await ecs.send(new StopTaskCommand({ cluster, task: taskArn, reason }), {
+        abortSignal: signal,
+      });
     },
     catch: (error) => awsOperationError(`stopping ECS task ${taskArn}`, error),
   }).pipe(Effect.asVoid);
+}
+
+/** Retry StopTask while a freshly-created task is still propagating through ECS. */
+function stopEcsTaskEventually(
+  ecs: ECSClient,
+  cluster: string,
+  taskArn: string,
+  reason: string,
+): Effect.Effect<void, RuntimeError> {
+  return Effect.gen(function* () {
+    const deadline = Date.now() + 30_000;
+    for (;;) {
+      const result = yield* Effect.result(stopEcsTask(ecs, cluster, taskArn, reason));
+      if (Result.isSuccess(result)) return;
+      const missing = /not found|does not exist|\bMISSING\b/i.test(result.failure.message);
+      if (!missing) {
+        return yield* result.failure;
+      }
+      // After the propagation window, durable absence is an idempotent stop.
+      if (Date.now() >= deadline) return;
+      yield* Effect.sleep("1 second");
+    }
+  });
 }
 
 // --- Typed environment/secret materialization (Plan 05 step 6) ---
@@ -298,7 +541,7 @@ export interface MaterializedEnvironment {
 }
 
 function isValidSecretArn(value: string): boolean {
-  return ARN_PREFIXES.some((prefix) => value.startsWith(prefix));
+  return SECRET_ARN.test(value);
 }
 
 /**
@@ -309,31 +552,36 @@ function isValidSecretArn(value: string): boolean {
  * or errors: literals were already public plan data and ARNs inject server-side.
  */
 export function materializeContainerEnvironment(plan: Plan): MaterializedEnvironment {
-  const environment: Array<{ name: string; value: string }> = [];
+  const environment = new Map<string, string>();
   const secrets: Array<{ name: string; valueFrom: string }> = [];
   const passthrough: string[] = [];
 
   for (const [key, value] of Object.entries(plan.runtime.environment).sort(([a], [b]) =>
     a.localeCompare(b),
   )) {
-    environment.push({ name: key, value });
+    environment.set(key, value);
   }
 
   for (const envVar of [...plan.runtime.envVars].sort((a, b) => a.key.localeCompare(b.key))) {
+    if (envVar.scope === "build") continue;
     if (envVar.value !== undefined) {
-      environment.push({ name: envVar.key, value: envVar.value });
+      environment.set(envVar.key, envVar.value);
       continue;
     }
     if (envVar.from && isSecretArnReference(envVar.from)) {
       if (!isValidSecretArn(envVar.from.secretArn)) {
         throw new RuntimeError({
-          message: `Environment variable "${envVar.key}" declares an unsupported secret reference. Use a Secrets Manager or SSM Parameter Store ARN (${ARN_PREFIXES.join(" or ")}...).`,
+          message: `Environment variable "${envVar.key}" declares an unsupported secret reference. Use arn:<partition>:secretsmanager:... or arn:<partition>:ssm:... in the target AWS partition.`,
         });
       }
       secrets.push({ name: envVar.key, valueFrom: envVar.from.secretArn });
       continue;
     }
-    passthrough.push(envVar.key);
+    if (envVar.default !== undefined) {
+      environment.set(envVar.key, envVar.default);
+    } else if (envVar.required !== false) {
+      passthrough.push(envVar.key);
+    }
   }
 
   if (passthrough.length > 0) {
@@ -342,7 +590,58 @@ export function materializeContainerEnvironment(plan: Plan): MaterializedEnviron
     });
   }
 
-  return { environment, secrets };
+  return {
+    environment: [...environment.entries()].map(([name, value]) => ({ name, value })),
+    secrets,
+  };
+}
+
+function requireImmutableImageRef(buildManifest: StartInput["buildManifest"]): string {
+  const imageRef = buildManifest.imageRef;
+  if (
+    !imageRef ||
+    !IMMUTABLE_IMAGE.test(imageRef) ||
+    !imageRef.endsWith(`@${buildManifest.digest}`)
+  ) {
+    throw new RuntimeError({
+      message:
+        "The aws-ecs driver requires a build manifest with an immutable repository@sha256 image reference. Rebuild this target before starting it.",
+    });
+  }
+  return imageRef;
+}
+
+function ecsClientToken(taskDefinitionArn: string, operation: string): string {
+  return createHash("sha256").update(`${operation}:${taskDefinitionArn}`).digest("hex");
+}
+
+function persistState(
+  rootDir: string,
+  targetName: string,
+  state: Parameters<typeof writeState>[2],
+): Effect.Effect<void, RuntimeError> {
+  return Effect.try({
+    try: () => writeState(rootDir, targetName, state),
+    catch: (error) =>
+      new RuntimeError({
+        message: `Failed to persist recoverable ECS state for target "${targetName}": ${platformErrorMessage(error)}`,
+      }),
+  });
+}
+
+function removePersistedState(rootDir: string, targetName: string): Effect.Effect<void, never> {
+  return Effect.try({
+    try: () => removeState(rootDir, targetName),
+    catch: toRuntimeError,
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() =>
+        console.warn(
+          `[biodome] Failed to remove deployment state for target "${targetName}": ${platformErrorMessage(error)}`,
+        ),
+      ),
+    ),
+  );
 }
 
 /** Read the immutable OCI image digest emitted by `docker buildx build --push`. */
@@ -368,9 +667,11 @@ function ensureLogGroup(
   logGroupName: string,
 ): Effect.Effect<void, RuntimeError> {
   return Effect.tryPromise({
-    try: async () => {
+    try: async (signal) => {
       try {
-        await cloudwatch.send(new CreateLogGroupCommand({ logGroupName }));
+        await cloudwatch.send(new CreateLogGroupCommand({ logGroupName }), {
+          abortSignal: signal,
+        });
       } catch (error) {
         if (isAwsErrorNamed(error, "ResourceAlreadyExistsException")) return;
         throw error;
@@ -386,9 +687,9 @@ function ensureLogGroup(
  * Build the single dev-container definition used by every ECS operation.
  *
  * Identity: workload containers run directly as the Plan 04 runtime identity
- * (non-root uid/gid). Deployments hosting supervised daemons keep the Plan 04
- * model in which supervisord starts as root solely to initialize paths and
- * setuid-drop each managed process onto the runtime identity.
+ * (non-root uid/gid). Deployments with lifecycle processes keep the Plan 04
+ * model in which startup begins as root solely to initialize paths and then
+ * setuid-drops hooks, daemons, and job commands onto their declared identity.
  *
  * Filesystem: the root filesystem stays writable because the dev image writes
  * workspace content, logs, harness homes, and artifacts; ownership is confined
@@ -406,12 +707,22 @@ function devContainerDefinition(input: {
   readonly region: string;
   readonly streamPrefix: string;
   readonly runSupervisorAsRoot: boolean;
+  readonly readinessFile: string;
 }): ContainerDefinition {
   const runtimeIdentity = identitiesOf(input.plan).find((identity) => identity.role === "runtime");
   const user =
     !input.runSupervisorAsRoot && runtimeIdentity
       ? `${runtimeIdentity.uid}:${runtimeIdentity.gid}`
       : undefined;
+  const environment = new Map(
+    input.env.environment.map((entry) => [entry.name, entry.value] as const),
+  );
+  if (input.runSupervisorAsRoot && runtimeIdentity) {
+    // Remote tasks always use the image identity. Host uid/gid mapping is a
+    // local bind-mount concern and must never be allowed to select uid 0 here.
+    environment.set("BIODOME_RUNTIME_UID", String(runtimeIdentity.uid));
+    environment.set("BIODOME_RUNTIME_GID", String(runtimeIdentity.gid));
+  }
 
   return {
     name: "dev",
@@ -419,7 +730,7 @@ function devContainerDefinition(input: {
     essential: true,
     command: input.command,
     user,
-    environment: input.env.environment.map((entry) => ({ name: entry.name, value: entry.value })),
+    environment: [...environment].map(([name, value]) => ({ name, value })),
     secrets: input.env.secrets.length > 0 ? input.env.secrets : undefined,
     logConfiguration: {
       logDriver: "awslogs",
@@ -433,6 +744,30 @@ function devContainerDefinition(input: {
     privileged: false,
     linuxParameters: {
       initProcessEnabled: true,
+      capabilities: input.runSupervisorAsRoot
+        ? {
+            // Fargate only permits SYS_PTRACE in `add`. Retain the default
+            // identity/path setup capabilities and explicitly drop the rest.
+            drop: [
+              "AUDIT_WRITE",
+              "FSETID",
+              "KILL",
+              "MKNOD",
+              "NET_BIND_SERVICE",
+              "NET_RAW",
+              "SETFCAP",
+              "SETPCAP",
+              "SYS_CHROOT",
+            ],
+          }
+        : { drop: ["ALL"] },
+    },
+    healthCheck: {
+      command: ["CMD-SHELL", `test -f ${input.readinessFile}`],
+      interval: 5,
+      timeout: 2,
+      retries: 3,
+      startPeriod: 300,
     },
   };
 }
@@ -464,13 +799,20 @@ export function createAwsEcsDriver(
     return `biodome-${deploymentId}`;
   }
 
+  function cloudwatchNamePart(value: string): string {
+    const sanitized = value.replace(/[^A-Za-z0-9._/#-]/g, "-");
+    if (sanitized === value && sanitized.length <= 200) return sanitized;
+    const suffix = createHash("sha256").update(value).digest("hex").slice(0, 12);
+    return `${sanitized.slice(0, 187)}-${suffix}`;
+  }
+
   function logGroupName(project: string, targetName: string): string {
-    return `/biodome/${project}/${targetName}`;
+    return `/biodome/${cloudwatchNamePart(project)}/${cloudwatchNamePart(targetName)}`;
   }
 
   /**
-   * Task placement: an explicit capacity provider (e.g. FARGATE_SPOT or a
-   * custom EC2 Spot strategy) when configured, on-demand Fargate otherwise.
+   * Task placement: an explicit Fargate capacity provider when configured,
+   * on-demand Fargate otherwise.
    */
   function placementFor(
     options: AwsEcsOptions,
@@ -485,7 +827,17 @@ export function createAwsEcsDriver(
   function requireState(
     input: RuntimeOperationInput,
     operation: string,
-  ): { taskArn?: string; taskDefinitionArn?: string; logGroup?: string } {
+  ): {
+    taskArn?: string;
+    taskDefinitionArn?: string;
+    jobTaskArn?: string;
+    jobTaskDefinitionArn?: string;
+    taskDefinitionFamily?: string;
+    jobTaskDefinitionFamily?: string;
+    taskLaunchMayExist?: string;
+    jobTaskLaunchMayExist?: string;
+    logGroup?: string;
+  } {
     const state = input.state;
     if (!state) {
       throw new RuntimeError({
@@ -547,6 +899,11 @@ export function createAwsEcsDriver(
 
     ensureAvailable(target: RuntimeTarget): Effect.Effect<void, RuntimeError, EventStore> {
       return Effect.gen(function* () {
+        const opts = yield* Effect.try({
+          try: () => validateAwsEcsOptions(target.options),
+          catch: toRuntimeError,
+        });
+        const c = getClients(opts);
         const handle = yield* ChildProcess.make("docker", ["version"], {
           stdin: "ignore",
           stdout: "ignore",
@@ -560,10 +917,8 @@ export function createAwsEcsDriver(
         }
 
         yield* Effect.tryPromise({
-          try: async () => {
-            const opts = validateAwsEcsOptions(target.options);
-            const c = getClients(opts);
-            await c.ecr.config.region();
+          try: async (signal) => {
+            await c.ecr.send(ecrAuthorizationCommand(opts), { abortSignal: signal });
           },
           catch: (error) => awsOperationError("verifying AWS credentials via ECR", error),
         });
@@ -576,13 +931,36 @@ export function createAwsEcsDriver(
 
     build(input: RuntimeOperationInput): Effect.Effect<BuildResult, RuntimeError, EventStore> {
       return Effect.gen(function* () {
-        const opts = validateAwsEcsOptions(input.target.options);
+        const opts = yield* Effect.try({
+          try: () => validateAwsEcsOptions(input.target.options),
+          catch: toRuntimeError,
+        });
         const c = getClients(opts);
         const imageTag = input.deploymentId;
         const fullImage = imageUri(opts, imageTag);
 
+        const temporaryBuildDir = yield* Effect.acquireRelease(
+          Effect.try({
+            try: () => mkdtempSync(join(tmpdir(), "biodome-buildx-")),
+            catch: (error) =>
+              new RuntimeError({
+                message: `Failed to create Docker Buildx metadata directory: ${platformErrorMessage(error)}`,
+              }),
+          }),
+          (path) => Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+        );
+        const dockerConfigDir = join(temporaryBuildDir, "docker-config");
+        yield* Effect.try({
+          try: () => mkdirSync(dockerConfigDir, { recursive: true, mode: 0o700 }),
+          catch: (error) =>
+            new RuntimeError({
+              message: `Failed to create isolated Docker credential storage: ${platformErrorMessage(error)}`,
+            }),
+        });
+        const dockerEnvironment = { DOCKER_CONFIG: dockerConfigDir };
+
         const authResponse = yield* Effect.tryPromise({
-          try: () => c.ecr.send(new GetAuthorizationTokenCommand({})),
+          try: (signal) => c.ecr.send(ecrAuthorizationCommand(opts), { abortSignal: signal }),
           catch: (error) => awsOperationError("getting the ECR authorization token", error),
         });
         const authData = authResponse.authorizationData?.[0];
@@ -600,6 +978,7 @@ export function createAwsEcsDriver(
             execFileSync("docker", ["login", "-u", user, "--password-stdin", proxyEndpoint], {
               input: pass,
               stdio: ["pipe", "ignore", "ignore"],
+              env: { ...process.env, ...dockerEnvironment },
             });
           },
           catch: (error) =>
@@ -608,40 +987,32 @@ export function createAwsEcsDriver(
             }),
         });
 
-        const metadataDir = yield* Effect.try({
-          try: () => mkdtempSync(join(tmpdir(), "biodome-buildx-")),
-          catch: (error) =>
-            new RuntimeError({
-              message: `Failed to create Docker Buildx metadata directory: ${platformErrorMessage(error)}`,
-            }),
+        const metadataPath = join(temporaryBuildDir, "metadata.json");
+        yield* runProcess({
+          command: "docker",
+          args: [
+            "buildx",
+            "build",
+            "--platform",
+            "linux/amd64",
+            "-t",
+            fullImage,
+            "--push",
+            "--provenance=false",
+            "--sbom=false",
+            "--metadata-file",
+            metadataPath,
+            "-f",
+            join(input.outputDir, "Dockerfile"),
+            input.rootDir,
+          ],
+          env: dockerEnvironment,
         });
-        const metadataPath = join(metadataDir, "metadata.json");
-        try {
-          yield* runProcess({
-            command: "docker",
-            args: [
-              "buildx",
-              "build",
-              "--platform",
-              "linux/amd64",
-              "-t",
-              fullImage,
-              "--push",
-              "--metadata-file",
-              metadataPath,
-              "-f",
-              join(input.outputDir, "Dockerfile"),
-              input.rootDir,
-            ],
-          });
-          const digest = yield* Effect.try({
-            try: () => buildxImageDigest(readFileSync(metadataPath, "utf-8")),
-            catch: toRuntimeError,
-          });
-          return { imageRef: `${opts.repository}@${digest}`, digest };
-        } finally {
-          rmSync(metadataDir, { recursive: true, force: true });
-        }
+        const digest = yield* Effect.try({
+          try: () => buildxImageDigest(readFileSync(metadataPath, "utf-8")),
+          catch: toRuntimeError,
+        });
+        return { imageRef: `${opts.repository}@${digest}`, digest };
       }).pipe(
         Effect.provide(NodeRuntime),
         Effect.scoped,
@@ -651,141 +1022,277 @@ export function createAwsEcsDriver(
 
     start(input: StartInput): Effect.Effect<DeploymentState, RuntimeError, EventStore> {
       return Effect.gen(function* () {
-        const opts = validateAwsEcsOptions(input.target.options);
+        const opts = yield* Effect.try({
+          try: () => validateAwsEcsOptions(input.target.options),
+          catch: toRuntimeError,
+        });
         const c = getClients(opts);
         const family = familyName(input.deploymentId);
         const lgGroup =
           input.state?.resourceIds.logGroup ?? logGroupName(input.plan.project, input.target.name);
 
-        const env = materializeContainerEnvironment(input.plan);
-        const hasDaemonProcesses = input.plan.runtime.processes.some(
-          (process) => process.mode === "daemon",
-        );
+        const env = yield* Effect.try({
+          try: () => materializeContainerEnvironment(input.plan),
+          catch: toRuntimeError,
+        });
+        const hasStartupProcesses = needsStartupScript(input.plan);
         const layout = runtimeLayout(input.rootDir, input.target.name).container;
-        const defaultCommand = hasDaemonProcesses ? ["sh", layout.startupScript] : undefined;
-        const imageRef = input.buildManifest.imageRef ?? imageUri(opts, input.deploymentId);
+        const readinessFile = `${layout.root}/ready`;
+        const defaultCommand = hasStartupProcesses
+          ? ["sh", layout.startupScript]
+          : ["sh", "-c", `rm -f ${readinessFile} && touch ${readinessFile} && exec sleep infinity`];
+        const imageRef = yield* Effect.try({
+          try: () => requireImmutableImageRef(input.buildManifest),
+          catch: toRuntimeError,
+        });
+        const roles = yield* Effect.try({
+          try: () => ({
+            executionRoleArn: resolveSecret(opts.executionRoleArn, "the ECS execution role ARN"),
+            taskRoleArn: opts.taskRoleArn
+              ? resolveSecret(opts.taskRoleArn, "the ECS task role ARN")
+              : undefined,
+          }),
+          catch: toRuntimeError,
+        });
 
         yield* ensureLogGroup(c.cloudwatch, lgGroup);
 
-        const registerResult = yield* Effect.tryPromise({
-          try: () =>
-            c.ecs.send(
-              new RegisterTaskDefinitionCommand({
-                family,
-                executionRoleArn: resolveSecret(
-                  opts.executionRoleArn,
-                  "the ECS execution role ARN",
-                ),
-                taskRoleArn: opts.taskRoleArn
-                  ? resolveSecret(opts.taskRoleArn, "the ECS task role ARN")
-                  : undefined,
-                networkMode: "awsvpc",
-                requiresCompatibilities: ["FARGATE"],
-                cpu: String(opts.cpu ?? 1024),
-                memory: String(opts.memoryMiB ?? 2048),
-                containerDefinitions: [
-                  devContainerDefinition({
-                    plan: input.plan,
-                    imageRef,
-                    command: defaultCommand,
-                    env,
-                    logGroup: lgGroup,
-                    region: opts.region,
-                    streamPrefix: input.deploymentId,
-                    runSupervisorAsRoot: hasDaemonProcesses,
-                  }),
-                ],
-              }),
-            ),
-          catch: (error) => awsOperationError(`registering ECS task definition ${family}`, error),
-        });
-
-        const taskDefArn = registerResult.taskDefinition?.taskDefinitionArn;
-        if (!taskDefArn) {
-          return yield* new RuntimeError({
-            message: "ECS RegisterTaskDefinition returned no task definition ARN",
-          });
-        }
-
-        // Provisional identity is durable before any waiting: an interrupted
-        // start leaves recoverable state naming every created resource.
         const createdAt = new Date().toISOString();
-        const resourceIds = {
-          taskDefinitionArn: taskDefArn,
-          taskArn: "",
+        let taskDefArn: string | undefined;
+        let taskArn: string | undefined;
+        let registrationNeedsReconciliation = false;
+        let runTaskNeedsReconciliation = false;
+        const resourceIds = () => ({
+          taskDefinitionArn: taskDefArn ?? "",
+          taskArn: taskArn ?? "",
+          taskDefinitionFamily: family,
+          ...(runTaskNeedsReconciliation ? { taskLaunchMayExist: "true" } : {}),
           logGroup: lgGroup,
           logStreamPrefix: input.deploymentId,
-        };
-        writeState(input.rootDir, input.target.name, {
-          driver: "aws-ecs",
-          deploymentId: input.deploymentId,
-          createdAt,
-          resourceIds,
-          status: "provisioning",
         });
 
-        let taskArn: string | undefined;
-        const startup = Effect.gen(function* () {
-          const runResult = yield* Effect.tryPromise({
-            try: () =>
-              c.ecs.send(
-                new RunTaskCommand({
-                  cluster: opts.cluster,
-                  taskDefinition: taskDefArn,
-                  ...placementFor(opts),
-                  networkConfiguration: {
-                    awsvpcConfiguration: {
-                      subnets: opts.subnets,
-                      securityGroups: opts.securityGroups,
-                      assignPublicIp: opts.assignPublicIp ? "ENABLED" : "DISABLED",
-                    },
-                  },
-                }),
+        const rollback = Effect.gen(function* () {
+          let cleaned = true;
+          const taskArns = new Set(taskArn ? [taskArn] : []);
+          const taskDefinitionArns = new Set(taskDefArn ? [taskDefArn] : []);
+          if (registrationNeedsReconciliation || runTaskNeedsReconciliation) {
+            const discovered = yield* Effect.result(
+              discoverFamilyResourcesEventually(
+                c.ecs,
+                opts.cluster,
+                family,
+                runTaskNeedsReconciliation ? "task" : "task-definition",
+                startPolling.intervalMs,
               ),
-            catch: (error) => awsOperationError(`starting ECS task from ${taskDefArn}`, error),
-          });
-
-          const launched = runResult.tasks?.[0]?.taskArn;
-          if (!launched) {
-            const failures = runResult.failures ?? [];
-            const detail =
-              failures
-                .map(
-                  (failure) =>
-                    `${failure.reason ?? "?"}${failure.detail ? ` (${failure.detail})` : ""}`,
-                )
-                .join("; ") || "no task was created";
-            return yield* new RuntimeError({
-              message: `ECS RunTask failed to place the task from ${taskDefArn}: ${detail}`,
-            });
+            );
+            if (Result.isFailure(discovered)) {
+              cleaned = false;
+              yield* Effect.sync(() => console.warn(`[biodome] ${discovered.failure.message}`));
+            } else {
+              for (const arn of discovered.success.taskArns) taskArns.add(arn);
+              for (const arn of discovered.success.taskDefinitionArns) {
+                taskDefinitionArns.add(arn);
+              }
+              taskArn ??= discovered.success.taskArns[0];
+              taskDefArn ??= discovered.success.taskDefinitionArns[0];
+            }
           }
-          taskArn = launched;
+          for (const arn of taskArns) {
+            cleaned =
+              (yield* bestEffortCleanup(
+                stopEcsTaskEventually(
+                  c.ecs,
+                  opts.cluster,
+                  arn,
+                  "Rolled back by biodome after failed or interrupted start",
+                ),
+                `Failed to stop ECS task ${arn} during rollback`,
+              )) && cleaned;
+          }
+          for (const arn of taskDefinitionArns) {
+            cleaned =
+              (yield* bestEffortCleanup(
+                releaseTaskDefinition(c.ecs, arn),
+                `Failed to release task definition ${arn} during rollback`,
+              )) && cleaned;
+          }
 
-          writeState(input.rootDir, input.target.name, {
-            driver: "aws-ecs",
-            deploymentId: input.deploymentId,
-            createdAt,
-            resourceIds: { ...resourceIds, taskArn: launched },
-            status: "provisioning",
-          });
+          if (cleaned && taskDefArn) {
+            yield* removePersistedState(input.rootDir, input.target.name);
+          } else if (!cleaned) {
+            yield* bestEffortCleanup(
+              persistState(input.rootDir, input.target.name, {
+                driver: "aws-ecs",
+                deploymentId: input.deploymentId,
+                createdAt,
+                resourceIds: resourceIds(),
+                status: "failed",
+              }),
+              `Failed to retain recovery state for target "${input.target.name}"`,
+            );
+          }
+        });
+
+        const startup = Effect.gen(function* () {
+          // A returned registration ARN and its first durable state write are
+          // uninterruptible; lost AWS responses are reconciled by family below.
+          yield* Effect.uninterruptible(
+            Effect.gen(function* () {
+              const registerResult = yield* Effect.tryPromise({
+                try: (signal) =>
+                  c.ecs.send(
+                    new RegisterTaskDefinitionCommand({
+                      family,
+                      executionRoleArn: roles.executionRoleArn,
+                      taskRoleArn: roles.taskRoleArn,
+                      networkMode: "awsvpc",
+                      requiresCompatibilities: ["FARGATE"],
+                      cpu: String(opts.cpu ?? 1024),
+                      memory: String(opts.memoryMiB ?? 2048),
+                      containerDefinitions: [
+                        devContainerDefinition({
+                          plan: input.plan,
+                          imageRef,
+                          command: defaultCommand,
+                          env,
+                          logGroup: lgGroup,
+                          region: opts.region,
+                          streamPrefix: input.deploymentId,
+                          runSupervisorAsRoot: hasStartupProcesses,
+                          readinessFile,
+                        }),
+                      ],
+                    }),
+                    { abortSignal: signal },
+                  ),
+                catch: (error) => {
+                  registrationNeedsReconciliation = awsRequestMayHaveCommitted(error);
+                  return awsOperationError(`registering ECS task definition ${family}`, error);
+                },
+              });
+
+              taskDefArn = registerResult.taskDefinition?.taskDefinitionArn;
+              if (!taskDefArn) {
+                registrationNeedsReconciliation = true;
+                return yield* new RuntimeError({
+                  message: "ECS RegisterTaskDefinition returned no task definition ARN",
+                });
+              }
+              registrationNeedsReconciliation = false;
+              yield* persistState(input.rootDir, input.target.name, {
+                driver: "aws-ecs",
+                deploymentId: input.deploymentId,
+                createdAt,
+                resourceIds: resourceIds(),
+                status: "provisioning",
+              });
+            }),
+          );
+
+          yield* Effect.uninterruptible(
+            Effect.gen(function* () {
+              const currentTaskDefArn = taskDefArn;
+              if (!currentTaskDefArn) {
+                return yield* new RuntimeError({
+                  message: "Cannot launch an ECS task before its task definition is recorded",
+                });
+              }
+              const runResult = yield* Effect.tryPromise({
+                try: (signal) =>
+                  c.ecs.send(
+                    new RunTaskCommand({
+                      cluster: opts.cluster,
+                      taskDefinition: currentTaskDefArn,
+                      clientToken: ecsClientToken(currentTaskDefArn, "start"),
+                      ...placementFor(opts),
+                      networkConfiguration: {
+                        awsvpcConfiguration: {
+                          subnets: opts.subnets,
+                          securityGroups: opts.securityGroups,
+                          assignPublicIp: opts.assignPublicIp ? "ENABLED" : "DISABLED",
+                        },
+                      },
+                    }),
+                    { abortSignal: signal },
+                  ),
+                catch: (error) => {
+                  runTaskNeedsReconciliation = awsRequestMayHaveCommitted(error);
+                  return awsOperationError(`starting ECS task from ${currentTaskDefArn}`, error);
+                },
+              });
+
+              taskArn = runResult.tasks?.[0]?.taskArn;
+              if (!taskArn) {
+                runTaskNeedsReconciliation = (runResult.failures ?? []).length === 0;
+                const detail =
+                  (runResult.failures ?? [])
+                    .map(
+                      (failure) =>
+                        `${failure.reason ?? "?"}${failure.detail ? ` (${failure.detail})` : ""}`,
+                    )
+                    .join("; ") || "no task was created";
+                return yield* new RuntimeError({
+                  message: `ECS RunTask failed to place the task from ${currentTaskDefArn}: ${detail}`,
+                });
+              }
+              runTaskNeedsReconciliation = false;
+
+              yield* persistState(input.rootDir, input.target.name, {
+                driver: "aws-ecs",
+                deploymentId: input.deploymentId,
+                createdAt,
+                resourceIds: resourceIds(),
+                status: "provisioning",
+              });
+            }),
+          );
 
           // Bounded, injectable polling until the task is usable or terminal.
           const deadline = Date.now() + startPolling.timeoutMs;
+          let lastStatus = "MISSING";
+          let describeFailures = 0;
           for (;;) {
-            const task = yield* describeEcsTask(c.ecs, opts.cluster, launched);
-            if (!task) {
+            const currentTaskArn = taskArn;
+            if (!currentTaskArn) {
               return yield* new RuntimeError({
-                message: `ECS task ${launched} disappeared from cluster ${opts.cluster} before becoming usable`,
+                message: "Cannot poll an ECS task before its task ARN is recorded",
               });
             }
-            const lastStatus = task.lastStatus ?? "UNKNOWN";
-            if (lastStatus === "RUNNING") break;
-            if (lastStatus === "STOPPED") {
-              return yield* terminalTaskError(launched, task);
+            const described = yield* Effect.result(
+              describeEcsTask(c.ecs, opts.cluster, currentTaskArn),
+            );
+            if (Result.isFailure(described)) {
+              describeFailures += 1;
+              if (
+                /AWS authorization failed|AWS resource not found/.test(described.failure.message) ||
+                describeFailures >= MAX_DESCRIBE_FAILURES
+              ) {
+                return yield* described.failure;
+              }
+              yield* Effect.sleep(`${startPolling.intervalMs} millis`);
+              continue;
+            }
+            describeFailures = 0;
+            const task = described.success;
+            if (!task) {
+              // RunTask and DescribeTasks are eventually consistent. A MISSING
+              // response is retried until the same bounded startup deadline.
+              lastStatus = "MISSING";
+            } else {
+              lastStatus = task.lastStatus ?? "UNKNOWN";
+              if (lastStatus === "RUNNING" && task.healthStatus === "HEALTHY") break;
+              if (task.healthStatus === "UNHEALTHY") {
+                return yield* new RuntimeError({
+                  message: `ECS task ${currentTaskArn} became unhealthy before startup completed`,
+                });
+              }
+              if (lastStatus === "STOPPED") {
+                return yield* terminalTaskError(currentTaskArn, task);
+              }
             }
             if (Date.now() >= deadline) {
               return yield* new RuntimeError({
-                message: `Timed out after ${Math.round(startPolling.timeoutMs / 1000)}s waiting for ECS task ${launched} to reach RUNNING (last status ${lastStatus})`,
+                message: `Timed out after ${Math.round(startPolling.timeoutMs / 1000)}s waiting for ECS task ${currentTaskArn} to reach RUNNING (last status ${lastStatus})`,
               });
             }
             yield* Effect.sleep(`${startPolling.intervalMs} millis`);
@@ -796,52 +1303,16 @@ export function createAwsEcsDriver(
           const finalState: DeploymentState = {
             driver: "aws-ecs",
             deploymentId: input.deploymentId,
-            resourceIds: { ...resourceIds, taskArn: launched },
+            resourceIds: resourceIds(),
             createdAt,
             status: "running",
           };
-          writeState(input.rootDir, input.target.name, finalState);
+          yield* persistState(input.rootDir, input.target.name, finalState);
           return finalState;
         });
 
         return yield* startup.pipe(
-          // Any failed or interrupted start rolls back every created resource:
-          // the task (if placed) is stopped and the task definition deregistered.
-          Effect.onError(() =>
-            Effect.gen(function* () {
-              if (taskArn) {
-                yield* bestEffortCleanup(
-                  stopEcsTask(
-                    c.ecs,
-                    opts.cluster,
-                    taskArn,
-                    "Rolled back by biodome after failed start",
-                  ),
-                  `Failed to stop ECS task ${taskArn} during rollback`,
-                );
-              }
-              yield* bestEffortCleanup(
-                deregisterTaskDefinition(c.ecs, taskDefArn),
-                `Failed to deregister leaked task definition ${taskDefArn} after failed start`,
-              );
-              removeState(input.rootDir, input.target.name);
-            }),
-          ),
-          Effect.onInterrupt(() =>
-            Effect.gen(function* () {
-              if (taskArn) {
-                yield* bestEffortCleanup(
-                  stopEcsTask(c.ecs, opts.cluster, taskArn, "Interrupted biodome start"),
-                  `Failed to stop ECS task ${taskArn} after interrupted start`,
-                );
-              }
-              yield* bestEffortCleanup(
-                deregisterTaskDefinition(c.ecs, taskDefArn),
-                `Failed to deregister task definition ${taskDefArn} after interrupted start`,
-              );
-              removeState(input.rootDir, input.target.name);
-            }),
-          ),
+          Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : rollback)),
         );
       }).pipe(
         Effect.provide(NodeRuntime),
@@ -852,50 +1323,104 @@ export function createAwsEcsDriver(
 
     stop(input: RuntimeOperationInput): Effect.Effect<void, RuntimeError, EventStore> {
       return Effect.gen(function* () {
-        const opts = validateAwsEcsOptions(input.target.options);
+        const opts = yield* Effect.try({
+          try: () => validateAwsEcsOptions(input.target.options),
+          catch: toRuntimeError,
+        });
         const c = getClients(opts);
-        const { taskArn, taskDefinitionArn } = requireState(input, "stop");
+        const {
+          taskArn,
+          taskDefinitionArn,
+          taskDefinitionFamily,
+          taskLaunchMayExist,
+          jobTaskArn,
+          jobTaskDefinitionArn,
+          jobTaskDefinitionFamily,
+          jobTaskLaunchMayExist,
+        } = yield* Effect.try({
+          try: () => requireState(input, "stop"),
+          catch: toRuntimeError,
+        });
+
+        const stopAndWait = (arn: string, mayBePropagating: boolean) =>
+          Effect.gen(function* () {
+            const task = yield* describeEcsTask(c.ecs, opts.cluster, arn);
+            if (!task) {
+              if (mayBePropagating) {
+                yield* stopEcsTaskEventually(c.ecs, opts.cluster, arn, "Stopped by biodome");
+              }
+              return;
+            }
+            if (task.lastStatus === "STOPPED") return;
+
+            yield* stopEcsTaskEventually(c.ecs, opts.cluster, arn, "Stopped by biodome");
+            for (let i = 0; i < 30; i++) {
+              const stoppedTask = yield* describeEcsTask(c.ecs, opts.cluster, arn);
+              if (!stoppedTask || stoppedTask.lastStatus === "STOPPED") return;
+              if (i < 29) yield* Effect.sleep("2 seconds");
+            }
+            return yield* new RuntimeError({
+              message: `Timed out waiting for ECS task ${arn} to stop`,
+            });
+          });
+
+        const taskArns = new Set(taskArn ? [taskArn] : []);
+        const taskDefinitionArns = new Set(taskDefinitionArn ? [taskDefinitionArn] : []);
+        const jobTaskArns = new Set(jobTaskArn ? [jobTaskArn] : []);
+        const jobTaskDefinitionArns = new Set(jobTaskDefinitionArn ? [jobTaskDefinitionArn] : []);
+        const mayNeedDiscovery =
+          input.state?.status === "provisioning" || input.state?.status === "failed";
+
+        if (
+          mayNeedDiscovery &&
+          taskDefinitionFamily &&
+          (!taskDefinitionArn || (!taskArn && taskLaunchMayExist === "true"))
+        ) {
+          const discovered = yield* discoverFamilyResourcesEventually(
+            c.ecs,
+            opts.cluster,
+            taskDefinitionFamily,
+            !taskDefinitionArn ? "task-definition" : "task",
+            startPolling.intervalMs,
+          );
+          for (const arn of discovered.taskArns) taskArns.add(arn);
+          for (const arn of discovered.taskDefinitionArns) taskDefinitionArns.add(arn);
+        }
+        if (
+          mayNeedDiscovery &&
+          jobTaskDefinitionFamily &&
+          (!jobTaskDefinitionArn || (!jobTaskArn && jobTaskLaunchMayExist === "true"))
+        ) {
+          const discovered = yield* discoverFamilyResourcesEventually(
+            c.ecs,
+            opts.cluster,
+            jobTaskDefinitionFamily,
+            !jobTaskDefinitionArn ? "task-definition" : "task",
+            startPolling.intervalMs,
+          );
+          for (const arn of discovered.taskArns) jobTaskArns.add(arn);
+          for (const arn of discovered.taskDefinitionArns) jobTaskDefinitionArns.add(arn);
+        }
+
+        // A previous job cleanup failure records these references in the same
+        // deployment state so `down` can recover them before the base task.
+        for (const arn of jobTaskArns) yield* stopAndWait(arn, true);
+        for (const arn of jobTaskDefinitionArns) {
+          yield* releaseTaskDefinition(c.ecs, arn);
+        }
 
         // Idempotent: a record without a placed task still releases the
         // registered task definition from an interrupted start.
-        if (!taskArn) {
-          if (taskDefinitionArn) {
-            yield* bestEffortCleanup(
-              deregisterTaskDefinition(c.ecs, taskDefinitionArn),
-              `Failed to deregister task definition ${taskDefinitionArn} during stop`,
-            );
-          }
+        if (taskArns.size === 0) {
+          for (const arn of taskDefinitionArns) yield* releaseTaskDefinition(c.ecs, arn);
           return;
         }
 
-        const stopFlow = Effect.gen(function* () {
-          const task = yield* describeEcsTask(c.ecs, opts.cluster, taskArn);
-          if (!task || task.lastStatus === "STOPPED") return;
+        for (const arn of taskArns) yield* stopAndWait(arn, mayNeedDiscovery);
 
-          yield* stopEcsTask(c.ecs, opts.cluster, taskArn, "Stopped by biodome");
-
-          for (let i = 0; i < 30; i++) {
-            const stoppedTask = yield* describeEcsTask(c.ecs, opts.cluster, taskArn);
-            if (!stoppedTask || stoppedTask.lastStatus === "STOPPED") return;
-            if (i < 29) yield* Effect.sleep("2 seconds");
-          }
-
-          return yield* new RuntimeError({
-            message: `Timed out waiting for ECS task ${taskArn} to stop`,
-          });
-        });
-
-        yield* stopFlow;
-
-        // The deployment's own task is terminal, so its dedicated task
-        // definition has no remaining active user and is released. Cleanup
-        // failures warn instead of masking a successful stop.
-        if (taskDefinitionArn) {
-          yield* bestEffortCleanup(
-            deregisterTaskDefinition(c.ecs, taskDefinitionArn),
-            `Failed to deregister ECS task definition ${taskDefinitionArn}`,
-          );
-        }
+        // Do not report a successful stop while its definition leaked. The
+        // caller retains state when this fails and can safely retry `down`.
+        for (const arn of taskDefinitionArns) yield* releaseTaskDefinition(c.ecs, arn);
       }).pipe(
         Effect.provide(NodeRuntime),
         Effect.scoped,
@@ -905,11 +1430,17 @@ export function createAwsEcsDriver(
 
     runJob(input: JobInput): Effect.Effect<CommandResult, RuntimeError, EventStore> {
       return Effect.gen(function* () {
-        const opts = validateAwsEcsOptions(input.target.options);
+        const opts = yield* Effect.try({
+          try: () => validateAwsEcsOptions(input.target.options),
+          catch: toRuntimeError,
+        });
         const c = getClients(opts);
         const family = familyName(input.deploymentId);
         const lgGroup = logGroupName(input.plan.project, input.target.name);
-        const imageRef = input.buildManifest.imageRef ?? imageUri(opts, input.deploymentId);
+        const imageRef = yield* Effect.try({
+          try: () => requireImmutableImageRef(input.buildManifest),
+          catch: toRuntimeError,
+        });
         const startTime = Date.now();
 
         // Tracked so the all-exits finalizer below can release ECS resources.
@@ -918,9 +1449,55 @@ export function createAwsEcsDriver(
           taskDefArn?: string;
           lastStatus: string;
         } = { lastStatus: "PENDING" };
+        let registrationNeedsReconciliation = false;
+        let runTaskNeedsReconciliation = false;
+        const baseState = input.state;
+        const persistJobRecoveryState = (): Effect.Effect<void, RuntimeError> =>
+          baseState
+            ? persistState(input.rootDir, input.target.name, {
+                driver: baseState.driver,
+                deploymentId: baseState.deploymentId,
+                createdAt: baseState.createdAt,
+                resourceIds: {
+                  ...baseState.resourceIds,
+                  jobTaskArn: refs.taskArn ?? "",
+                  jobTaskDefinitionArn: refs.taskDefArn ?? "",
+                  jobTaskDefinitionFamily: `${family}-exec`,
+                  ...(runTaskNeedsReconciliation ? { jobTaskLaunchMayExist: "true" } : {}),
+                },
+                status: baseState.status,
+              })
+            : Effect.void;
+        const restoreDeploymentState = (): Effect.Effect<void, RuntimeError> =>
+          baseState
+            ? persistState(input.rootDir, input.target.name, {
+                driver: baseState.driver,
+                deploymentId: baseState.deploymentId,
+                createdAt: baseState.createdAt,
+                resourceIds: baseState.resourceIds,
+                status: baseState.status,
+              })
+            : Effect.void;
 
-        const env = materializeContainerEnvironment(input.plan);
-        let taskRoleArn: string | undefined;
+        const env = yield* Effect.try({
+          try: () => materializeContainerEnvironment(input.plan),
+          catch: toRuntimeError,
+        });
+        const roles = yield* Effect.try({
+          try: () => ({
+            executionRoleArn: resolveSecret(opts.executionRoleArn, "the ECS execution role ARN"),
+            taskRoleArn: opts.taskRoleArn
+              ? resolveSecret(opts.taskRoleArn, "the ECS task role ARN")
+              : undefined,
+          }),
+          catch: toRuntimeError,
+        });
+        for (const artifactPath of input.artifactPaths ?? []) {
+          yield* Effect.try({
+            try: () => assertRelativeArtifactPath(artifactPath),
+            catch: toRuntimeError,
+          });
+        }
         if (input.artifactPaths && input.artifactPaths.length > 0) {
           if (!opts.artifactBucket) {
             return yield* new RuntimeError({
@@ -934,8 +1511,10 @@ export function createAwsEcsDriver(
                 "The aws-ecs target needs taskRoleArn configured to upload task artifacts to S3.",
             });
           }
-          const bucket = resolveSecret(opts.artifactBucket, "the S3 artifact bucket");
-          taskRoleArn = resolveSecret(opts.taskRoleArn, "the ECS task role ARN");
+          const bucket = yield* Effect.try({
+            try: () => resolveSecret(opts.artifactBucket, "the S3 artifact bucket"),
+            catch: toRuntimeError,
+          });
           env.environment.push({ name: "BIODOME_ARTIFACT_BUCKET", value: bucket });
           env.environment.push({
             name: "BIODOME_ARTIFACT_PREFIX",
@@ -948,85 +1527,123 @@ export function createAwsEcsDriver(
           });
         }
 
+        const hasStartupProcesses = needsStartupScript(input.plan);
+        const layout = runtimeLayout(input.rootDir, input.target.name).container;
+        const readinessFile = `${layout.root}/ready`;
+        const jobCommand = hasStartupProcesses
+          ? ["sh", layout.startupScript, "--job", ...input.command]
+          : input.command;
+
         yield* ensureLogGroup(c.cloudwatch, lgGroup);
 
         const job = Effect.gen(function* () {
-          const registerResult = yield* Effect.tryPromise({
-            try: () =>
-              c.ecs.send(
-                new RegisterTaskDefinitionCommand({
-                  family: `${family}-exec`,
-                  executionRoleArn: resolveSecret(
-                    opts.executionRoleArn,
-                    "the ECS execution role ARN",
-                  ),
-                  taskRoleArn,
-                  networkMode: "awsvpc",
-                  requiresCompatibilities: ["FARGATE"],
-                  cpu: String(opts.cpu ?? 1024),
-                  memory: String(opts.memoryMiB ?? 2048),
-                  containerDefinitions: [
-                    devContainerDefinition({
-                      plan: input.plan,
-                      imageRef,
-                      command: input.command,
-                      env,
-                      logGroup: lgGroup,
-                      region: opts.region,
-                      streamPrefix: `${input.deploymentId}-exec`,
-                      // Job commands are plain workloads: never a supervisor.
-                      runSupervisorAsRoot: false,
+          yield* Effect.uninterruptible(
+            Effect.gen(function* () {
+              const registerResult = yield* Effect.tryPromise({
+                try: (signal) =>
+                  c.ecs.send(
+                    new RegisterTaskDefinitionCommand({
+                      family: `${family}-exec`,
+                      executionRoleArn: roles.executionRoleArn,
+                      taskRoleArn: roles.taskRoleArn,
+                      networkMode: "awsvpc",
+                      requiresCompatibilities: ["FARGATE"],
+                      cpu: String(opts.cpu ?? 1024),
+                      memory: String(opts.memoryMiB ?? 2048),
+                      containerDefinitions: [
+                        devContainerDefinition({
+                          plan: input.plan,
+                          imageRef,
+                          command: jobCommand,
+                          env,
+                          logGroup: lgGroup,
+                          region: opts.region,
+                          streamPrefix: `${input.deploymentId}-exec`,
+                          runSupervisorAsRoot: hasStartupProcesses,
+                          readinessFile,
+                        }),
+                      ],
                     }),
-                  ],
-                }),
-              ),
-            catch: (error) =>
-              awsOperationError(`registering ECS job task definition ${family}-exec`, error),
-          });
+                    { abortSignal: signal },
+                  ),
+                catch: (error) => {
+                  registrationNeedsReconciliation = awsRequestMayHaveCommitted(error);
+                  return awsOperationError(
+                    `registering ECS job task definition ${family}-exec`,
+                    error,
+                  );
+                },
+              });
 
-          const taskDefArn = registerResult.taskDefinition?.taskDefinitionArn;
-          if (!taskDefArn) {
-            return yield* new RuntimeError({
-              message: "ECS RegisterTaskDefinition returned no task definition ARN for the job",
-            });
-          }
-          refs.taskDefArn = taskDefArn;
+              refs.taskDefArn = registerResult.taskDefinition?.taskDefinitionArn;
+              if (!refs.taskDefArn) {
+                registrationNeedsReconciliation = true;
+                return yield* new RuntimeError({
+                  message: "ECS RegisterTaskDefinition returned no task definition ARN for the job",
+                });
+              }
+              registrationNeedsReconciliation = false;
+              yield* persistJobRecoveryState();
+            }),
+          );
 
-          const runResult = yield* Effect.tryPromise({
-            try: () =>
-              c.ecs.send(
-                new RunTaskCommand({
-                  cluster: opts.cluster,
-                  taskDefinition: taskDefArn,
-                  ...placementFor(opts),
-                  networkConfiguration: {
-                    awsvpcConfiguration: {
-                      subnets: opts.subnets,
-                      securityGroups: opts.securityGroups,
-                      assignPublicIp: opts.assignPublicIp ? "ENABLED" : "DISABLED",
-                    },
-                  },
-                }),
-              ),
-            catch: (error) =>
-              awsOperationError(`starting the ECS job task from ${taskDefArn}`, error),
-          });
+          yield* Effect.uninterruptible(
+            Effect.gen(function* () {
+              const taskDefArn = refs.taskDefArn;
+              if (!taskDefArn) {
+                return yield* new RuntimeError({
+                  message: "Cannot launch an ECS job before its task definition is recorded",
+                });
+              }
+              const runResult = yield* Effect.tryPromise({
+                try: (signal) =>
+                  c.ecs.send(
+                    new RunTaskCommand({
+                      cluster: opts.cluster,
+                      taskDefinition: taskDefArn,
+                      clientToken: ecsClientToken(taskDefArn, "job"),
+                      ...placementFor(opts),
+                      networkConfiguration: {
+                        awsvpcConfiguration: {
+                          subnets: opts.subnets,
+                          securityGroups: opts.securityGroups,
+                          assignPublicIp: opts.assignPublicIp ? "ENABLED" : "DISABLED",
+                        },
+                      },
+                    }),
+                    { abortSignal: signal },
+                  ),
+                catch: (error) => {
+                  runTaskNeedsReconciliation = awsRequestMayHaveCommitted(error);
+                  return awsOperationError(`starting the ECS job task from ${taskDefArn}`, error);
+                },
+              });
 
-          const taskArn = runResult.tasks?.[0]?.taskArn;
+              refs.taskArn = runResult.tasks?.[0]?.taskArn;
+              if (!refs.taskArn) {
+                runTaskNeedsReconciliation = (runResult.failures ?? []).length === 0;
+                const detail =
+                  (runResult.failures ?? [])
+                    .map(
+                      (failure) =>
+                        `${failure.reason ?? "?"}${failure.detail ? ` (${failure.detail})` : ""}`,
+                    )
+                    .join("; ") || "no task was created";
+                return yield* new RuntimeError({
+                  message: `ECS RunTask failed to place the job task from ${taskDefArn}: ${detail}`,
+                });
+              }
+              runTaskNeedsReconciliation = false;
+              yield* persistJobRecoveryState();
+            }),
+          );
+
+          const taskArn = refs.taskArn;
           if (!taskArn) {
-            const failures = runResult.failures ?? [];
-            const detail =
-              failures
-                .map(
-                  (failure) =>
-                    `${failure.reason ?? "?"}${failure.detail ? ` (${failure.detail})` : ""}`,
-                )
-                .join("; ") || "no task was created";
             return yield* new RuntimeError({
-              message: `ECS RunTask failed to place the job task from ${taskDefArn}: ${detail}`,
+              message: "Cannot poll an ECS job before its task ARN is recorded",
             });
           }
-          refs.taskArn = taskArn;
 
           let exitCode = 0;
           const pollStart = Date.now();
@@ -1051,14 +1668,20 @@ export function createAwsEcsDriver(
 
             const task = described.success;
             if (!task) {
-              return yield* new RuntimeError({
-                message: `ECS job task ${taskArn} disappeared from the cluster before reaching a terminal state`,
-              });
+              refs.lastStatus = "MISSING";
+              yield* Effect.sleep(JOB_POLL_INTERVAL);
+              continue;
             }
 
             refs.lastStatus = task.lastStatus || "UNKNOWN";
             if (refs.lastStatus === "STOPPED") {
-              exitCode = task.containers?.[0]?.exitCode ?? 0;
+              const container =
+                task.containers?.find((candidate) => candidate.name === "dev") ??
+                (task.containers?.length === 1 ? task.containers[0] : undefined);
+              if (container?.exitCode === undefined) {
+                return yield* terminalTaskError(taskArn, task);
+              }
+              exitCode = container.exitCode;
               break;
             }
             yield* Effect.sleep(JOB_POLL_INTERVAL);
@@ -1082,22 +1705,63 @@ export function createAwsEcsDriver(
           };
         });
 
-        return yield* Effect.ensuring(
-          job,
-          Effect.gen(function* () {
-            if (refs.taskArn && refs.lastStatus !== "STOPPED") {
-              yield* bestEffortCleanup(
-                stopEcsTask(c.ecs, opts.cluster, refs.taskArn, "Timed out waiting for job task"),
-                `Failed to stop ECS job task ${refs.taskArn} during cleanup`,
-              );
-            }
-            if (refs.taskDefArn) {
-              yield* bestEffortCleanup(
-                deregisterTaskDefinition(c.ecs, refs.taskDefArn),
-                `Failed to deregister ECS job task definition ${refs.taskDefArn} during cleanup`,
-              );
-            }
-          }),
+        return yield* job.pipe(
+          Effect.onExit((exit) =>
+            Effect.gen(function* () {
+              const cleanupErrors: string[] = [];
+              const taskArns = new Set(refs.taskArn ? [refs.taskArn] : []);
+              const taskDefinitionArns = new Set(refs.taskDefArn ? [refs.taskDefArn] : []);
+              if (registrationNeedsReconciliation || runTaskNeedsReconciliation) {
+                const discovered = yield* Effect.result(
+                  discoverFamilyResourcesEventually(
+                    c.ecs,
+                    opts.cluster,
+                    `${family}-exec`,
+                    runTaskNeedsReconciliation ? "task" : "task-definition",
+                    startPolling.intervalMs,
+                  ),
+                );
+                if (Result.isFailure(discovered)) {
+                  cleanupErrors.push(discovered.failure.message);
+                } else {
+                  for (const arn of discovered.success.taskArns) taskArns.add(arn);
+                  for (const arn of discovered.success.taskDefinitionArns) {
+                    taskDefinitionArns.add(arn);
+                  }
+                  refs.taskArn ??= discovered.success.taskArns[0];
+                  refs.taskDefArn ??= discovered.success.taskDefinitionArns[0];
+                  const persisted = yield* Effect.result(persistJobRecoveryState());
+                  if (Result.isFailure(persisted)) cleanupErrors.push(persisted.failure.message);
+                }
+              }
+              for (const arn of taskArns) {
+                if (arn === refs.taskArn && refs.lastStatus === "STOPPED") continue;
+                const stopped = yield* Effect.result(
+                  stopEcsTaskEventually(
+                    c.ecs,
+                    opts.cluster,
+                    arn,
+                    "Stopped while cleaning up a biodome job task",
+                  ),
+                );
+                if (Result.isFailure(stopped)) cleanupErrors.push(stopped.failure.message);
+              }
+              for (const arn of taskDefinitionArns) {
+                const deregistered = yield* Effect.result(releaseTaskDefinition(c.ecs, arn));
+                if (Result.isFailure(deregistered))
+                  cleanupErrors.push(deregistered.failure.message);
+              }
+              if (cleanupErrors.length === 0) {
+                const restored = yield* Effect.result(restoreDeploymentState());
+                if (Result.isFailure(restored)) cleanupErrors.push(restored.failure.message);
+              }
+              if (cleanupErrors.length > 0) {
+                const message = `Failed to clean up ECS job resources (task ${refs.taskArn ?? "not-created"}, definition ${refs.taskDefArn ?? "not-created"}): ${cleanupErrors.join("; ")}`;
+                if (Exit.isSuccess(exit)) return yield* new RuntimeError({ message });
+                yield* Effect.sync(() => console.warn(`[biodome] ${message}`));
+              }
+            }),
+          ),
         );
       }).pipe(
         Effect.provide(NodeRuntime),
@@ -1110,20 +1774,29 @@ export function createAwsEcsDriver(
       input: RuntimeOperationInput & { paths: string[] },
     ): Effect.Effect<Artifact[], RuntimeError, EventStore> {
       return Effect.gen(function* () {
-        const opts = validateAwsEcsOptions(input.target.options);
+        const opts = yield* Effect.try({
+          try: () => validateAwsEcsOptions(input.target.options),
+          catch: toRuntimeError,
+        });
         if (!opts.artifactBucket) {
           return yield* new RuntimeError({
             message:
               "The aws-ecs target does not have artifactBucket configured. Configure artifactBucket in target options to collect task artifacts.",
           });
         }
-        const bucket = resolveSecret(opts.artifactBucket, "the S3 artifact bucket");
+        const bucket = yield* Effect.try({
+          try: () => resolveSecret(opts.artifactBucket, "the S3 artifact bucket"),
+          catch: toRuntimeError,
+        });
         const prefix = opts.artifactPrefix ? opts.artifactPrefix.replace(/\/+$/, "") : "artifacts";
         const c = getClients(opts);
         const s3 = c.s3 ?? new S3Client({ region: opts.region });
 
         const artifactsDir = join(input.outputDir, "artifacts");
-        mkdirSync(artifactsDir, { recursive: true });
+        yield* Effect.try({
+          try: () => mkdirSync(artifactsDir, { recursive: true }),
+          catch: toRuntimeError,
+        });
 
         const artifacts: Artifact[] = [];
         for (const requestedPath of input.paths) {
@@ -1134,13 +1807,18 @@ export function createAwsEcsDriver(
           });
           const s3Key = `${prefix}/${input.deploymentId}/${requestedPath}`;
           const localPath = join(artifactsDir, requestedPath);
-          mkdirSync(dirname(localPath), { recursive: true });
+          yield* Effect.try({
+            try: () => mkdirSync(dirname(localPath), { recursive: true }),
+            catch: toRuntimeError,
+          });
 
           const response = yield* Effect.tryPromise({
-            try: async () => {
+            try: async (signal) => {
               let res: GetObjectCommandOutput;
               try {
-                res = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: s3Key }));
+                res = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: s3Key }), {
+                  abortSignal: signal,
+                });
               } catch (error) {
                 const name = awsErrorName(error);
                 if (name === "NoSuchKey") {
@@ -1171,12 +1849,7 @@ export function createAwsEcsDriver(
                   message: `Artifact "${requestedPath}" is ${declaredSize} bytes, exceeding the ${MAX_ARTIFACT_BYTES}-byte collection limit`,
                 });
               }
-              const byteArray = await res.Body.transformToByteArray();
-              if (byteArray.length > MAX_ARTIFACT_BYTES) {
-                throw new RuntimeError({
-                  message: `Artifact "${requestedPath}" streamed ${byteArray.length} bytes, exceeding the ${MAX_ARTIFACT_BYTES}-byte collection limit`,
-                });
-              }
+              const byteArray = await readArtifactBodyWithinLimit(res.Body, requestedPath);
               writeFileSync(localPath, byteArray);
               return { sizeBytes: byteArray.length };
             },
@@ -1206,9 +1879,15 @@ export function createAwsEcsDriver(
 
     status(input: RuntimeOperationInput): Effect.Effect<StatusResult, RuntimeError, EventStore> {
       return Effect.gen(function* () {
-        const opts = validateAwsEcsOptions(input.target.options);
+        const opts = yield* Effect.try({
+          try: () => validateAwsEcsOptions(input.target.options),
+          catch: toRuntimeError,
+        });
         const c = getClients(opts);
-        const { taskArn } = requireState(input, "query status");
+        const { taskArn } = yield* Effect.try({
+          try: () => requireState(input, "query status"),
+          catch: toRuntimeError,
+        });
 
         if (!taskArn) {
           return { state: "unknown" as const, message: "No task ARN in state" };
@@ -1223,6 +1902,15 @@ export function createAwsEcsDriver(
         const lastStatus = task.lastStatus || "UNKNOWN";
         switch (lastStatus) {
           case "RUNNING":
+            if (task.healthStatus === "UNHEALTHY") {
+              return { state: "failed" as const, message: "ECS task is running but unhealthy" };
+            }
+            if (task.healthStatus !== "HEALTHY") {
+              return {
+                state: "pending" as const,
+                message: "ECS task is running but startup health is not ready",
+              };
+            }
             return { state: "running" as const, message: "ECS task is running" };
           case "PENDING":
           case "PROVISIONING":
@@ -1250,32 +1938,53 @@ export function createAwsEcsDriver(
       input: RuntimeOperationInput & { processName?: string },
     ): Effect.Effect<void, RuntimeError, EventStore> {
       return Effect.gen(function* () {
-        const opts = validateAwsEcsOptions(input.target.options);
+        const opts = yield* Effect.try({
+          try: () => validateAwsEcsOptions(input.target.options),
+          catch: toRuntimeError,
+        });
         const c = getClients(opts);
         const lgGroup =
           input.state?.resourceIds.logGroup ?? logGroupName(input.plan.project, input.target.name);
-        const streamPrefix = input.processName
-          ? `${input.deploymentId}-exec/${input.processName}`
-          : input.deploymentId;
+        const requestsJobLogs =
+          input.processName !== undefined &&
+          input.plan.deployment?.task?.name === input.processName;
+        if (input.processName !== undefined && !requestsJobLogs) {
+          return yield* new RuntimeError({
+            message: `The aws-ecs driver cannot filter CloudWatch output for supervised process "${input.processName}". Run logs without a process name for aggregate container stdout/stderr; per-process supervisor files are not exported to CloudWatch.`,
+          });
+        }
+        const streamPrefix = requestsJobLogs
+          ? `${input.deploymentId}-exec/dev/`
+          : `${input.deploymentId}/dev/`;
 
-        const streamsResult = yield* Effect.tryPromise({
-          try: () =>
-            c.cloudwatch.send(
-              new DescribeLogStreamsCommand({
-                logGroupName: lgGroup,
-                logStreamNamePrefix: streamPrefix,
-                orderBy: "LastEventTime",
-                descending: true,
-                limit: 10,
-              }),
+        const logStreams: Array<{ logStreamName: string; lastEventTimestamp?: number }> = [];
+        let nextToken: string | undefined;
+        for (let page = 0; page < 20; page++) {
+          const streamsResult = yield* Effect.tryPromise({
+            try: (signal) =>
+              c.cloudwatch.send(
+                new DescribeLogStreamsCommand({
+                  logGroupName: lgGroup,
+                  logStreamNamePrefix: streamPrefix,
+                  limit: 50,
+                  nextToken,
+                }),
+                { abortSignal: signal },
+              ),
+            catch: (error) =>
+              awsOperationError(`listing CloudWatch log streams in ${lgGroup}`, error),
+          });
+          logStreams.push(
+            ...(streamsResult.logStreams || []).filter(
+              (stream): stream is typeof stream & { logStreamName: string } =>
+                typeof stream.logStreamName === "string",
             ),
-          catch: (error) =>
-            awsOperationError(`listing CloudWatch log streams in ${lgGroup}`, error),
-        });
-
-        const logStreams = (streamsResult.logStreams || []).filter(
-          (stream): stream is typeof stream & { logStreamName: string } =>
-            typeof stream.logStreamName === "string",
+          );
+          if (!streamsResult.nextToken || streamsResult.nextToken === nextToken) break;
+          nextToken = streamsResult.nextToken;
+        }
+        logStreams.sort(
+          (left, right) => (right.lastEventTimestamp ?? 0) - (left.lastEventTimestamp ?? 0),
         );
         if (logStreams.length === 0) {
           console.log(`No log streams found matching ${streamPrefix}`);
@@ -1284,13 +1993,14 @@ export function createAwsEcsDriver(
 
         for (const stream of logStreams.slice(0, 3)) {
           const eventsResult = yield* Effect.tryPromise({
-            try: () =>
+            try: (signal) =>
               c.cloudwatch.send(
                 new GetLogEventsCommand({
                   logGroupName: lgGroup,
                   logStreamName: stream.logStreamName,
                   limit: 100,
                 }),
+                { abortSignal: signal },
               ),
             catch: (error) =>
               awsOperationError(`reading CloudWatch log stream ${stream.logStreamName}`, error),

@@ -4,11 +4,12 @@
 // unsupported workspace strategies, service kinds, network modes, secret
 // exposures, and artifact transports before any provider call.
 
-import type { ArtifactTransport, SecretExposure } from "./execution-plan.js";
+import type { ArtifactTransport, SecretExposure, WorkspaceRequirement } from "./execution-plan.js";
 import type { NetworkMode, ResourceBounds, WorkspaceStrategy } from "./compatibility.js";
 
 export interface DriverSupportDeclaration {
   readonly workspaceStrategies?: readonly WorkspaceStrategy[];
+  readonly workspaceFields?: readonly (keyof Omit<WorkspaceRequirement, "strategy">)[];
   /** In-container service kinds this provider can host in the dev image. */
   readonly processServiceKinds?: readonly string[];
   readonly networkModes?: readonly NetworkMode[];
@@ -46,11 +47,16 @@ export const DRIVER_SUPPORT: Readonly<Record<string, DriverSupportDeclaration>> 
     processServiceKinds: ["postgres", "redis"],
     // The repository is uploaded as part of the immutable image build context.
     workspaceStrategies: ["upload"],
+    workspaceFields: [],
     // Fargate awsvpc tasks always have egress; no host networking exists.
     networkModes: ["egress"],
     // Security groups cannot express per-destination allowlists.
     networkAllowlist: false,
-    secretExposures: ["environment", "request-proxy", "agent-forwarding"],
+    // The single-container ECS driver supports native environment injection.
+    // Request proxies and per-agent forwarding are not cloud-wired yet.
+    secretExposures: ["environment"],
     artifactTransports: ["s3"],
+    // Target-level Fargate sizing is not a portable per-task resource contract.
+    supportsTaskResources: false,
   },
 };

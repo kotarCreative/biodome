@@ -257,7 +257,7 @@ describe("generateSupervisordConf", () => {
     );
   });
 
-  it("marks service servers RUNNING immediately; readiness is gated by the bootstrap health wait", () => {
+  it("uses Supervisor's startup qualification for service servers", () => {
     const plan = createPlan("my-app");
     plan.runtime.services.push({
       name: "db",
@@ -290,7 +290,8 @@ describe("generateSupervisordConf", () => {
       conf.indexOf("[program:db-server]"),
       conf.indexOf("[program:web]"),
     );
-    expect(dbSection).toContain("startsecs=0");
+    expect(dbSection).toContain("startretries=10");
+    expect(dbSection).not.toContain("startsecs=0");
     const webSection = conf.slice(conf.indexOf("[program:web]"));
     expect(webSection).not.toContain("startsecs=0");
   });

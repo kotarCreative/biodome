@@ -237,4 +237,69 @@ describe("validateCompatibility", () => {
       validateCompatibility(executionPlan, providerProfile(createAwsEcsDriver())).compatible,
     ).toBe(true);
   });
+
+  it("rejects upload workspace fields that the ECS image build would ignore", () => {
+    const executionPlan = plan([]);
+    executionPlan.task.workspace = {
+      strategy: "upload",
+      path: "apps/api",
+      repository: "https://example.test/other.git",
+      ref: "main",
+    };
+    executionPlan.task.network.allow = [];
+
+    const report = validateCompatibility(executionPlan, providerProfile(createAwsEcsDriver()));
+    expect(report.compatible).toBe(false);
+    expect(report.missing.map((issue) => issue.subject)).toEqual([
+      'workspace field "repository"',
+      'workspace field "ref"',
+      'workspace field "path"',
+    ]);
+  });
+
+  it("rejects proxy and agent-forwarded secrets that ECS does not scope", () => {
+    const executionPlan = plan([]);
+    executionPlan.task.workspace = { strategy: "upload" };
+    executionPlan.task.network.allow = [];
+    executionPlan.task.secrets = [
+      {
+        name: "PROVIDER_TOKEN",
+        purpose: "provider auth",
+        exposure: "request-proxy",
+        destinations: ["https://provider.example"],
+        required: true,
+      },
+      {
+        name: "AGENT_KEY",
+        purpose: "agent auth",
+        exposure: "agent-forwarding",
+        destinations: [],
+        required: true,
+      },
+    ];
+
+    const report = validateCompatibility(executionPlan, providerProfile(createAwsEcsDriver()));
+    expect(report.compatible).toBe(false);
+    expect(report.missing.map((issue) => issue.subject)).toEqual([
+      'secret "PROVIDER_TOKEN"',
+      'secret "AGENT_KEY"',
+    ]);
+  });
+
+  it("rejects portable task resources that the ECS target sizing does not enforce", () => {
+    const executionPlan = plan([]);
+    executionPlan.task.workspace = { strategy: "upload" };
+    executionPlan.task.network.allow = [];
+    executionPlan.task.resources = { cpu: 2, memoryMiB: 4096, diskMiB: 20480 };
+
+    const report = validateCompatibility(executionPlan, providerProfile(createAwsEcsDriver()));
+    expect(report.compatible).toBe(false);
+    expect(report.missing).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "resource", subject: "cpu" }),
+        expect.objectContaining({ kind: "resource", subject: "memoryMiB" }),
+        expect.objectContaining({ kind: "resource", subject: "diskMiB" }),
+      ]),
+    );
+  });
 });

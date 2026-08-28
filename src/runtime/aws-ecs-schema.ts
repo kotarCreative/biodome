@@ -20,13 +20,12 @@ export interface AwsEcsOptions {
   assignPublicIp?: boolean;
   cpu?: number;
   memoryMiB?: number;
-  workspace?: { strategy: typeof ECS_WORKSPACE_STRATEGY };
+  workspace: { strategy: typeof ECS_WORKSPACE_STRATEGY };
   /**
-   * Cluster capacity provider for task placement, e.g. "FARGATE_SPOT" or a
-   * custom EC2 Spot capacity provider. When omitted tasks use Fargate
-   * on-demand via launchType.
+   * Fargate capacity provider for task placement. EC2 capacity providers are
+   * incompatible with this driver's Fargate-only task definitions.
    */
-  capacityProvider?: string;
+  capacityProvider?: "FARGATE" | "FARGATE_SPOT";
   artifactBucket?: { env: string } | string;
   artifactPrefix?: string;
 }
@@ -50,8 +49,8 @@ export const AwsEcsOptionsSchema = Schema.Struct({
   assignPublicIp: Schema.optional(Schema.Boolean),
   cpu: Schema.optional(Schema.Number),
   memoryMiB: Schema.optional(Schema.Number),
-  workspace: Schema.optional(WorkspaceSchema),
-  capacityProvider: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
+  workspace: WorkspaceSchema,
+  capacityProvider: Schema.optional(Schema.Literals(["FARGATE", "FARGATE_SPOT"])),
   artifactBucket: Schema.optional(
     Schema.Union([EnvRefSchema, Schema.String.check(Schema.isMinLength(1))]),
   ),
@@ -124,8 +123,14 @@ export function validateAwsEcsOptions(raw: unknown): AwsEcsOptions {
   if (decoded.subnets.length === 0) {
     throw new RuntimeError({ message: "At least one subnet is required for ECS" });
   }
+  if (decoded.subnets.length > 16) {
+    throw new RuntimeError({ message: "ECS supports at most 16 subnets per task" });
+  }
   if (decoded.securityGroups.length === 0) {
     throw new RuntimeError({ message: "At least one security group is required for ECS" });
+  }
+  if (decoded.securityGroups.length > 5) {
+    throw new RuntimeError({ message: "ECS supports at most 5 security groups per task" });
   }
 
   const cpu = decoded.cpu ?? 1024;

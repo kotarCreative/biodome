@@ -2,11 +2,16 @@
 
 Status: partial. Priority: P0. Dependencies: Plans 03 and 04.
 
-> Implemented on branch `feat/ecs-production-readiness`: every implementation
-> step below is in place and unit-tested. The one outstanding acceptance
-> criterion is running the opt-in integration workflow against a real AWS
-> account (`BIODOME_AWS_INTEGRATION=1 npm run test:integration`), which requires
-> live credentials and an ECR repository.
+> Implemented on branch `feat/ecs-production-readiness`: the implementation and
+> local failure-path tests below are in place. The remaining acceptance gate is
+> running the opt-in integration workflow against a real AWS account
+> (`BIODOME_AWS_INTEGRATION=1 npm run test:integration`), including its
+> workspace, secret, job, log, artifact, and zero-leak assertions.
+> Local verification was rerun on 2026-08-27: `npm run check` passed with
+> 821 unit tests, the build passed, and all 8 local/package integration tests
+> passed. The AWS test remained skipped because its required account, network,
+> role, bucket, repository, and sentinel-secret environment variables were not
+> configured. ECS therefore remains experimental.
 
 ## Objective
 
@@ -46,6 +51,10 @@ contracts.
 - ECS workloads use the non-root identity established by Plan 04.
 - Remove or reject `ttl` until a durable cloud-side expiry mechanism is implemented.
   A local timer is not a lifecycle guarantee.
+- CloudWatch log access covers aggregate container stdout/stderr and named job
+  streams. Process-scoped daemon logs remain unsupported until supervisor files
+  are explicitly forwarded; requesting one fails rather than returning unrelated
+  container output.
 
 ## Files
 
@@ -97,8 +106,13 @@ contracts.
   privileged mode, and intended filesystem settings.
 - Startup polling covers pending, running, stopped, timeout, `RunTask.failures`, and
   cleanup after partial creation.
+- Lost registration and `RunTask` responses reconcile paginated family resources,
+  retain discovered task/task-definition ARNs when cleanup fails, and never run
+  reconciliation after a definitive authorization rejection.
 - Status distinguishes missing tasks from AWS errors.
 - Stop is idempotent for stopped and missing tasks.
+- Rollback, stop, and job cleanup deregister task definitions before requesting
+  deletion and accept the provider's `DELETE_IN_PROGRESS` lifecycle state.
 - Artifact collection enforces declared keys and byte limits.
 - Driver contracts advertise job execution and reject in-place exec.
 
@@ -121,3 +135,15 @@ npm run build
 npm audit --omit=dev --audit-level=high
 BIODOME_AWS_INTEGRATION=1 npm run test:integration
 ```
+
+Results from 2026-08-27:
+
+- Focused ECS/generator/app/orchestration suite: 278 tests passed.
+- `npm run check`: formatting, lint, typecheck, and 821 tests passed.
+- `npm run build`: passed.
+- `npm run test:integration`: 8 tests passed; the opt-in AWS test was skipped.
+- `npm audit --omit=dev --audit-level=high`: passed the high/critical gate; 7
+  moderate transitive advisories remain visible.
+- The credentialed AWS command was not run because `AWS_REGION`, ECS cluster,
+  ECR repository, subnets, security groups, execution/task roles, S3 bucket, and
+  `BIODOME_ECS_SENTINEL_SECRET_ARN` were absent from the environment.

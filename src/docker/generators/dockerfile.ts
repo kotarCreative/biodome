@@ -1,5 +1,6 @@
 import { identitiesOf, type Plan, type RuntimeIdentity } from "../../core/plan.js";
 import { generatedRuntimeDir } from "./shell.js";
+import { needsStartupScript } from "./startup.js";
 
 export interface DockerfileOptions {
   /** Path to generated runtime files relative to the Docker build context. */
@@ -195,8 +196,9 @@ export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}):
   if (plan.deployment?.target.driver === "aws-ecs") {
     // Remote providers have no host bind mount: the repository workspace is
     // uploaded as the build context and materialized inside the immutable
-    // image. Excluded trees (.git, node_modules, .env, ...) stay out via
-    // .dockerignore; dependency artifacts copied above are not shadowed.
+    // image. Excluded trees (.git, node_modules, .env, ...) stay out via the
+    // generated Dockerfile-specific ignore file, regardless of a repository's
+    // own .dockerignore; dependency artifacts copied above are not shadowed.
     // Generated target files are layered on top afterwards.
     lines.push("# Materialize the declared upload workspace inside the image.");
     lines.push("COPY . /workspace/");
@@ -237,16 +239,15 @@ export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}):
     lines.push("");
   }
 
-  const needsStartupScript =
-    hasDaemonProcesses || plan.runtime.processes.some((p) => p.mode === "oneshot");
-  if (!needsStartupScript && runtimeIdentity) {
+  const hasStartupScript = needsStartupScript(plan);
+  if (!hasStartupScript && runtimeIdentity) {
     // No supervised lifecycle to initialize: interactive sessions run directly
     // as the non-root workload user.
     lines.push(`USER ${shellWord(runtimeIdentity.user)}`);
     lines.push("");
   }
 
-  if (hasDaemonProcesses || plan.runtime.processes.some((p) => p.mode === "oneshot")) {
+  if (hasStartupScript) {
     if (!options.generatedFilesPath) {
       lines.push("# Copy the managed-process startup script.");
       lines.push(`COPY ${generatedFilesPath}/startup.sh ${generatedRuntimeDir(plan)}/startup.sh`);

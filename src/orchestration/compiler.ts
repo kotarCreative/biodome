@@ -76,7 +76,9 @@ export function compileExecutionPlan(plan: Plan): ExecutionPlan {
       },
       secrets: compileSecrets(plan),
       workspace,
-      artifacts: task.artifacts.map((path) => ({ path, required: false, transport })),
+      // Task declarations currently list artifacts without optional metadata;
+      // collection therefore treats every declared path as required.
+      artifacts: task.artifacts.map((path) => ({ path, required: true, transport })),
       validationCommands: task.validationCommands ?? [],
     },
     services: plan.runtime.services.map((service) => ({

@@ -34,13 +34,16 @@ describe("application builder", () => {
       path: "/workspace/apps/backend",
     });
     expect(result.runtime.processes.map((item) => item.name)).toEqual(
-      expect.arrayContaining(["backend-migrate", "backend-web"]),
+      expect.arrayContaining(["app-7-backend-migrate", "app-7-backend-web"]),
     );
-    expect(result.runtime.processes.find((item) => item.name === "backend-web")?.workingDir).toBe(
-      "/workspace/apps/backend",
-    );
-    expect(result.runtime.endpoints[0]).toMatchObject({ name: "backend-http", port: 8000 });
-    expect(metadata.processes).toEqual(["backend-web"]);
+    expect(
+      result.runtime.processes.find((item) => item.name === "app-7-backend-web")?.workingDir,
+    ).toBe("/workspace/apps/backend");
+    expect(result.runtime.endpoints[0]).toMatchObject({
+      name: "app-7-backend-http",
+      port: 8000,
+    });
+    expect(metadata.processes).toEqual(["app-7-backend-web"]);
   });
 
   it("allows the same local process name in two apps and rejects local duplicates", () => {
@@ -51,8 +54,82 @@ describe("application builder", () => {
     expect(() => first.builder.addProcess("web", { command: ["again"] })).toThrow(
       "Duplicate process",
     );
-    expect(finalized(first.plan).runtime.processes[0].name).toBe("api-web");
-    expect(finalized(second.plan).runtime.processes[0].name).toBe("worker-web");
+    expect(finalized(first.plan).runtime.processes[0].name).toBe("app-3-api-web");
+    expect(finalized(second.plan).runtime.processes[0].name).toBe("app-6-worker-web");
+  });
+
+  it("qualifies adversarial hyphenated app and local names injectively", () => {
+    const plan = new PlanBuilder("/tmp/app-builder", "test");
+    const knownApps = new Set(["foo", "foo-bar"]);
+    const foo = new ApplicationBuilderImpl(plan.context, plan.applications, {
+      name: "foo",
+      declarationPath: ".biodome/apps/foo.mjs",
+      knownApps,
+    });
+    const fooBar = new ApplicationBuilderImpl(plan.context, plan.applications, {
+      name: "foo-bar",
+      declarationPath: ".biodome/apps/foo-bar.mjs",
+      knownApps,
+    });
+
+    foo.addProcess("bar-baz", { command: ["foo"], port: 3000 });
+    foo.exposeEndpoint("bar-baz", { process: "bar-baz" });
+    fooBar.addProcess("baz", { command: ["foo-bar"], port: 4000 });
+    fooBar.exposeEndpoint("baz", { process: "baz" });
+
+    const result = finalized(plan);
+    const processNames = result.runtime.processes.map((process) => process.name);
+    const endpointNames = result.runtime.endpoints.map((endpoint) => endpoint.name);
+    expect(processNames).toEqual(
+      expect.arrayContaining(["app-3-foo-bar-baz", "app-7-foo-bar-baz"]),
+    );
+    expect(endpointNames).toEqual(
+      expect.arrayContaining(["app-3-foo-bar-baz", "app-7-foo-bar-baz"]),
+    );
+    expect(new Set(processNames)).toHaveProperty("size", processNames.length);
+    expect(processNames.every((name) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name))).toBe(true);
+  });
+
+  it("does not resolve an endpoint reference to a colliding declaration from another app", () => {
+    const plan = new PlanBuilder("/tmp/app-builder", "test");
+    const knownApps = new Set(["consumer", "foo", "foo-bar"]);
+    const fooBar = new ApplicationBuilderImpl(plan.context, plan.applications, {
+      name: "foo-bar",
+      declarationPath: ".biodome/apps/foo-bar.mjs",
+      knownApps,
+    });
+    const consumer = new ApplicationBuilderImpl(plan.context, plan.applications, {
+      name: "consumer",
+      declarationPath: ".biodome/apps/consumer.mjs",
+      knownApps,
+    });
+    fooBar.exposeEndpoint("baz", { port: 4000 });
+
+    expect(() =>
+      consumer.requireAppEndpoint({
+        _tag: "AppEndpointReference",
+        app: "foo",
+        endpoint: "bar-baz",
+      }),
+    ).toThrow('references endpoint "foo.bar-baz", which is not declared');
+  });
+
+  it("does not resolve an app reference to an unrelated global endpoint", () => {
+    const plan = new PlanBuilder("/tmp/app-builder", "test");
+    plan.context.addEndpoint({ name: "app-3-foo-bar", port: 4000 });
+    const consumer = new ApplicationBuilderImpl(plan.context, plan.applications, {
+      name: "consumer",
+      declarationPath: ".biodome/apps/consumer.mjs",
+      knownApps: new Set(["consumer", "foo"]),
+    });
+
+    expect(() =>
+      consumer.requireAppEndpoint({
+        _tag: "AppEndpointReference",
+        app: "foo",
+        endpoint: "bar",
+      }),
+    ).toThrow('references endpoint "foo.bar", which is not declared');
   });
 
   it("binds application environment variables to declared service environment keys", () => {
@@ -92,13 +169,13 @@ describe("application builder", () => {
     const { builder } = app();
 
     expect(() => builder.addHook("other:migrate", { command: ["echo", "migrate"] })).toThrow(
-      'Application "backend" local declaration name must not contain ":"',
+      'Invalid local declaration for application "backend" name',
     );
     expect(() => builder.addProcess("other:web", { command: ["node"] })).toThrow(
-      'Application "backend" local declaration name must not contain ":"',
+      'Invalid local declaration for application "backend" name',
     );
     expect(() => builder.exposeEndpoint("other:http", {})).toThrow(
-      'Application "backend" local declaration name must not contain ":"',
+      'Invalid local declaration for application "backend" name',
     );
   });
 
@@ -106,7 +183,7 @@ describe("application builder", () => {
     const { builder } = app();
 
     expect(() => builder.exposeEndpoint("http", { process: "other:web" })).toThrow(
-      'Application "backend" reference must not contain ":"',
+      'Invalid local declaration for application "backend" name',
     );
   });
 });
