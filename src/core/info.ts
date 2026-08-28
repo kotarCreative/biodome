@@ -198,6 +198,9 @@ export function formatInfo(plan: Plan): string {
     for (const svc of plan.runtime.services) {
       const port = svc.ports.map(formatPort).join(", ") || "none";
       lines.push(`  - ${svc.name} (${svc.type}) ports ${port}`);
+      if (svc.extensions && svc.extensions.length > 0) {
+        lines.push(`      extensions: ${svc.extensions.join(", ")}`);
+      }
       const conn = serviceConnection(svc);
       if (conn) {
         lines.push(`      internal: ${conn.internal}`);
@@ -377,6 +380,11 @@ export function formatAgentsMd(plan: Plan): string {
       lines.push("");
       if (svc.ports.length > 0) {
         lines.push(`- Ports: ${svc.ports.map((p) => `\`${formatPort(p)}\``).join(", ")}`);
+      }
+      if (svc.extensions && svc.extensions.length > 0) {
+        lines.push(
+          `- Extensions: ${svc.extensions.map((extension) => `\`${extension}\``).join(", ")}`,
+        );
       }
       const conn = serviceConnection(svc);
       if (conn) {

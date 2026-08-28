@@ -78,6 +78,40 @@ describe("ServiceBuilder", () => {
     );
   });
 
+  it("installs and records requested Postgres extensions", () => {
+    const plan = createPlan("test");
+    const packages: string[] = [];
+    const builder = new ServiceBuilder(
+      plan,
+      (name) => packages.push(name),
+      () => {},
+      () => {},
+      "/services",
+      () => {},
+    );
+
+    builder.add("postgres", { extensions: ["postgis", "pgcrypto"] });
+
+    expect(plan.runtime.services[0].extensions).toEqual(["postgis", "pgcrypto"]);
+    expect(packages).toEqual(["postgresql", "postgresql-postgis", "postgresql-contrib"]);
+  });
+
+  it("rejects duplicate, unknown, and non-Postgres extensions", () => {
+    expect(() =>
+      makeBuilder(createPlan("test"), []).add("postgres", {
+        extensions: ["postgis", "postgis"],
+      }),
+    ).toThrow();
+    expect(() =>
+      makeBuilder(createPlan("test"), []).add("postgres", {
+        extensions: ["unknown" as "postgis"],
+      }),
+    ).toThrow(/postgis/);
+    expect(() =>
+      makeBuilder(createPlan("test"), []).add("redis", { extensions: ["postgis"] }),
+    ).toThrow(/only supported by postgres/);
+  });
+
   it("defaults the service port to the type's well-known port", () => {
     const plan = createPlan("test");
     const processes: unknown[] = [];

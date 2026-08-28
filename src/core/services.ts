@@ -1,10 +1,23 @@
 import type { SecretArnReference, SecretReference } from "./secrets.js";
-import { Service } from "./plan.js";
+import type { PostgresExtensionName, Service } from "./plan.js";
 import { ServiceOptions } from "./feature.js";
 
 // The container environment variable carrying the service credential. The
 // generated init scripts read it at run time; it is never baked into files.
 export const POSTGRES_PASSWORD_ENV_VAR = "POSTGRES_PASSWORD";
+
+export const POSTGRES_EXTENSION_PACKAGES: Record<PostgresExtensionName, readonly string[]> = {
+  citext: ["postgresql-contrib"],
+  hstore: ["postgresql-contrib"],
+  ltree: ["postgresql-contrib"],
+  pg_trgm: ["postgresql-contrib"],
+  pgcrypto: ["postgresql-contrib"],
+  postgis: ["postgresql-postgis"],
+  postgis_raster: ["postgresql-postgis"],
+  postgis_topology: ["postgresql-postgis"],
+  unaccent: ["postgresql-contrib"],
+  "uuid-ossp": ["postgresql-contrib"],
+};
 
 // The declared credential for a service: users[0].password, falling back to
 // the top-level options.password.
@@ -42,5 +55,8 @@ export const serviceConfigs: Record<string, (svc: Service, options: ServiceOptio
       svc.environment.POSTGRES_PASSWORD = password;
     }
     svc.environment.POSTGRES_DB = database;
+    if (options.extensions && options.extensions.length > 0) {
+      svc.extensions = [...options.extensions];
+    }
   },
 };

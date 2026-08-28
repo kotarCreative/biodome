@@ -62,6 +62,7 @@ export default function services(ctx) {
     port: 5432,
     databases: [{ name: "myapp" }],
     users: [{ name: "myapp", password: "devpassword" }],
+    extensions: ["postgis", "pgcrypto"],
   });
 
   ctx.addService("redis", { port: 6379 });

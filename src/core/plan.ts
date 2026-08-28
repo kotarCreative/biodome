@@ -244,11 +244,27 @@ export interface Provider {
 
 // A declared backing service. Services run inside the dev image as supervised
 // processes under dedicated system accounts; a deployment is one image.
+export const POSTGRES_EXTENSION_NAMES = [
+  "citext",
+  "hstore",
+  "ltree",
+  "pg_trgm",
+  "pgcrypto",
+  "postgis",
+  "postgis_raster",
+  "postgis_topology",
+  "unaccent",
+  "uuid-ossp",
+] as const;
+
+export type PostgresExtensionName = (typeof POSTGRES_EXTENSION_NAMES)[number];
+
 export interface Service {
   name: string;
   type: string;
   environment: Record<string, string>;
   ports: PortMapping[];
+  extensions?: PostgresExtensionName[];
 }
 
 export interface PortMapping {
@@ -691,12 +707,15 @@ export const ServiceDatabaseSchema = Schema.Struct({
   name: Schema.String,
 });
 
+export const PostgresExtensionNameSchema = Schema.Literals(POSTGRES_EXTENSION_NAMES);
+
 export const ServiceOptionsSchema = Schema.Struct({
   port: Schema.optional(Schema.Number),
   environment: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   databases: Schema.optional(Schema.Array(ServiceDatabaseSchema)),
   users: Schema.optional(Schema.Array(ServiceUserSchema)),
   password: Schema.optional(ServicePasswordValueSchema),
+  extensions: Schema.optional(Schema.Array(PostgresExtensionNameSchema).check(Schema.isUnique())),
 });
 
 const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -1098,6 +1117,7 @@ export const ServiceSchema = Schema.Struct({
   type: Schema.String,
   environment: EnvValueRecord,
   ports: Schema.Array(PortSchema),
+  extensions: Schema.optional(Schema.Array(PostgresExtensionNameSchema)),
 });
 
 export const ProviderSchema = Schema.Struct({

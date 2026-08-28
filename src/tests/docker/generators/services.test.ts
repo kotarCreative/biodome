@@ -69,4 +69,20 @@ describe("generateInContainerServiceFiles", () => {
       expect(content).not.toContain("devpassword");
     }
   });
+
+  it("enables requested extensions in the configured database", () => {
+    const plan = createPlan("test");
+    plan.runtime.services.push({
+      name: "postgres",
+      type: "postgres",
+      environment: { POSTGRES_DB: "my app" },
+      ports: [],
+      extensions: ["postgis", "pgcrypto"],
+    });
+
+    const init = generateInContainerServiceFiles(plan)["postgres-init.sh"];
+    expect(init).toContain("--dbname='my app'");
+    expect(init).toContain('CREATE EXTENSION IF NOT EXISTS "postgis" CASCADE;');
+    expect(init).toContain('CREATE EXTENSION IF NOT EXISTS "pgcrypto" CASCADE;');
+  });
 });

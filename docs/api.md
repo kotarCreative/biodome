@@ -97,6 +97,8 @@ rejects other versions because its release binaries are checksum-pinned.
 
 Add a backing service. Services run as ephemeral processes inside the dev image under dedicated system accounts; supported types: `postgres`, `redis`. See [File layout](file-layout.md).
 
+Postgres accepts `options.extensions`, an array of extension names installed and enabled during startup. Supported names: `citext`, `hstore`, `ltree`, `pg_trgm`, `pgcrypto`, `postgis`, `postgis_raster`, `postgis_topology`, `unaccent`, and `uuid-ossp`.
+
 ### `addEndpoint(spec)`
 
 Declare an agent-discoverable endpoint with a name, optional URL/port, credentials (plain or env-referenced), and free-form metadata. Endpoints are surfaced in `biodome info`, `AGENTS.md`, `.biodome-build/plan.json`, and the MCP `get_endpoints` tool. See [Primitives](primitives.md#addendpointspec).
@@ -443,6 +445,8 @@ Generate an `AGENTS.md` file with base image, languages, services, endpoints, pr
 ### `biodome logs <target> [process]`
 
 Show logs from a managed process when the target supports log access. Docker-based targets can use `supervisord` logs; other providers may return bounded provider logs instead.
+
+The experimental `aws-ecs` driver reads bounded container stdout/stderr from CloudWatch. Without a process argument it returns aggregate deployment-container output; passing the current named task selects that task's CloudWatch stream. ECS does not currently export per-process `supervisord` files, so `biodome logs <target> <daemon>` fails explicitly instead of returning misleading aggregate output.
 
 ### `biodome ps <target>`
 

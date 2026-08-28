@@ -59,6 +59,7 @@ plan.runtime.services.push({
   type: "postgres",
   environment: { POSTGRES_PASSWORD: "postgres" },
   ports: [{ host: 5432, container: 5432 }],
+  extensions: ["postgis", "pgcrypto"],
 });
 plan.runtime.volumes.push(
   { name: "local", type: "local", source: "./data", target: "/data" },
@@ -163,14 +164,14 @@ plan.runtime.applications.push({
   declarationPath: ".biodome/apps/app.mjs",
   repositories: ["app"],
   hooks: [],
-  processes: ["web"],
-  endpoints: ["api"],
+  processes: ["app-3-app-web"],
+  endpoints: ["app-3-app-api"],
   requiredServices: ["postgres"],
   dependencies: [],
 });
 plan.runtime.contributions.push({
   kind: "process",
-  qualifiedName: "app:web",
+  qualifiedName: "app-3-app-web",
   source: {
     application: "app",
     recipe: "node",

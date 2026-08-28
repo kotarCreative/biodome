@@ -4,6 +4,7 @@ import type { EnvSpec, ProcessSpec, ServiceOptions } from "../feature.js";
 import { ValidationError } from "../errors.js";
 import { isSecretArnReference } from "../secrets.js";
 import {
+  POSTGRES_EXTENSION_PACKAGES,
   POSTGRES_PASSWORD_ENV_VAR,
   SUPPORTED_SERVICE_TYPES,
   serviceConfigs,
@@ -39,6 +40,11 @@ export class ServiceBuilder {
     }
     const validated = Schema.decodeSync(ServiceOptionsSchema)(options);
     this.validatePort(validated.port, `Service ${name}: port`);
+    if (name !== "postgres" && validated.extensions !== undefined) {
+      throw new ValidationError({
+        message: `Service ${name}: extensions are only supported by postgres`,
+      });
+    }
 
     if (this.plan.runtime.services.some((service) => service.name === name)) {
       throw new ValidationError({ message: `Duplicate service name: ${name}` });
@@ -57,6 +63,11 @@ export class ServiceBuilder {
     const port = validated.port ?? SERVICE_DEFAULT_PORTS[name];
     if (name === "postgres") {
       this.addAptPackage("postgresql");
+      for (const extension of validated.extensions ?? []) {
+        for (const packageName of POSTGRES_EXTENSION_PACKAGES[extension]) {
+          this.addAptPackage(packageName);
+        }
+      }
       this.addProcess({
         name: `${name}-server`,
         command: ["sh", `${this.servicesPath}/${name}.sh`],

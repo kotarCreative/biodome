@@ -23,10 +23,12 @@ describe("formatInfo", () => {
         POSTGRES_DB: "myapp",
       },
       ports: [{ host: 5432, container: 5432 }],
+      extensions: ["postgis", "pgcrypto"],
     });
 
     const info = formatInfo(plan);
     expect(info).toContain("Services:");
+    expect(info).toContain("extensions: postgis, pgcrypto");
     expect(info).toContain("postgresql://app@localhost:5432/myapp");
   });
 
@@ -118,12 +120,14 @@ describe("formatAgentsMd", () => {
         POSTGRES_DB: "myapp",
       },
       ports: [{ host: 5432, container: 5432 }],
+      extensions: ["postgis", "pgcrypto"],
     });
 
     const md = formatAgentsMd(plan);
     expect(md).toContain("# Development Environment");
     expect(md).toContain("node:20-slim");
     expect(md).toContain("### postgres");
+    expect(md).toContain("- Extensions: `postgis`, `pgcrypto`");
     expect(md).toContain("postgresql://app@localhost:5432/myapp");
     expect(md).toContain("biodome up");
   });

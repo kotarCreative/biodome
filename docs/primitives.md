@@ -133,11 +133,18 @@ export default function services(ctx) {
     port: 5432,
     databases: [{ name: "myapp" }],
     users: [{ name: "myapp", password: "devpassword" }],
+    extensions: ["postgis", "pgcrypto"],
   });
 
   ctx.addService("redis", { port: 6379 });
 }
 ```
+
+Postgres extensions are installed and enabled in the configured database during
+startup. Supported extensions are `citext`, `hstore`, `ltree`, `pg_trgm`,
+`pgcrypto`, `postgis`, `postgis_raster`, `postgis_topology`, `unaccent`, and
+`uuid-ossp`. PostGIS extensions install `postgresql-postgis`; the others install
+`postgresql-contrib`. Duplicate or unsupported extension names are rejected.
 
 Each service's declared port is published from the dev container on host
 loopback (`127.0.0.1`) so host tooling keeps working and the port is never
@@ -344,7 +351,7 @@ The spec accepts exactly one of:
 - `value` — a literal string. Stored in the plan and baked into the image `ENV` layer / compose file.
 - `from` — one of:
   - `{ env: "VAR_NAME" }`, passed through from the host environment via compose interpolation. The value is never persisted.
-  - `{ secretArn: "arn:aws:secretsmanager|ssm:..." }`, an AWS-managed secret (Secrets Manager secret or SSM Parameter Store parameter). The `aws-ecs` target injects it natively at task launch via the ECS `secrets` field, so the value is never stored in the task definition; local Compose targets resolve it from a host variable named after the key and fail loudly when it is unset.
+  - `{ secretArn: "arn:<aws-partition>:secretsmanager|ssm:..." }`, an AWS-managed secret (Secrets Manager secret or SSM Parameter Store parameter). The `aws-ecs` target injects it natively at task launch via the ECS `secrets` field, so the value is never stored in the task definition; local Compose targets resolve it from a host variable named after the key and fail loudly when it is unset.
 
 Plus:
 

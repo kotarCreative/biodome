@@ -266,6 +266,25 @@ describe("ServiceOptionsSchema credentials", () => {
   });
 });
 
+describe("ServiceOptionsSchema extensions", () => {
+  it("accepts supported Postgres extensions", () => {
+    const decoded = Schema.decodeSync(ServiceOptionsSchema)({
+      extensions: ["postgis", "pgcrypto"],
+    });
+
+    expect(decoded.extensions).toEqual(["postgis", "pgcrypto"]);
+  });
+
+  it("rejects unsupported and duplicate extensions", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(ServiceOptionsSchema)({ extensions: ["unknown"] }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(ServiceOptionsSchema)({ extensions: ["postgis", "postgis"] }),
+    ).toThrow();
+  });
+});
+
 describe("VolumeSpecSchema", () => {
   const common = { name: "data", target: "/workspace/data" };
 

@@ -4,9 +4,18 @@ function sqlString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+function sqlIdentifier(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+function shellString(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
 function postgresFiles(service: Service): Record<string, string> {
   const user = service.environment.POSTGRES_USER || "postgres";
   const database = service.environment.POSTGRES_DB || "postgres";
+  const extensions = service.extensions ?? [];
   return {
     // Runs as the package-created "postgres" system user (supervisor user=),
     // so no privileged su is required anywhere in this script.
@@ -50,6 +59,15 @@ function postgresFiles(service: Service): Record<string, string> {
       `SELECT format('CREATE DATABASE %I OWNER %I', ${sqlString(database)}, ${sqlString(user)})`,
       `WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = ${sqlString(database)}) \\gexec`,
       "SQL",
+      ...(extensions.length > 0
+        ? [
+            `"$PG_BIN/psql" --username=postgres --dbname=${shellString(database)} -v ON_ERROR_STOP=1 <<'SQL'`,
+            ...extensions.map(
+              (extension) => `CREATE EXTENSION IF NOT EXISTS ${sqlIdentifier(extension)} CASCADE;`,
+            ),
+            "SQL",
+          ]
+        : []),
       "",
     ].join("\n"),
   };
