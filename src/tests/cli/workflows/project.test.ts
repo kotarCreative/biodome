@@ -59,24 +59,29 @@ describe("initWorkflow", () => {
 
   it("appends the build directory to a missing .gitignore", () => {
     Effect.runSync(initWorkflow(rootDir, true));
-    expect(readFileSync(join(rootDir, ".gitignore"), "utf8")).toBe(".biodome-build/\n");
+    expect(readFileSync(join(rootDir, ".gitignore"), "utf8")).toBe(".env\n.biodome-build/\n");
   });
 
   it("preserves an existing .gitignore without a trailing newline", () => {
     writeFileSync(join(rootDir, ".gitignore"), "node_modules");
     Effect.runSync(initWorkflow(rootDir, true));
     expect(readFileSync(join(rootDir, ".gitignore"), "utf8")).toBe(
-      "node_modules\n.biodome-build/\n",
+      "node_modules\n.env\n.biodome-build/\n",
     );
   });
 
   it("does not duplicate an existing ignore entry", () => {
-    writeFileSync(join(rootDir, ".gitignore"), "node_modules\n.biodome-build/\n");
+    writeFileSync(join(rootDir, ".gitignore"), "node_modules\n.env\n.biodome-build/\n");
     Effect.runSync(initWorkflow(rootDir, true));
     expect(
       readFileSync(join(rootDir, ".gitignore"), "utf8")
         .split("\n")
         .filter((line) => line === ".biodome-build/"),
+    ).toHaveLength(1);
+    expect(
+      readFileSync(join(rootDir, ".gitignore"), "utf8")
+        .split("\n")
+        .filter((line) => line === ".env"),
     ).toHaveLength(1);
   });
 

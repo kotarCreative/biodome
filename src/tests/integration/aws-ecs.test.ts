@@ -33,6 +33,7 @@ import { removeState, readState, statePath, writeState } from "../../runtime/sta
 import { createPlan, type Plan, type RuntimeTarget } from "../../core/plan.js";
 import { NoOpEventStoreLive, type EventStore } from "../../core/events.js";
 import type { RuntimeError } from "../../core/errors.js";
+import { loadBiodomeEnv } from "../../cli/load-env.js";
 
 /**
  * Manually enabled live AWS proof (Plan 05 step 15):
@@ -45,7 +46,11 @@ import type { RuntimeError } from "../../core/errors.js";
  *   ECS_EXECUTION_ROLE_ARN=arn:aws:iam::<account>:role/... \
  *   ECS_TASK_ROLE_ARN=arn:aws:iam::<account>:role/... \
  *   BIODOME_ECS_ARTIFACT_BUCKET=... \
+ *   BIODOME_ECS_SENTINEL_SECRET_ARN=arn:aws:secretsmanager:... \
  *   npm run test:integration -- src/tests/integration/aws-ecs.test.ts
+ *
+ * Alternatively, place the same assignments in `.biodome/.env`; this test
+ * loads that file without overwriting values already present in the process.
  *
  * The execution role must pull from ECR and write CloudWatch logs. The task
  * role must put objects under the configured bucket, while the test principal
@@ -61,6 +66,7 @@ import type { RuntimeError } from "../../core/errors.js";
  * Cleanup owns the unique ECS families, ECR tag, CloudWatch log group, S3 keys,
  * and local root.
  */
+loadBiodomeEnv();
 const RUN = process.env.BIODOME_AWS_INTEGRATION === "1";
 const TARGET_NAME = "aws-integration";
 

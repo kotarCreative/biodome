@@ -1,5 +1,6 @@
 /biodome
 /biodome.exe
+.env
 .biodome/
 !examples/apps-demo/.biodome/
 !examples/apps-demo/.biodome/**

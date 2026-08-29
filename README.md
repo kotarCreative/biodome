@@ -33,6 +33,7 @@ npx @kotarcreative/biodome down local
 - `biodome app validate` — validate implicit apps, references, features, and the final plan.
 - `biodome app add <package> --yes` / `app remove <package>` — manage trusted npm app recipes in `.biodome/package.json`.
 - `biodome config validate` — validate `.biodome/`, feature/service module exports, and the computed plan (including port conflicts) without building.
+- `biodome config env [target]` — interactively collect environment variables required by targets and save them to `.biodome/.env`.
 - `biodome target validate <target>` — validate a named target configuration without building or deploying.
 - `biodome generate agents.md` — create `AGENTS.md` for AI context.
 - `biodome logs <target> [process]` — show logs from a managed process when the target supports log access.

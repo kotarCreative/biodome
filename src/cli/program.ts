@@ -25,6 +25,7 @@ import {
   upWorkflow,
 } from "./workflows/target.js";
 import { configValidateWorkflow, targetValidateWorkflow } from "./workflows/config.js";
+import { envConfigWorkflow } from "./workflows/env.js";
 import { eventQuery, eventsWorkflow } from "./workflows/events.js";
 import {
   appAddWorkflow,
@@ -109,6 +110,7 @@ export interface ProgramDependencies {
     readonly events?: typeof eventsWorkflow;
     readonly configValidate?: typeof configValidateWorkflow;
     readonly targetValidate?: typeof targetValidateWorkflow;
+    readonly envConfig?: typeof envConfigWorkflow;
     readonly agents?: typeof agentsWorkflow;
   };
 }
@@ -368,6 +370,17 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
         "config validate",
         (workflows.configValidate ?? configValidateWorkflow)(rootDir()),
         undefined,
+        logMessage,
+      ),
+    );
+  config
+    .command("env [target]")
+    .description(
+      "Interactively collect environment variables required by targets and save them to .biodome/.env",
+    )
+    .action((target) =>
+      executePlain(
+        (workflows.envConfig ?? envConfigWorkflow)(rootDir(), { targetName: target }),
         logMessage,
       ),
     );

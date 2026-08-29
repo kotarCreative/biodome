@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, win32 } from "node:path";
 import { Effect } from "effect";
 import { buildPlanEffect, validatePlan } from "../../builder/index.js";
@@ -6,18 +6,14 @@ import { addAppPackageEffect, removeAppPackageEffect } from "../../apps/package-
 import { appInspection, formatAppInspection, formatAppList } from "../../apps/format.js";
 import { formatAgentsMd, formatInfo } from "../../core/info.js";
 import { PlanError } from "../../core/errors.js";
+import { ensureGitignoreEntries } from "../../core/gitignore.js";
 import { detectStarterLanguages, generateStarterFeature } from "../helpers.js";
 
 const CONFIG_DIR = ".biodome";
 const BUILD_DIR = ".biodome-build";
 
 function ensureIgnored(rootDir: string): void {
-  const path = join(rootDir, ".gitignore");
-  const entry = `${BUILD_DIR}/`;
-  const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
-  if (!existing.split(/\r?\n/).includes(entry)) {
-    writeFileSync(path, `${existing}${existing && !existing.endsWith("\n") ? "\n" : ""}${entry}\n`);
-  }
+  ensureGitignoreEntries(rootDir, [".env", `${BUILD_DIR}/`]);
 }
 
 export function initWorkflow(rootDir: string, bare: boolean) {

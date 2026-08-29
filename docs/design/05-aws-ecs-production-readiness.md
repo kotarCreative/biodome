@@ -136,6 +136,9 @@ npm audit --omit=dev --audit-level=high
 BIODOME_AWS_INTEGRATION=1 npm run test:integration
 ```
 
+The AWS integration variables may be exported by the shell or stored in
+`.biodome/.env`, which the integration test loads before checking its opt-in flag.
+
 Results from 2026-08-27:
 
 - Focused ECS/generator/app/orchestration suite: 278 tests passed.
