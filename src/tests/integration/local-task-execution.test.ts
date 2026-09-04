@@ -19,6 +19,7 @@ const ARTIFACT_BODY = [
   "daemon: ok",
   "environment: ok",
   "pi-arguments: ok",
+  "working-directory: ok",
   "",
 ].join("\n");
 
@@ -74,6 +75,11 @@ export default function dev(ctx) {
       retries: 10,
       startPeriod: "1s",
     },
+  });
+  ctx.addProcess({
+    name: "fixture-worker",
+    command: ["node", "worker.mjs"],
+    workingDir: "/workspace/src",
   });
   ctx.addHook({
     name: "fixture-setup",
@@ -148,6 +154,19 @@ createServer((request, response) => {
   response.end();
 }).listen(4317, "127.0.0.1");
 `,
+    "src/worker.mjs": `
+import { createServer } from "node:http";
+
+// Proves supervisord started this daemon inside its workingDir: with a
+// misquoted directory value the spawn fails and this endpoint never answers.
+// Serves over HTTP (instead of writing a marker file) because single-language
+// images may already own uid 1000, leaving the bind-mounted workspace
+// read-only for the generated runtime identity.
+createServer((request, response) => {
+  response.writeHead(200, { "content-type": "text/plain" });
+  response.end(\`worker-cwd-ok:\${process.cwd()}\`);
+}).listen(4318, "127.0.0.1");
+`,
     "bin/pi": `#!/usr/bin/env node
 import { readFile, writeFile } from "node:fs/promises";
 import pc from "picocolors";
@@ -176,6 +195,19 @@ for (let attempt = 0; attempt < 30; attempt += 1) {
   await new Promise((resolve) => setTimeout(resolve, 200));
 }
 if (!daemonReady) throw new Error("managed daemon unavailable");
+
+let workerCwd = "";
+for (let attempt = 0; attempt < 30; attempt += 1) {
+  try {
+    const response = await fetch("http://127.0.0.1:4318/");
+    if (response.ok) workerCwd = await response.text();
+  } catch {}
+  if (workerCwd === "worker-cwd-ok:/workspace/src") break;
+  await new Promise((resolve) => setTimeout(resolve, 200));
+}
+if (workerCwd !== "worker-cwd-ok:/workspace/src") {
+  throw new Error("workingDir daemon did not start in its directory");
+}
 
 await writeFile("/workspace/review.md", ${JSON.stringify(ARTIFACT_BODY)});
 `,

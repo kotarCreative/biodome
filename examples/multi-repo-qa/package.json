@@ -1,0 +1,11 @@
+{
+  "name": "biodome-multi-repo-qa",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "validate": "node -e \"process.exit(0)\""
+  },
+  "dependencies": {
+    "@kotarcreative/biodome": "file:../.."
+  }
+}

@@ -116,6 +116,7 @@ describe("manualQaTask", () => {
     expect(task.prompt).toContain("new checkout validation");
     expect(task.prompt).toContain("Do not modify application source code");
     expect(task.prompt).toContain("run test -s for every declared artifact");
+    expect(task.prompt).toContain("write [] (an empty JSON array)");
     expect(task.requiredProcesses).toEqual(["app-3-web-web"]);
     expect(task.validationCommands).toBeUndefined();
   });

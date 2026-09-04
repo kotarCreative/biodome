@@ -161,6 +161,13 @@ node dist/cli/index.js --help
 # Compile the included demonstration against both providers.
 (cd examples/orchestration-demo && node ../../dist/cli/index.js plan local review)
 (cd examples/orchestration-demo && node ../../dist/cli/index.js plan secure review)
+
+# Compile the multi-repo + computer-use demonstration (offline-safe: plan
+# only validates, it never clones). Install the example dependency first so
+# the computer-use recipe import resolves.
+(cd examples/multi-repo-qa && npm install && node ../../dist/cli/index.js config validate)
+(cd examples/multi-repo-qa && node ../../dist/cli/index.js plan local smoke)
+(cd examples/multi-repo-qa && node ../../dist/cli/index.js plan local manual-qa)
 ```
 
 To smoke-test a project target, create a target and task as above, then run:

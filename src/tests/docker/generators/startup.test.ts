@@ -72,13 +72,40 @@ describe("generateStartupScript", () => {
     const script = generateStartupScript(plan)!;
     expect(script).toContain("cd /workspace/apps/api");
     expect(script).toContain(
-      'setpriv --reuid="$BIODOME_RUNTIME_UID" --regid="$BIODOME_RUNTIME_GID" --clear-groups env DATABASE_URL=\'postgres://db\' python manage.py migrate',
+      'setpriv --reuid="$BIODOME_RUNTIME_UID" --regid="$BIODOME_RUNTIME_GID" --clear-groups env \\\n      "HOME=${hook_home:-/root}" \\\n      env DATABASE_URL=\'postgres://db\' python manage.py migrate',
     );
     expect(script).toContain('chgrp "$BIODOME_RUNTIME_GID" /workspace/.biodome-build/logs');
     expect(script).toContain("chmod 2770 /workspace/.biodome-build/logs");
     expect(script.indexOf("supervisord -c")).toBeLessThan(script.indexOf("repo-sync-api"));
     expect(script.indexOf("repo-sync-api")).toBeLessThan(script.indexOf("start all"));
     expect(script.indexOf("start all")).toBeLessThan(script.indexOf("announce"));
+  });
+
+  it("points hook HOME at the mapped runtime identity instead of /root", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push(
+      {
+        name: "migrate",
+        command: ["python", "manage.py", "migrate"],
+        ports: [],
+        environment: {},
+        mode: "oneshot",
+        startOn: "start.pre",
+      },
+      {
+        name: "api",
+        command: ["node", "server.js"],
+        ports: [],
+        environment: {},
+        mode: "daemon",
+        startOn: "start.post",
+      },
+    );
+
+    const script = generateStartupScript(plan)!;
+    const section = generatedSection(script, "[hook] migrate", "aborting startup");
+    expect(section).toContain('hook_home="$(getent passwd "$BIODOME_RUNTIME_UID" | cut -d: -f6)"');
+    expect(section).toContain('"HOME=${hook_home:-/root}"');
   });
 
   it("maps the runtime identity onto the workspace owner via environment overrides", () => {

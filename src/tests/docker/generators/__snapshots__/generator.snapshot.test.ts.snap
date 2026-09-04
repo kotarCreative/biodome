@@ -103,7 +103,7 @@ stderr_logfile=/workspace/.biodome-build/logs/backend-healthcheck.log
 
 [program:frontend]
 command=npm run dev
-directory="/workspace/frontend"
+directory=/workspace/frontend
 user=biodome
 autostart=false
 autorestart=true

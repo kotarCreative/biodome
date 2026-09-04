@@ -133,11 +133,16 @@ function hookCommand(hook: Process): string {
   const workingDir = shellQuote(hook.workingDir ?? "/workspace");
   // Hooks are user-controlled workloads: run them as the mapped runtime
   // identity instead of root. Root startup must fail closed when the image
-  // cannot perform the identity transition.
+  // cannot perform the identity transition. HOME is pointed at the runtime
+  // identity's passwd entry (startup still runs with HOME=/root), so
+  // HOME-sensitive tools such as git do not read or warn about /root/.config.
   return `(
   cd ${workingDir} || exit 1
   if command -v setpriv >/dev/null 2>&1; then
-    setpriv --reuid="$BIODOME_RUNTIME_UID" --regid="$BIODOME_RUNTIME_GID" --clear-groups ${invocation}
+    hook_home="$(getent passwd "$BIODOME_RUNTIME_UID" | cut -d: -f6)"
+    setpriv --reuid="$BIODOME_RUNTIME_UID" --regid="$BIODOME_RUNTIME_GID" --clear-groups env \\
+      "HOME=\${hook_home:-/root}" \\
+      ${invocation}
   else
     echo 'biodome: setpriv unavailable; refusing to run a lifecycle hook as root' >&2
     exit 1

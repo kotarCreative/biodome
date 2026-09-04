@@ -26,6 +26,22 @@ function supervisordEnvValue(value: string): string {
   return quoteSupervisordEnv(value);
 }
 
+function supervisordDirectoryValue(value: string): string {
+  // `directory` is a bare INI value: supervisord chdirs to it literally, so
+  // wrapping it in double quotes (as `environment` values require) makes the
+  // quotes part of the path and every spawn fails with ENOENT (exit 127).
+  // Only %-interpolation needs escaping here; newlines are flattened as a
+  // backstop since an INI value cannot span lines.
+  return value.replace(/\r\n?/g, " ").replace(/\n/g, " ").replace(/%/g, "%%");
+}
+
+function supervisordCommandArg(arg: string): string {
+  // `command` is re-parsed by supervisord (shlex-style, so shellQuote's single
+  // quotes group correctly), but INI %-interpolation runs first: a literal %
+  // in an argument must be doubled or supervisord fails to parse the config.
+  return shellQuote(arg).replace(/%/g, "%%");
+}
+
 function sortEnv(env: Record<string, string>): [string, string][] {
   return Object.keys(env)
     .sort()
@@ -85,11 +101,10 @@ export function generateSupervisordConf(plan: Plan): string {
   for (const proc of daemonProcesses) {
     assertIdentifier(proc.name, "process name");
     lines.push(`[program:${proc.name}]`);
-    const cmd = proc.command.map(shellQuote).join(" ");
+    const cmd = proc.command.map(supervisordCommandArg).join(" ");
     lines.push(`command=${cmd}`);
     if (proc.workingDir) {
-      // Quoted like env values so spaces and % never break the INI directive.
-      lines.push(`directory=${quoteSupervisordEnv(proc.workingDir)}`);
+      lines.push(`directory=${supervisordDirectoryValue(proc.workingDir)}`);
     }
     // User workloads, MCP, and mount helpers each run as their generated
     // non-root identity. Health monitors are biodome infrastructure that must

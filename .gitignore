@@ -4,6 +4,8 @@
 .biodome/
 !examples/apps-demo/.biodome/
 !examples/apps-demo/.biodome/**
+!examples/multi-repo-qa/.biodome/
+!examples/multi-repo-qa/.biodome/**
 .biodome-build/
 node_modules
 dist

@@ -151,6 +151,42 @@ describe("generateSupervisordConf", () => {
     expect(conf).toContain("command=sh -c 'echo $(id) && curl http://x;y'");
   });
 
+  it("emits workingDir as a bare supervisord directory value without quotes", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "frontend",
+      command: ["python", "-m", "http.server", "4200"],
+      ports: [{ host: 4200, container: 4200 }],
+      environment: {},
+      mode: "daemon",
+      startOn: "start.post",
+      workingDir: "/workspace/repos/frontend",
+    });
+
+    const conf = generateSupervisordConf(plan);
+    // supervisord chdirs to `directory` literally: double quotes would become
+    // part of the path and every spawn would fail with ENOENT (exit 127).
+    expect(conf).toContain("directory=/workspace/repos/frontend");
+    expect(conf).not.toContain('directory="/workspace/repos/frontend"');
+  });
+
+  it("escapes supervisord interpolation in directory and command values", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "worker",
+      command: ["node", "worker.js", "100%"],
+      ports: [],
+      environment: {},
+      mode: "daemon",
+      startOn: "start.post",
+      workingDir: "/workspace/100%done",
+    });
+
+    const conf = generateSupervisordConf(plan);
+    expect(conf).toContain("directory=/workspace/100%%done");
+    expect(conf).toContain("command=node worker.js '100%%'");
+  });
+
   it("rejects process names that are not safe identifiers", () => {
     const plan = createPlan("my-app");
     plan.runtime.processes.push({
