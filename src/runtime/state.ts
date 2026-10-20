@@ -21,6 +21,7 @@ export interface DeploymentState {
   resourceIds: Record<string, string>;
   /** Lifecycle phase recorded by drivers that persist identity before waiting. */
   status?: DeploymentStatusPhase;
+  profileFingerprint?: string;
 }
 
 const CURRENT_SCHEMA_VERSION = 1;
@@ -98,6 +99,7 @@ function isDeploymentState(value: unknown): value is DeploymentState {
     state.resourceIds !== null &&
     !Array.isArray(state.resourceIds) &&
     Object.values(state.resourceIds).every((id) => typeof id === "string") &&
+    (state.profileFingerprint === undefined || typeof state.profileFingerprint === "string") &&
     (state.status === undefined ||
       state.status === "provisioning" ||
       state.status === "running" ||
@@ -125,6 +127,7 @@ export function writeState(
     createdAt: state.createdAt,
     resourceIds: state.resourceIds,
     ...(state.status ? { status: state.status } : {}),
+    ...(state.profileFingerprint ? { profileFingerprint: state.profileFingerprint } : {}),
   };
 
   const tmpPath = path + ".tmp";

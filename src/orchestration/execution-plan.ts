@@ -89,6 +89,7 @@ export interface ActionRequirement {
 export interface ExecutionPlan {
   version: typeof EXECUTION_PLAN_VERSION;
   project: string;
+  profile?: { name: string; fingerprint: string };
   target: { name: string; provider: string; options: Record<string, unknown> };
   task: ActionRequirement;
   services: ServiceRequirement[];
@@ -161,6 +162,7 @@ const ActionRequirementSchema = Schema.Struct({
 export const ExecutionPlanSchema = Schema.Struct({
   version: Schema.Literal(EXECUTION_PLAN_VERSION),
   project: Schema.String.check(Schema.isMinLength(1)),
+  profile: Schema.optional(Schema.Struct({ name: Schema.String, fingerprint: Schema.String })),
   target: Schema.Struct({
     name: Schema.String.check(Schema.isMinLength(1)),
     provider: Schema.String.check(Schema.isMinLength(1)),

@@ -83,6 +83,7 @@ describe("published package", () => {
       },
     ).trim();
     expect(exportedNames.split(",")).toEqual([
+      "ProfileSchema",
       "buildActionPlan",
       "buildActionPlanEffect",
       "buildPlan",
@@ -91,6 +92,7 @@ describe("published package", () => {
       "buildTargetPlanEffect",
       "buildTaskPlan",
       "buildTaskPlanEffect",
+      "listProfiles",
       "validateConfig",
       "validateConfigEffect",
       "validateFeatures",

@@ -69,6 +69,7 @@ export const EVENT_TYPES = [
   "task.completed",
   "task.failed",
   "source.resolved",
+  "profile.resolved",
   "environment.ready",
   "action.phase",
   "action.report",
@@ -114,6 +115,12 @@ export interface CommandMetadata {
 }
 
 export interface EventData {
+  "profile.resolved": {
+    name: string;
+    fingerprint: string;
+    features: string[];
+    environmentKeys: string[];
+  };
   "environment.ready": { imageRef?: string; digest?: string };
   "source.resolved": { revision?: string; trackedChanges?: boolean; untrackedFiles?: number };
   "action.phase": { phase: string; action: string; message?: string };

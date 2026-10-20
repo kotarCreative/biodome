@@ -33,7 +33,7 @@ export class EnvironmentBuilder {
     return this.plan.runtime.envVars.some((envVar) => envVar.key === key);
   }
 
-  add(key: string, spec: EnvSpec): void {
+  add(key: string, spec: EnvSpec, replace = false): void {
     if (typeof key !== "string" || !envKeyPattern.test(key)) {
       throw new ValidationError({ message: `Env ${key}: key must match ${envKeyPattern.source}` });
     }
@@ -64,9 +64,13 @@ export class EnvironmentBuilder {
     const existing = this.plan.runtime.envVars.find((current) => current.key === key);
     if (existing) {
       if (sameEnvVar(existing, normalized)) return;
-      throw new ValidationError({
-        message: `Duplicate env variable with conflicting declarations: ${key}`,
-      });
+      if (!replace)
+        throw new ValidationError({
+          message: `Duplicate env variable with conflicting declarations: ${key}`,
+        });
+      this.plan.runtime.envVars = this.plan.runtime.envVars.filter((entry) => entry.key !== key);
+      delete this.plan.build.environment[key];
+      delete this.plan.runtime.environment[key];
     }
     this.plan.runtime.envVars.push(normalized);
     if (hasValue && (scope === "build" || scope === "both"))

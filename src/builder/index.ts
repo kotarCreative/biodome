@@ -10,6 +10,12 @@ import { TargetContextImpl } from "../core/target-context.js";
 import { TaskContextImpl } from "../core/task-context.js";
 import { getDriver } from "../runtime/registry.js";
 import { runtimeLayout } from "../runtime/layout.js";
+import {
+  selectedProfile,
+  loadProfile,
+  profileFingerprint,
+  profileTargetName,
+} from "../core/profiles.js";
 import type { FeatureContext, TargetContext, TaskContext } from "../core/feature.js";
 import {
   ConfigError,
@@ -23,6 +29,7 @@ const BIODOME_DIR = ".biodome";
 
 export interface BuildPlanOptions {
   dryRun?: boolean;
+  profile?: string;
 }
 
 export interface McpConfig {
@@ -58,6 +65,8 @@ export const buildPlanEffect = Effect.fnUntraced(function* (
   options: BuildPlanOptions = {},
 ) {
   const config = yield* readConfig(rootDir);
+  const profileName = yield* selectedProfile(options.profile);
+  const profile = profileName === undefined ? undefined : yield* loadProfile(rootDir, profileName);
   const builder = new PlanBuilder(rootDir, config.project.name, options.dryRun);
   const ctx = builder.context;
 
@@ -88,11 +97,29 @@ export const buildPlanEffect = Effect.fnUntraced(function* (
 
   yield* loadServices(rootDir, ctx);
   yield* loadAppsEffect(rootDir, builder);
-  yield* loadFeatures(rootDir, ctx);
+  const features = yield* loadFeatures(rootDir, ctx, profile?.features);
+  if (profile) {
+    yield* Effect.try({
+      try: () => {
+        for (const [key, spec] of Object.entries(profile.environment ?? {}))
+          builder.overrideEnvironment(key, spec);
+      },
+      catch: (error) =>
+        new ConfigError({ message: `Invalid profile environment: ${String(error)}` }),
+    });
+  }
 
   builder.finalize();
 
   const plan = builder.getPlan();
+  if (profile && profileName !== undefined)
+    plan.profile = {
+      name: profileName,
+      fingerprint: profileFingerprint(plan, profile),
+      description: profile.description,
+      features,
+      environmentKeys: Object.keys(profile.environment ?? {}).sort(),
+    };
   yield* validatePlan(plan);
 
   return plan;
@@ -255,11 +282,19 @@ const loadServices = Effect.fnUntraced(function* (rootDir: string, ctx: FeatureC
   }
 });
 
-const loadFeatures = Effect.fnUntraced(function* (rootDir: string, ctx: FeatureContext) {
+const loadFeatures = Effect.fnUntraced(function* (
+  rootDir: string,
+  ctx: FeatureContext,
+  selected?: readonly string[],
+) {
   const featuresDir = join(rootDir, BIODOME_DIR, "features");
   const exists = yield* Effect.sync(() => existsSync(featuresDir));
   if (!exists) {
-    return;
+    if (selected?.length)
+      return yield* new ConfigError({
+        message: "Profile selects features but .biodome/features does not exist",
+      });
+    return [];
   }
 
   const files = yield* Effect.sync(() =>
@@ -267,11 +302,24 @@ const loadFeatures = Effect.fnUntraced(function* (rootDir: string, ctx: FeatureC
       .filter((f) => f.endsWith(".mjs") || f.endsWith(".js"))
       .sort(),
   );
+  if (selected) {
+    for (const name of selected) {
+      const matches = files.filter((file) => file.replace(/\.(mjs|js)$/, "") === name);
+      if (matches.length !== 1)
+        return yield* new ConfigError({
+          message: `Profile feature "${name}" is ${matches.length === 0 ? "missing" : "ambiguous (.js and .mjs)"}`,
+        });
+    }
+  }
+  const chosen = files.filter(
+    (file) => selected === undefined || selected.includes(file.replace(/\.(mjs|js)$/, "")),
+  );
 
-  for (const file of files) {
+  for (const file of chosen) {
     const path = join(featuresDir, file);
     yield* executeFeatureModule(path, ctx);
   }
+  return chosen.map((file) => file.replace(/\.(mjs|js)$/, ""));
 });
 
 const executeFeatureModule = Effect.fnUntraced(function* (path: string, ctx: FeatureContext) {
@@ -364,6 +412,7 @@ export const buildTargetPlanEffect = Effect.fnUntraced(function* (
 ) {
   try {
     validateModuleName(targetName, "target");
+    profileTargetName(targetName);
   } catch (e) {
     return yield* new ValidationError({ message: (e as Error).message });
   }
@@ -426,14 +475,21 @@ export const buildTargetPlanEffect = Effect.fnUntraced(function* (
   });
 
   const rt = targetCtx.getTarget();
+  const scopedTarget = profileTargetName(targetName, plan.profile?.name);
+  rt.name = scopedTarget;
+  if (plan.profile)
+    plan.profile.fingerprint = createHash("sha256")
+      .update(plan.profile.fingerprint)
+      .update(JSON.stringify(rt))
+      .digest("hex");
   yield* getDriver(rt.driver);
-  const deploymentId = computeDeploymentId(plan.project, targetName, rootDir);
+  const deploymentId = computeDeploymentId(plan.project, scopedTarget, rootDir);
 
   plan.deployment = {
     target: rt,
     deploymentId,
   };
-  applyTargetRuntimeLayout(plan, targetName);
+  applyTargetRuntimeLayout(plan, scopedTarget);
 
   yield* validatePlan(plan);
 

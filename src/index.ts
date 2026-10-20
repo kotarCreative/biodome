@@ -13,6 +13,8 @@ export {
 } from "./builder/index.js";
 
 export type { BuildPlanOptions, Config, McpConfig } from "./builder/index.js";
+export { ProfileSchema, listProfiles } from "./core/profiles.js";
+export type { ProfileDefinition } from "./core/profiles.js";
 export type {
   Feature,
   FeatureContext,

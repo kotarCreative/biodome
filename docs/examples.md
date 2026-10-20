@@ -5,6 +5,8 @@ and interactive sessions, see [environment-actions](../examples/environment-acti
 See [actions](actions.md) for the input/output/intent contract and Git worktree usage.
 For pinned TodoMVC, Express, and FastAPI trials with live event consumption,
 cursor polling, and failure evidence, see [public-repo-qa](../examples/public-repo-qa/README.md).
+For the same action against healthy and erroring API setups, see
+[environment-profiles](../examples/environment-profiles/README.md).
 
 ## Django + Postgres + Redis
 

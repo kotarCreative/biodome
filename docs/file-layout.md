@@ -18,6 +18,8 @@ my-project/
 │   │   └── npm-tools.mjs    # tools and packages
 │   ├── targets/
 │   │   └── local.mjs        # default Docker Compose target
+│   ├── profiles/
+│   │   └── staging.json     # optional feature selection + environment overrides
 │   └── actions/
 │       └── e2e.mjs          # command hook: intent, input, outputs
 ├── .biodome-build/
@@ -35,6 +37,9 @@ my-project/
 ├── .dockerignore            # generated
 └── .gitignore               # includes the `.biodome-build/` entry
 ```
+
+With `--profile`, generated output uses a separate target/profile namespace under
+`.biodome-build/targets/`. See [profiles](profiles.md) for naming and cleanup.
 
 ## `.biodome/config.json`
 

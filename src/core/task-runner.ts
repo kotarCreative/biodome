@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { assertProfileManifest, assertProfileState } from "./profiles.js";
 import { Effect } from "effect";
 import { parseDuration, type Plan, type RuntimeTarget, type Task } from "./plan.js";
 import type { RuntimeDriver } from "../runtime/driver.js";
@@ -148,7 +149,12 @@ function buildAndStartDeployment(
       deploymentId: context.deploymentId,
       buildResult,
       contentId: buildResult.digest ?? context.deploymentId,
-      provider: buildResult.provider,
+      provider: {
+        ...buildResult.provider,
+        ...(context.plan.profile
+          ? { "biodome.profileFingerprint": context.plan.profile.fingerprint }
+          : {}),
+      },
     });
     writeBuildManifest(context.rootDir, targetName, manifest);
     const newState = yield* instrumentOperation(
@@ -158,7 +164,10 @@ function buildAndStartDeployment(
       { rootDir: context.rootDir, build: true },
       driverOps.start({ ...context, buildManifest: manifest }),
     );
-    writeState(context.rootDir, targetName, newState);
+    writeState(context.rootDir, targetName, {
+      ...newState,
+      profileFingerprint: context.plan.profile?.fingerprint,
+    });
     return {
       state: readState(context.rootDir, targetName, context.deploymentId, driverOps.id),
       buildManifest: readBuildManifest(
@@ -183,6 +192,7 @@ function ensureDeployed(
   }
   return Effect.gen(function* () {
     const existing = readState(context.rootDir, targetName, context.deploymentId, driverOps.id);
+    yield* assertProfileState(context.plan, existing);
     const st = yield* instrumentOperation(
       store,
       scope,
@@ -191,14 +201,16 @@ function ensureDeployed(
       driverOps.status({ ...context, state: existing }),
     );
     if (st.state === "running") {
+      const manifest = readBuildManifest(
+        context.rootDir,
+        targetName,
+        context.deploymentId,
+        driverOps.id,
+      );
+      yield* assertProfileManifest(context.plan, manifest);
       return {
         state: existing,
-        buildManifest: readBuildManifest(
-          context.rootDir,
-          targetName,
-          context.deploymentId,
-          driverOps.id,
-        ),
+        buildManifest: manifest,
       };
     }
     yield* instrumentOperation(

@@ -49,6 +49,9 @@ export function compileExecutionPlan(plan: Plan): ExecutionPlan {
 
   return {
     version: EXECUTION_PLAN_VERSION,
+    ...(plan.profile
+      ? { profile: { name: plan.profile.name, fingerprint: plan.profile.fingerprint } }
+      : {}),
     project: plan.project,
     target: {
       name: deployment.target.name,

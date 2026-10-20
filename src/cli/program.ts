@@ -13,6 +13,12 @@ import {
 import type { SandboxError } from "../core/errors.js";
 import { NodeRuntime } from "../core/runtime-node.js";
 import { VERSION } from "../core/version.js";
+import {
+  ProfileSelection,
+  validateProfileName,
+  profileTargetName,
+  listProfiles,
+} from "../core/profiles.js";
 import { runSafe } from "./helpers.js";
 import {
   buildWorkflow,
@@ -163,6 +169,13 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
     .description("Self-contained development environment manager")
     .version(VERSION);
   program.option("--no-events", "disable structured event capture");
+  program.option("--profile <name>", "Select a named environment profile", (name) => {
+    try {
+      return validateProfileName(name);
+    } catch (error) {
+      throw new InvalidArgumentError(String(error));
+    }
+  });
 
   const execute = <A>(
     command: string,
@@ -174,6 +187,7 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
     const cwd = rootDir();
     const programEffect = Effect.tap(effect, (value) => Effect.sync(() => present(value))).pipe(
       Effect.asVoid,
+      Effect.provideService(ProfileSelection, { name: program.opts().profile }),
     );
     return run(
       withLayers(
@@ -181,7 +195,9 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
         cwd,
         program.opts().events,
         randomUUID(),
-        targetName,
+        targetName === undefined
+          ? undefined
+          : profileTargetName(targetName, program.opts().profile),
         stream,
       ),
     );
@@ -197,11 +213,32 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
         yield* Effect.sync(() => present(value));
         const error = failure?.(value);
         if (error) return yield* error;
-      }) as Effect.Effect<void, SandboxError, never>,
+      }).pipe(
+        Effect.provideService(ProfileSelection, { name: program.opts().profile }),
+      ) as Effect.Effect<void, SandboxError, never>,
     );
   const logMessage = (value: { message: string }) => {
     console.log(value.message);
   };
+
+  program
+    .command("profiles")
+    .description("List named environment setups without evaluating feature modules")
+    .option("--json", "Print profile declarations as JSON")
+    .action((options) =>
+      executePlain(listProfiles(rootDir()), (profiles) => {
+        console.log(
+          options.json
+            ? JSON.stringify(profiles, null, 2)
+            : profiles
+                .map(
+                  (profile) =>
+                    `${profile.name}${profile.description ? ` — ${profile.description}` : ""}`,
+                )
+                .join("\n") || "No profiles declared",
+        );
+      }),
+    );
 
   program
     .command("init")
@@ -365,7 +402,11 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
           options.json
             ? console.log(
                 JSON.stringify(
-                  { executionPlan: value.executionPlan, compatibility: value.compatibility },
+                  {
+                    executionPlan: value.executionPlan,
+                    compatibility: value.compatibility,
+                    ...(value.profile ? { profile: value.profile } : {}),
+                  },
                   null,
                   2,
                 ),

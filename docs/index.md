@@ -27,6 +27,7 @@ npx @kotarcreative/biodome up local
 - **Features:** JavaScript modules in `.biodome/features/` that export a default function receiving the biodome context and extend the base plan after applications.
 - **Services:** Backing dependencies declared in `.biodome/services.mjs`. Built-in Postgres and Redis run ephemerally as supervised processes inside the dev container.
 - **Actions:** On-demand command hooks in `.biodome/actions/`, with input, intent, outputs, timeout, and cleanup policy. See [Environment actions](actions.md).
+- **Profiles:** Named feature selections and environment overrides in `.biodome/profiles/`, selected with `--profile`. See [Environment profiles](profiles.md).
 
 ## MCP (Model Context Protocol)
 
@@ -62,4 +63,5 @@ Queries return at most 100 events by default and accept up to 1,000 with `--limi
 - [API reference](api.md)
 - [Examples](examples.md)
 - [Environment actions and branch sessions](actions.md)
+- [Named environment profiles](profiles.md)
 - [Active design and implementation plans](design/README.md)

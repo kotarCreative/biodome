@@ -5,6 +5,7 @@ import type { Plan, RuntimeTarget } from "../core/plan.js";
 import type { RuntimeDriver } from "../runtime/driver.js";
 import { runtimeLayout, type RuntimeLayout } from "../runtime/layout.js";
 import { getDriver } from "../runtime/registry.js";
+import { emitProfileResolved } from "../core/profiles.js";
 
 export interface TargetOperation {
   readonly rootDir: string;
@@ -43,12 +44,13 @@ export function createTargetOperation(
       return yield* new PlanError({ message: `Target plan "${targetName}" has no deployment` });
     }
     const driver = yield* dependencies.getDriver(deployment.target.driver);
+    yield* emitProfileResolved(plan);
     return {
       rootDir,
       plan,
       target: deployment.target,
       driver,
-      layout: runtimeLayout(rootDir, targetName),
+      layout: runtimeLayout(rootDir, deployment.target.name),
       deploymentId: deployment.deploymentId,
     };
   });

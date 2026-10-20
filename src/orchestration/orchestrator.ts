@@ -9,6 +9,7 @@ import { createRunRecord, transitionRun, type RunRecord } from "./run-record.js"
 import { writeRunRecordEffect } from "./run-store.js";
 import { EventStore } from "../core/events.js";
 import { sourceRevision } from "./source.js";
+import { emitProfileResolved } from "../core/profiles.js";
 
 export interface OrchestrationResult extends TaskResult {
   run: RunRecord;
@@ -39,6 +40,7 @@ export function orchestrateTask(
     }
 
     const eventStore = yield* EventStore;
+    yield* emitProfileResolved(plan);
     const source = sourceRevision(rootDir);
     yield* eventStore.emit("source.resolved", source ?? {});
 
@@ -49,6 +51,9 @@ export function orchestrateTask(
       provider: driver.id,
       planDigest: executionPlanDigest(portablePlan),
       source,
+      profile: plan.profile
+        ? { name: plan.profile.name, fingerprint: plan.profile.fingerprint }
+        : undefined,
     });
     yield* writeRunRecordEffect(rootDir, run);
 

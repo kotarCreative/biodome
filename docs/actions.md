@@ -5,6 +5,9 @@ hook in that environment, not an agent workflow. Your agent stays outside and
 chooses what to invoke; Biodome does not install agents, select models, or manage
 prompts and conversations.
 
+Use [profiles](profiles.md) to run the same action against different named setups
+without editing its checks or target infrastructure.
+
 ## Declare an action
 
 One file in `.biodome/actions/` declares one action. The filename is its name.

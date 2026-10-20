@@ -63,6 +63,14 @@ export function taskPlanWorkflow(
     const compatibility = validateCompatibility(executionPlan, providerProfile(driver));
     return {
       executionPlan,
+      profile: plan.profile
+        ? {
+            ...plan.profile,
+            environment: plan.runtime.envVars.filter((entry) =>
+              plan.profile?.environmentKeys.includes(entry.key),
+            ),
+          }
+        : undefined,
       compatibility,
       report: formatCompatibilityReport(compatibility),
       error: compatibility.compatible

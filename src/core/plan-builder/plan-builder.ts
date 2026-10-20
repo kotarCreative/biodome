@@ -2,7 +2,7 @@ import type { ApplicationPlanAccess } from "../../apps/application-builder.js";
 import { qualifyAppPrimitive } from "../../apps/qualification.js";
 import { runtimeLayout } from "../../runtime/layout.js";
 import { createFeatureContext } from "../context.js";
-import type { FeatureContext } from "../feature.js";
+import type { FeatureContext, EnvSpec } from "../feature.js";
 import { createPlan, type Plan } from "../plan.js";
 import { BuildBuilder } from "./build.js";
 import { EnvironmentBuilder } from "./environment.js";
@@ -134,6 +134,10 @@ export class PlanBuilder {
 
   configureMcp(port: number, options: McpOptions): void {
     this.mutate(() => this.mcp.configure(port, options));
+  }
+
+  overrideEnvironment(key: string, spec: EnvSpec): void {
+    this.mutate(() => this.environment.add(key, spec, true));
   }
 
   getPlan(): Plan {

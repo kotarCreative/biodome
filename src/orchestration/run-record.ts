@@ -53,6 +53,7 @@ export interface RunRecord {
   attempts: RunAttempt[];
   artifacts: RunArtifact[];
   source?: SourceRevision;
+  profile?: { name: string; fingerprint: string };
   phase?: string;
   outcome?: "succeeded" | "failed" | "timed-out";
   cleanupStatus?: "completed" | "failed" | "not-requested";
@@ -112,5 +113,6 @@ export function createRunRecord(
     attempts: [],
     artifacts: [],
     ...(input.source ? { source: input.source } : {}),
+    ...(input.profile ? { profile: input.profile } : {}),
   };
 }

@@ -30,6 +30,7 @@ npx @kotarcreative/biodome down local
 - `biodome exec <target> <command...>` — run a command inside a target.
 - `biodome shell <target>` — open an interactive shell in a running Compose environment.
 - `biodome plan <target> <action> [--json]` — inspect an action and preflight provider requirements without starting anything.
+- `biodome profiles [--json]` — list named setups; use `--profile <name>` on environment and action commands.
 - `biodome run <target> <action> [--input <json>] [--intent <text>] [--output <paths...>] [--json]` — run an ordinary command hook and collect its outputs.
 - `biodome info` — show services, ports, and connection strings.
 - `biodome app list` — list implicit applications declared in `.biodome/apps/`.
@@ -60,6 +61,7 @@ Every lifecycle command captures a structured event stream by default. Target-sc
 - [API reference](docs/api.md)
 - [Examples](docs/examples.md)
 - [Actions, branch QA, performance tests, and interactive sessions](docs/actions.md)
+- [Named setup profiles for experiment loops](docs/profiles.md)
 
 ## An action, not an agent workflow
 

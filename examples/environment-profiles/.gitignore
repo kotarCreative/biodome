@@ -1,0 +1,4 @@
+.biodome-build/
+.dockerignore
+.biodome/.env
+results/

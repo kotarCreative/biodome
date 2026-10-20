@@ -1191,6 +1191,15 @@ export const RuntimePlanSchema = Schema.Struct({
 
 export const PlanSchema = Schema.Struct({
   project: Schema.String,
+  profile: Schema.optional(
+    Schema.Struct({
+      name: Schema.String,
+      fingerprint: Schema.String,
+      description: Schema.optional(Schema.String),
+      features: Schema.Array(Schema.String),
+      environmentKeys: Schema.Array(Schema.String),
+    }),
+  ),
   deployment: Schema.optional(DeploymentPlanSchema),
   build: BuildPlanSchema,
   runtime: RuntimePlanSchema,

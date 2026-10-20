@@ -1,5 +1,8 @@
 import { Effect } from "effect";
 import { RuntimeError } from "../../core/errors.js";
+import { assertProfileManifest, assertProfileState } from "../../core/profiles.js";
+import { existsSync } from "node:fs";
+import { statePath } from "../../runtime/state.js";
 import {
   EventStore,
   commandMetadata,
@@ -75,7 +78,12 @@ function persistBuildManifest(
     deploymentId: operation.deploymentId,
     buildResult,
     contentId: buildResult.digest ?? operation.deploymentId,
-    provider: buildResult.provider,
+    provider: {
+      ...buildResult.provider,
+      ...(operation.plan.profile
+        ? { "biodome.profileFingerprint": operation.plan.profile.fingerprint }
+        : {}),
+    },
   });
   writeBuildManifest(operation.rootDir, operation.target.name, manifest);
   return manifest;
@@ -157,7 +165,11 @@ export function buildWorkflow(
     yield* driver.ensureAvailable(operation.target);
     yield* driver.render(operationInput(operation));
     const store = yield* EventStore;
-    const scope: EventScope = { runId: store.runId, target: targetName, provider: driver.id };
+    const scope: EventScope = {
+      runId: store.runId,
+      target: operation.target.name,
+      provider: driver.id,
+    };
     const buildResult = yield* instrumentOperation(
       store,
       scope,
@@ -178,6 +190,12 @@ export function upWorkflow(
 ) {
   return Effect.gen(function* () {
     const operation = yield* createTargetOperation(rootDir, targetName, {}, dependencies);
+    const scopedTarget = operation.target.name;
+    if (operation.plan.profile && existsSync(statePath(rootDir, scopedTarget)))
+      yield* assertProfileState(
+        operation.plan,
+        readState(rootDir, scopedTarget, operation.deploymentId, operation.driver.id),
+      );
     yield* planLoaded(operation, targetName);
     yield* ensureTargetCompatible(operation);
     yield* validateProviderTarget(operation);
@@ -186,7 +204,11 @@ export function upWorkflow(
     if (!supportsStart(driver)) return yield* unsupported(driver.id, "lifecycle.start");
     yield* driver.ensureAvailable(operation.target);
     const store = yield* EventStore;
-    const scope: EventScope = { runId: store.runId, target: targetName, provider: driver.id };
+    const scope: EventScope = {
+      runId: store.runId,
+      target: operation.target.name,
+      provider: driver.id,
+    };
     let buildManifest: BuildManifest | undefined = readCurrentBuildManifest(operation);
     if (options.build) {
       if (!supportsRender(driver)) return yield* unsupported(driver.id, "lifecycle.build");
@@ -206,6 +228,7 @@ export function upWorkflow(
       (yield* new RuntimeError({
         message: `No build manifest found for target "${targetName}". Run "biodome build ${targetName}" first.`,
       }));
+    yield* assertProfileManifest(operation.plan, manifest);
     const state = yield* instrumentOperation(
       store,
       scope,
@@ -213,8 +236,11 @@ export function upWorkflow(
       { rootDir, build: options.build ?? false },
       driver.start({ ...operationInput(operation), buildManifest: manifest }),
     );
-    writeState(rootDir, targetName, state);
-    const validated = readState(rootDir, targetName, operation.deploymentId, driver.id);
+    writeState(rootDir, scopedTarget, {
+      ...state,
+      profileFingerprint: operation.plan.profile?.fingerprint,
+    });
+    const validated = readState(rootDir, scopedTarget, operation.deploymentId, driver.id);
     yield* Effect.sync(() => console.log(`Target "${targetName}" is running`));
     if (options.wait) {
       if (!supportsStop(driver)) return yield* unsupported(driver.id, "lifecycle.stop");
@@ -229,7 +255,7 @@ export function upWorkflow(
         { rootDir },
         driver.stop({ ...operationInput(operation), state: validated }),
       );
-      removeState(rootDir, targetName);
+      removeState(rootDir, scopedTarget);
     }
     return { message: `Target "${targetName}" is running`, waiting: Boolean(options.wait) };
   }).pipe(Effect.scoped);
@@ -247,13 +273,18 @@ export function downWorkflow(
       { dryRun: true },
       dependencies,
     );
-    const state = readState(rootDir, targetName, operation.deploymentId, operation.driver.id);
+    const state = readState(
+      rootDir,
+      operation.target.name,
+      operation.deploymentId,
+      operation.driver.id,
+    );
     if (!supportsStop(operation.driver))
       return yield* unsupported(operation.driver.id, "lifecycle.stop");
     const store = yield* EventStore;
     const scope: EventScope = {
       runId: store.runId,
-      target: targetName,
+      target: operation.target.name,
       provider: operation.driver.id,
     };
     yield* instrumentOperation(
@@ -263,7 +294,7 @@ export function downWorkflow(
       { rootDir },
       operation.driver.stop({ ...operationInput(operation), state }),
     );
-    removeState(rootDir, targetName);
+    removeState(rootDir, operation.target.name);
     return { message: `Target "${targetName}" stopped` };
   });
 }
@@ -284,7 +315,7 @@ export function execWorkflow(
     const store = yield* EventStore;
     const scope: EventScope = {
       runId: store.runId,
-      target: targetName,
+      target: operation.target.name,
       provider: operation.driver.id,
     };
     // `biodome exec` is in-place execution by contract. One-shot jobs belong
@@ -293,6 +324,8 @@ export function execWorkflow(
       return yield* unsupported(operation.driver.id, "in-place command execution");
     }
     const input = operationInputWithState(operation);
+    yield* assertProfileState(operation.plan, input.state);
+    yield* assertProfileManifest(operation.plan, input.buildManifest);
     yield* instrumentOperation(
       store,
       scope,
@@ -319,7 +352,10 @@ export function shellWorkflow(
     if (!supportsShell(operation.driver)) {
       return yield* unsupported(operation.driver.id, "interactive shells");
     }
-    yield* operation.driver.shell(operationInputWithState(operation));
+    const input = operationInputWithState(operation);
+    yield* assertProfileState(operation.plan, input.state);
+    yield* assertProfileManifest(operation.plan, input.buildManifest);
+    yield* operation.driver.shell(input);
   }).pipe(Effect.scoped);
 }
 
@@ -341,7 +377,7 @@ export function logsWorkflow(
     const store = yield* EventStore;
     const scope: EventScope = {
       runId: store.runId,
-      target: targetName,
+      target: operation.target.name,
       provider: operation.driver.id,
     };
     yield* instrumentOperation(
@@ -371,7 +407,7 @@ export function psWorkflow(
     const store = yield* EventStore;
     const scope: EventScope = {
       runId: store.runId,
-      target: targetName,
+      target: operation.target.name,
       provider: operation.driver.id,
     };
     const status = yield* instrumentOperation(
@@ -403,7 +439,7 @@ export function statusWorkflow(
     const store = yield* EventStore;
     const scope: EventScope = {
       runId: store.runId,
-      target: targetName,
+      target: operation.target.name,
       provider: operation.driver.id,
     };
     const status = yield* instrumentOperation(
@@ -454,13 +490,14 @@ export function restartWorkflow(
     const operation = yield* createTargetOperation(rootDir, targetName, {}, dependencies);
     yield* planLoaded(operation, targetName);
     if (processName) {
+      yield* assertProfileState(operation.plan, operationInputWithValidatedState(operation).state);
       if (!supportsRestart(operation.driver)) {
         return yield* unsupported(operation.driver.id, "process.signal");
       }
       const store = yield* EventStore;
       const scope: EventScope = {
         runId: store.runId,
-        target: targetName,
+        target: operation.target.name,
         provider: operation.driver.id,
       };
       yield* instrumentOperation(
@@ -473,10 +510,11 @@ export function restartWorkflow(
     } else {
       const skipped: string[] = [];
       const input = operationInputWithValidatedState(operation);
+      yield* assertProfileState(operation.plan, input.state);
       const store = yield* EventStore;
       const scope: EventScope = {
         runId: store.runId,
-        target: targetName,
+        target: operation.target.name,
         provider: operation.driver.id,
       };
       for (const process of operation.plan.runtime.processes.filter(
