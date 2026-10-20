@@ -35,6 +35,8 @@ export interface ExecInput extends RuntimeOperationInput {
 export interface JobInput extends RuntimeOperationInput {
   buildManifest: BuildManifest;
   command: string[];
+  /** Commands that must observe the job's mutated workspace before artifacts publish. */
+  validationCommands?: string[][];
   timeoutMs?: number;
   artifactPaths?: string[];
 }
@@ -45,10 +47,13 @@ export interface StartInput extends RuntimeOperationInput {
 
 export interface ArtifactInput extends RuntimeOperationInput {
   paths: string[];
+  artifactDir?: string;
 }
 
 export interface LogInput extends RuntimeOperationInput {
   processName?: string;
+  /** Finite diagnostic snapshot instead of attaching a follower. */
+  follow?: boolean;
 }
 
 export interface RestartInput extends RuntimeOperationInput {
@@ -97,6 +102,11 @@ export interface RuntimeDriver {
   readonly capabilities: Capabilities;
 }
 
+/** Optional side-effect-free provider configuration validation. */
+export interface TargetValidatingDriver {
+  validateTarget(input: RenderInput): Effect.Effect<void, RuntimeError, never>;
+}
+
 export interface RenderableDriver {
   render(input: RenderInput): Effect.Effect<string[], RuntimeError, never>;
 }
@@ -119,6 +129,14 @@ export interface StoppableDriver {
 
 export interface ExecutableDriver {
   exec(input: ExecInput): Effect.Effect<CommandResult, RuntimeError, EventStore>;
+}
+
+export interface InteractiveDriver {
+  shell(input: RuntimeOperationInput): Effect.Effect<void, RuntimeError, EventStore>;
+}
+
+export function supportsShell(driver: RuntimeDriver): driver is RuntimeDriver & InteractiveDriver {
+  return driver.capabilities.has("exec.pty") && hasMethod(driver, "shell");
 }
 
 export interface JobDriver {
@@ -153,6 +171,12 @@ export function supportsAvailability(
   driver: RuntimeDriver,
 ): driver is RuntimeDriver & AvailableDriver {
   return hasMethod(driver, "ensureAvailable");
+}
+
+export function supportsTargetValidation(
+  driver: RuntimeDriver,
+): driver is RuntimeDriver & TargetValidatingDriver {
+  return hasMethod(driver, "validateTarget");
 }
 
 export function supportsBuild(driver: RuntimeDriver): driver is RuntimeDriver & BuildableDriver {
@@ -202,6 +226,7 @@ type Operation =
   | "start"
   | "stop"
   | "exec"
+  | "shell"
   | "runJob"
   | "collectArtifacts"
   | "status"
@@ -214,6 +239,7 @@ const operationCapabilities: Readonly<Record<Operation, readonly string[]>> = {
   start: ["lifecycle.start"],
   stop: ["lifecycle.stop"],
   exec: ["exec.inplace"],
+  shell: ["exec.pty"],
   runJob: ["job.run"],
   collectArtifacts: ["artifact.collect"],
   status: ["status.read"],

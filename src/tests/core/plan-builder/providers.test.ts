@@ -1,14 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { EnvSpec } from "../../../core/feature.js";
 import { createPlan, type SecretReference } from "../../../core/plan.js";
 import { ProviderBuilder } from "../../../core/plan-builder/providers.js";
 
-function makeBuilder(
-  addEnv: (key: string, spec: EnvSpec) => void = () => undefined,
-  hasEnv: (key: string) => boolean = () => false,
-) {
+function makeBuilder() {
   const plan = createPlan("test");
-  return { plan, builder: new ProviderBuilder(plan, addEnv, hasEnv) };
+  return { plan, builder: new ProviderBuilder(plan) };
 }
 
 describe("ProviderBuilder", () => {
@@ -144,68 +140,5 @@ describe("ProviderBuilder", () => {
     expect(() =>
       builder.addSlackProvider({ name: "invalid", mcpUrl: "", credentials: token }),
     ).toThrow(/mcpUrl is required/);
-  });
-
-  it("normalizes LLM providers and declares credential references through the environment capability", () => {
-    const declarations: Array<{ key: string; spec: EnvSpec }> = [];
-    const { builder, plan } = makeBuilder((key, spec) => declarations.push({ key, spec }));
-    const options = { baseURL: "http://localhost:2877/v1", apiKey: { env: "LMSTUDIO_API_KEY" } };
-    const models: Record<string, { name?: string }> = { "local-model": { name: "Local Model" } };
-
-    builder.addLlmProvider({
-      name: "lmstudio",
-      npm: "@ai-sdk/openai-compatible",
-      displayName: "LM Studio",
-      options,
-      models,
-    });
-    models["another-model"] = { name: "Another Model" };
-
-    expect(plan.runtime.llmProviders[0]).toMatchObject({
-      name: "lmstudio",
-      npm: "@ai-sdk/openai-compatible",
-      displayName: "LM Studio",
-      options,
-      models: { "local-model": { name: "Local Model" } },
-    });
-    expect(declarations).toEqual([
-      { key: "LMSTUDIO_API_KEY", spec: { from: { env: "LMSTUDIO_API_KEY" } } },
-    ]);
-    expect(() => builder.addLlmProvider({ name: "lmstudio" })).toThrow(
-      /Duplicate LLM provider name/,
-    );
-    expect(() =>
-      builder.addLlmProvider({ name: "literal", options: { apiKey: "secret" } }),
-    ).toThrow(/must be an environment reference/);
-  });
-
-  it("keeps LLM and external provider names in separate registries", () => {
-    const { builder, plan } = makeBuilder();
-
-    builder.addProvider({ name: "shared", type: "custom" });
-    builder.addLlmProvider({ name: "shared" });
-
-    expect(plan.runtime.providers).toHaveLength(1);
-    expect(plan.runtime.llmProviders).toHaveLength(1);
-  });
-
-  it("skips the credential env declaration when the variable is already declared", () => {
-    const declarations: Array<{ key: string; spec: EnvSpec }> = [];
-    // e.g. the user declared an AWS secret ARN-backed passthrough themselves.
-    const { plan, builder } = makeBuilder(
-      (key, spec) => declarations.push({ key, spec }),
-      (key) => key === "LMSTUDIO_API_KEY",
-    );
-
-    builder.addLlmProvider({
-      name: "lmstudio",
-      options: { apiKey: { env: "LMSTUDIO_API_KEY" } },
-      models: {},
-    });
-
-    expect(declarations).toEqual([]);
-    expect(plan.runtime.llmProviders[0].options).toEqual({
-      apiKey: { env: "LMSTUDIO_API_KEY" },
-    });
   });
 });

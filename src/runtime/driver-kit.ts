@@ -73,15 +73,21 @@ export function captureTimedExec(
 
 /** Artifact paths are workspace-relative POSIX paths; reject anything else. */
 export function assertRelativeArtifactPath(path: string): void {
-  if (path.startsWith("/") || path.split(/[\\/]/).includes("..")) {
+  if (
+    path.length === 0 ||
+    path.includes("\0") ||
+    path.startsWith("/") ||
+    path.split(/[\\/]/).includes("..")
+  ) {
     throw new RuntimeError({
-      message: `Invalid artifact path "${path}": must be a relative path without traversal`,
+      message: `Invalid artifact path "${path}": must be a non-empty relative path without NUL bytes or traversal`,
     });
   }
 }
 
 export interface CopyCollectOptions {
   readonly outputDir: string;
+  readonly artifactDir?: string;
   readonly paths: string[];
   /**
    * Copy one validated workspace-relative path into the prepared localPath.
@@ -100,7 +106,7 @@ export function collectArtifactsByCopying(
   options: CopyCollectOptions,
 ): Effect.Effect<Artifact[], RuntimeError, never> {
   return Effect.gen(function* () {
-    const artifactsDir = join(options.outputDir, "artifacts");
+    const artifactsDir = options.artifactDir ?? join(options.outputDir, "artifacts");
     mkdirSync(artifactsDir, { recursive: true });
     const artifacts: Artifact[] = [];
     for (const path of options.paths) {

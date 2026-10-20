@@ -46,8 +46,8 @@ export function initWorkflow(rootDir: string, bare: boolean) {
         join(configDir, "targets", "local.mjs"),
         'export default function local(ctx) {\n  ctx.useRuntime("docker-compose");\n}\n',
       );
-      mkdirSync(join(configDir, "tasks"), { recursive: true });
-      writeFileSync(join(configDir, "tasks", ".gitkeep"), "");
+      mkdirSync(join(configDir, "actions"), { recursive: true });
+      writeFileSync(join(configDir, "actions", ".gitkeep"), "");
       ensureIgnored(rootDir);
       return { message: `Initialized .biodome config for ${projectName}` };
     },

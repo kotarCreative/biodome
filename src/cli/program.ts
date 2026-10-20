@@ -22,11 +22,12 @@ import {
   psWorkflow,
   restartWorkflow,
   statusWorkflow,
+  shellWorkflow,
   upWorkflow,
 } from "./workflows/target.js";
 import { configValidateWorkflow, targetValidateWorkflow } from "./workflows/config.js";
 import { envConfigWorkflow } from "./workflows/env.js";
-import { eventQuery, eventsWorkflow } from "./workflows/events.js";
+import { eventQuery, eventsWorkflow, eventPageWorkflow } from "./workflows/events.js";
 import {
   appAddWorkflow,
   appInspectWorkflow,
@@ -38,10 +39,26 @@ import {
   initWorkflow,
 } from "./workflows/project.js";
 import { runTaskWorkflow, taskPlanWorkflow } from "./workflows/task.js";
+import { CommandOutput } from "../core/command-output.js";
 
-function buildLayers(rootDir: string, enabled: boolean, runId: string, targetName?: string) {
+function buildLayers(
+  rootDir: string,
+  enabled: boolean,
+  runId: string,
+  targetName?: string,
+  stream = false,
+) {
   const events = enabled
-    ? FileEventStoreLive({ runId, path: eventLogPath(rootDir, runId, targetName) })
+    ? FileEventStoreLive({
+        runId,
+        path: eventLogPath(rootDir, runId, targetName),
+        target: targetName,
+        onEvent: stream
+          ? (event) => {
+              process.stdout.write(JSON.stringify(event) + "\n");
+            }
+          : undefined,
+      })
     : NoOpEventStoreLive(runId);
   return Layer.merge(NodeRuntime, events);
 }
@@ -52,9 +69,10 @@ function withLayers<E>(
   enabled: boolean,
   runId: string,
   targetName?: string,
+  stream = false,
 ): Effect.Effect<void, E, never> {
   return effect.pipe(
-    Effect.provide(buildLayers(rootDir, enabled, runId, targetName)),
+    Effect.provide(buildLayers(rootDir, enabled, runId, targetName, stream)),
     provideTelemetry,
   ) as Effect.Effect<void, E, never>;
 }
@@ -95,6 +113,7 @@ export interface ProgramDependencies {
     readonly up?: typeof upWorkflow;
     readonly down?: typeof downWorkflow;
     readonly exec?: typeof execWorkflow;
+    readonly shell?: typeof shellWorkflow;
     readonly logs?: typeof logsWorkflow;
     readonly ps?: typeof psWorkflow;
     readonly status?: typeof statusWorkflow;
@@ -123,6 +142,18 @@ function parseEventLimit(value: string): number {
   }
 }
 
+function parseActionInput(value: string): Record<string, unknown> {
+  try {
+    const input: unknown = JSON.parse(value);
+    if (input === null || typeof input !== "object" || Array.isArray(input)) {
+      throw new Error("expected a JSON object");
+    }
+    return input as Record<string, unknown>;
+  } catch (error) {
+    throw new InvalidArgumentError(`--input requires a JSON object: ${String(error)}`);
+  }
+}
+
 export function createProgram(dependencies: ProgramDependencies = {}): Command {
   const rootDir = dependencies.rootDir ?? process.cwd;
   const run = dependencies.run ?? runSafe;
@@ -138,6 +169,7 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
     effect: Effect.Effect<A, SandboxError, EventStore | ChildProcessSpawner.ChildProcessSpawner>,
     targetName: string | undefined,
     present: (value: A) => void = () => {},
+    stream = false,
   ) => {
     const cwd = rootDir();
     const programEffect = Effect.tap(effect, (value) => Effect.sync(() => present(value))).pipe(
@@ -150,6 +182,7 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
         program.opts().events,
         randomUUID(),
         targetName,
+        stream,
       ),
     );
   };
@@ -208,6 +241,12 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
         target,
         logMessage,
       ),
+    );
+  program
+    .command("shell <target>")
+    .description("Open an interactive shell in a running environment")
+    .action((target) =>
+      execute("shell", (workflows.shell ?? shellWorkflow)(rootDir(), target), target),
     );
   program
     .command("logs <target> [process]")
@@ -309,12 +348,19 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
     );
 
   program
-    .command("plan <target> <task>")
-    .description("Compile a portable task plan and validate it against a target")
+    .command("plan <target> <action>")
+    .description("Inspect an environment action without starting anything")
     .option("--json", "Print the portable execution plan and compatibility report as JSON")
+    .option("--input <json>", "Merge JSON input into the action defaults", parseActionInput)
+    .option("--intent <text>", "Describe the purpose of this invocation")
+    .option("--output <paths...>", "Override the workspace-relative output files")
     .action((target, task, options) =>
       executePlain(
-        (workflows.taskPlan ?? taskPlanWorkflow)(rootDir(), target, task),
+        (workflows.taskPlan ?? taskPlanWorkflow)(rootDir(), target, task, {
+          input: options.input,
+          intent: options.intent,
+          outputs: options.output,
+        }),
         (value) =>
           options.json
             ? console.log(
@@ -325,42 +371,101 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
                 ),
               )
             : console.log(
-                `Task: ${value.executionPlan.task.name}\nTarget: ${value.executionPlan.target.name}\n${value.report}`,
+                `Action: ${value.executionPlan.task.name}\nIntent: ${value.executionPlan.task.intent}\nTarget: ${value.executionPlan.target.name}\n${value.report}`,
               ),
         (value) => value.error,
       ),
     );
   program
-    .command("run <target> <task>")
-    .description("Execute a named task against a target sandbox")
-    .action((target, task) =>
-      execute(
+    .command("run <target> <action>")
+    .description("Run a declared command in an environment; no embedded agent")
+    .option("--input <json>", "Merge JSON input into the action defaults", parseActionInput)
+    .option("--intent <text>", "Describe the purpose of this invocation")
+    .option("--output <paths...>", "Override the workspace-relative output files")
+    .option("--json", "Print the run result as JSON")
+    .option("--stream", "Stream the persisted event log as JSON Lines")
+    .action((target, task, options) => {
+      if (options.stream && (!program.opts().events || options.json)) {
+        throw new InvalidArgumentError(
+          "--stream requires event capture and cannot be combined with --json",
+        );
+      }
+      return execute(
         "run",
-        (workflows.runTask ?? runTaskWorkflow)(rootDir(), target, task),
+        (workflows.runTask ?? runTaskWorkflow)(rootDir(), target, task, {
+          input: options.input,
+          intent: options.intent,
+          outputs: options.output,
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.gen(function* () {
+              const store = yield* EventStore;
+              if (options.json)
+                console.log(
+                  JSON.stringify(
+                    {
+                      runId: store.runId,
+                      eventLogPath: store.path,
+                      exitCode: "exitCode" in error ? (error.exitCode ?? 1) : 1,
+                      error: error.message,
+                      artifacts: "artifacts" in error ? (error.artifacts ?? []) : [],
+                      cleanupFailed: "cleanupFailed" in error ? error.cleanupFailed : undefined,
+                    },
+                    null,
+                    2,
+                  ),
+                );
+              return yield* Effect.fail(error);
+            }),
+          ),
+          Effect.provideService(CommandOutput, {
+            progressToStderr: Boolean(options.json || options.stream),
+          }),
+        ),
         target,
         (result) => {
-          console.log(`Task "${task}" completed with exit code ${result.exitCode}`);
+          if (options.stream) return;
+          if (options.json) {
+            console.log(JSON.stringify(result, null, 2));
+            return;
+          }
+          console.log(`Action "${task}" completed with exit code ${result.exitCode}`);
           console.log(`Run record: ${result.run.runId}`);
           for (const artifact of result.artifacts ?? [])
             console.log(
               `  Artifact: ${artifact.path} (${artifact.sizeBytes} bytes) -> ${artifact.localPath}`,
             );
         },
-      ),
-    );
+        options.stream,
+      );
+    });
   program
     .command("events")
     .description("Show captured structured events for the current project")
     .option("--run <runId>", "Filter to a specific run")
+    .option("--json", "Return a cursor-based event page for one run")
+    .option("--after <sequence>", "Read events after this sequence number", (value) => {
+      const number = Number(value);
+      if (!Number.isSafeInteger(number) || number < 0)
+        throw new InvalidArgumentError("--after must be a non-negative integer");
+      return number;
+    })
     .option("--limit <n>", `Maximum events to show (1-${MAX_EVENT_QUERY_LIMIT})`, parseEventLimit)
-    .action((options) =>
-      executePlain(
+    .action((options) => {
+      if (options.json || options.after !== undefined) {
+        if (!options.run) throw new InvalidArgumentError("Cursor queries require --run <runId>");
+        return executePlain(
+          eventPageWorkflow(rootDir(), options.run, options.after ?? 0, options.limit),
+          (page) => console.log(JSON.stringify(page, null, 2)),
+        );
+      }
+      return executePlain(
         (workflows.events ?? eventsWorkflow)(rootDir(), eventQuery(options.run, options.limit)),
         (lines) => {
           for (const line of lines) console.log(line);
         },
-      ),
-    );
+      );
+    });
   const config = program.command("config").description("Manage sandbox configuration");
   config
     .command("validate")

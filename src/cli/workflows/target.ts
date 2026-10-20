@@ -10,12 +10,14 @@ import {
   supportsAvailability,
   supportsBuild,
   supportsInplaceExec,
+  supportsShell,
   supportsLogs,
   supportsRender,
   supportsRestart,
   supportsStart,
   supportsStatus,
   supportsStop,
+  supportsTargetValidation,
 } from "../../runtime/driver.js";
 import { readState, removeState, writeState } from "../../runtime/state.js";
 import {
@@ -132,6 +134,12 @@ function ensureTargetCompatible(
   );
 }
 
+function validateProviderTarget(operation: TargetOperation) {
+  return supportsTargetValidation(operation.driver)
+    ? operation.driver.validateTarget(operationInput(operation))
+    : Effect.void;
+}
+
 export function buildWorkflow(
   rootDir: string,
   targetName: string,
@@ -141,6 +149,7 @@ export function buildWorkflow(
     const operation = yield* createTargetOperation(rootDir, targetName, {}, dependencies);
     yield* planLoaded(operation, targetName);
     yield* ensureTargetCompatible(operation);
+    yield* validateProviderTarget(operation);
     const { driver } = operation;
     if (!supportsAvailability(driver)) return yield* unsupported(driver.id, "availability checks");
     if (!supportsRender(driver)) return yield* unsupported(driver.id, "lifecycle.build");
@@ -171,6 +180,7 @@ export function upWorkflow(
     const operation = yield* createTargetOperation(rootDir, targetName, {}, dependencies);
     yield* planLoaded(operation, targetName);
     yield* ensureTargetCompatible(operation);
+    yield* validateProviderTarget(operation);
     const { driver } = operation;
     if (!supportsAvailability(driver)) return yield* unsupported(driver.id, "availability checks");
     if (!supportsStart(driver)) return yield* unsupported(driver.id, "lifecycle.start");
@@ -291,6 +301,25 @@ export function execWorkflow(
       operation.driver.exec({ ...input, command }),
     );
     return { message: `Command completed on target "${targetName}"` };
+  }).pipe(Effect.scoped);
+}
+
+export function shellWorkflow(
+  rootDir: string,
+  targetName: string,
+  dependencies?: TargetOperationDependencies,
+) {
+  return Effect.gen(function* () {
+    const operation = yield* createTargetOperation(
+      rootDir,
+      targetName,
+      { dryRun: true },
+      dependencies,
+    );
+    if (!supportsShell(operation.driver)) {
+      return yield* unsupported(operation.driver.id, "interactive shells");
+    }
+    yield* operation.driver.shell(operationInputWithState(operation));
   }).pipe(Effect.scoped);
 }
 

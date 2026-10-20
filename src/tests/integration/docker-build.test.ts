@@ -1,14 +1,19 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { buildPlan } from "../../builder/index.js";
+import { createPlan, type RuntimeTarget } from "../../core/plan.js";
 import { generateCompose } from "../../docker/generators/compose.js";
 import { generateDockerfile } from "../../docker/generators/dockerfile.js";
 import { generateHealthcheckScripts } from "../../docker/generators/healthchecks.js";
 import { generateInContainerServiceFiles } from "../../docker/generators/services.js";
 import { generateStartupScript } from "../../docker/generators/startup.js";
 import { generateSupervisordConf } from "../../docker/generators/supervisor.js";
+import { renderCommonArtifacts, writeArtifacts } from "../../runtime/artifacts.js";
+import { runtimeLayout } from "../../runtime/layout.js";
 
 function hasDocker(): boolean {
   try {
@@ -88,6 +93,77 @@ function createProject(dir: string, files: Record<string, string>): void {
 const describeIntegration = hasDocker() ? describe : describe.skip;
 
 describeIntegration("docker build integration", () => {
+  it("builds a self-contained ECS upload image with the AWS artifact client", () => {
+    const dir = mkdtempSync(join(tmpdir(), "biodome-ecs-image-"));
+    const target: RuntimeTarget = {
+      name: "ecs-production",
+      driver: "aws-ecs",
+      options: {
+        region: "us-east-1",
+        cluster: "production",
+        repository: "123456789012.dkr.ecr.us-east-1.amazonaws.com/app",
+        executionRoleArn: { env: "ECS_EXECUTION_ROLE_ARN" },
+        subnets: ["subnet-example"],
+        securityGroups: ["sg-example"],
+        workspace: { strategy: "upload" },
+        artifactBucket: "biodome-artifacts",
+      },
+    };
+    const plan = {
+      ...createPlan("ecs-image-fixture"),
+      deployment: { target, deploymentId: "ecs-image-test" },
+    };
+    const layout = runtimeLayout(dir, target.name);
+    const imageTag = `biodome-ecs-image-test-${Date.now()}`;
+
+    try {
+      createProject(dir, {
+        "workspace-marker.txt": "uploaded workspace\n",
+        ".env": "MUST_NOT_ENTER_IMAGE=secret\n",
+        ".aws/credentials": "MUST_NOT_ENTER_IMAGE=secret\n",
+      });
+      Effect.runSync(writeArtifacts(dir, renderCommonArtifacts(plan, layout)));
+
+      execFileSync(
+        "docker",
+        ["buildx", "build", "-f", layout.host.dockerfile, "-t", imageTag, "."],
+        { cwd: dir, stdio: "inherit" },
+      );
+
+      const output = execFileSync(
+        "docker",
+        [
+          "run",
+          "--rm",
+          "--entrypoint",
+          "sh",
+          imageTag,
+          "-c",
+          [
+            'test "$(id -u)" = 10001',
+            "test \"$(cat /workspace/workspace-marker.txt)\" = 'uploaded workspace'",
+            "test -f /workspace/.biodome-build/targets/ecs-production/Dockerfile",
+            "test ! -e /workspace/.env",
+            "test ! -e /workspace/.aws/credentials",
+            "command -v aws >/dev/null",
+            "touch /workspace/runtime-write-test",
+            "rm /workspace/runtime-write-test",
+            "printf ready",
+          ].join(" && "),
+        ],
+        { cwd: dir, encoding: "utf-8" },
+      );
+      expect(output).toBe("ready");
+    } finally {
+      try {
+        execFileSync("docker", ["rmi", "-f", imageTag], { stdio: "ignore" });
+      } catch {
+        // Ignore cleanup errors.
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 300000);
+
   it("builds a generated Dockerfile for a Python project with a usable venv", async () => {
     const dir = join("/tmp", "sandbox-integration-" + Date.now());
     createProject(dir, {

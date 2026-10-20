@@ -54,7 +54,7 @@ describe("PlanBuilder", () => {
     log.mockRestore();
   });
 
-  it("composes endpoint, MCP provider, and LLM provider contributions", () => {
+  it("composes environment and external agent access without installing agents", () => {
     const builder = new PlanBuilder("/unused", "test", false, fakeProjectIO({}));
 
     builder.context.addEndpoint({ name: "api", port: 8000 });
@@ -64,10 +64,6 @@ describe("PlanBuilder", () => {
       mcpUrl: "https://mcp.atlassian.com/v1/mcp/authv2",
       credentials: { token: { env: "JIRA_TOKEN" } },
     });
-    builder.context.addLlmProvider({
-      name: "lmstudio",
-      options: { apiKey: { env: "LMSTUDIO_API_KEY" } },
-    });
     builder.context.addProcess({ name: "web", command: ["node", "server.js"], port: 3000 });
     builder.context.addS3Volume({
       name: "assets",
@@ -76,10 +72,6 @@ describe("PlanBuilder", () => {
       proxy: true,
       credentials: { accessKeyId: { env: "AWS_ACCESS_KEY_ID" } },
     });
-    builder.context.addOpencodeHarness({ name: "open" });
-    builder.context.addPiHarness({ name: "pi", apiKey: { env: "PI_API_KEY" } });
-    builder.context.addCodexHarness({ name: "codex", apiKey: { env: "CODEX_API_KEY" } });
-    builder.context.addClaudeHarness({ name: "claude", apiKey: { env: "CLAUDE_API_KEY" } });
     builder.configureMcp(3001, { token: { env: "MCP_TOKEN" } });
     builder.finalize();
 
@@ -87,13 +79,10 @@ describe("PlanBuilder", () => {
     const mcp = plan.runtime.processes.find((process) => process.name === "biodome-mcp");
     expect(plan.runtime.endpoints).toHaveLength(1);
     expect(plan.runtime.providers).toHaveLength(1);
-    expect(plan.runtime.llmProviders).toHaveLength(1);
     expect(plan.runtime.volumes).toHaveLength(1);
-    expect(plan.runtime.processes).toHaveLength(4);
-    expect(plan.runtime.agentHarnesses).toHaveLength(1);
-    expect(plan.runtime.piHarnesses).toHaveLength(1);
-    expect(plan.runtime.codexHarnesses).toHaveLength(1);
-    expect(plan.runtime.claudeHarnesses).toHaveLength(1);
+    expect(plan.runtime.processes).toHaveLength(2);
+    expect(builder.context).not.toHaveProperty("addOpencodeHarness");
+    expect(plan.runtime).not.toHaveProperty("agentHarnesses");
     expect(mcp).toMatchObject({
       mergeEnv: false,
       environment: {
@@ -102,13 +91,6 @@ describe("PlanBuilder", () => {
       },
     });
     expect(plan.runtime.environment.JIRA_TOKEN).toBeUndefined();
-    expect(plan.runtime.envVars).toContainEqual({
-      key: "LMSTUDIO_API_KEY",
-      scope: "runtime",
-      from: { env: "LMSTUDIO_API_KEY" },
-      required: undefined,
-      default: undefined,
-    });
   });
 
   it("exposes the plan only after exactly one successful finalization", () => {

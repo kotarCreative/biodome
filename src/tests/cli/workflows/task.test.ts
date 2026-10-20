@@ -8,22 +8,22 @@ import { NoOpEventStoreLive } from "../../../core/events.js";
 
 function writeProject(dir: string): void {
   const configDir = join(dir, ".biodome");
-  mkdirSync(join(configDir, "tasks"), { recursive: true });
+  mkdirSync(join(configDir, "actions"), { recursive: true });
   mkdirSync(join(configDir, "features"), { recursive: true });
   mkdirSync(join(configDir, "targets"), { recursive: true });
   writeFileSync(join(configDir, "config.json"), JSON.stringify({ project: { name: "tasks" } }));
   writeFileSync(join(configDir, "services.mjs"), "export default function services(ctx) {\n}\n");
   writeFileSync(
-    join(configDir, "features", "harnesses.mjs"),
-    'export default function harnesses(ctx) {\n  ctx.addOpencodeHarness({ name: "opencode" });\n}\n',
-  );
-  writeFileSync(
     join(configDir, "targets", "local.mjs"),
     'export default function local(ctx) {\n  ctx.useRuntime("docker-compose");\n}\n',
   );
   writeFileSync(
-    join(configDir, "tasks", "check.mjs"),
-    'export default function check(ctx) {\n  ctx.addTask({ harness: "opencode", prompt: "Say hi" });\n}\n',
+    join(configDir, "targets", "invalid-aws.mjs"),
+    'export default function invalidAws(ctx) {\n  ctx.useRuntime("aws-ecs", {});\n}\n',
+  );
+  writeFileSync(
+    join(configDir, "actions", "check.mjs"),
+    'export default function check(ctx) {\n  ctx.addAction({ command: ["npm", "test"], intent: "Check this branch" });\n}\n',
   );
 }
 
@@ -46,9 +46,32 @@ describe("task workflows", () => {
     expect(result.error).toBeUndefined();
   });
 
+  it("applies caller input, intent, and output declarations before preflight", async () => {
+    const result = await Effect.runPromise(
+      taskPlanWorkflow(rootDir, "local", "check", {
+        input: { users: 10 },
+        intent: "Measure this branch",
+        outputs: ["results/performance.json"],
+      }),
+    );
+    expect(result.executionPlan.task).toMatchObject({
+      input: { users: 10 },
+      intent: "Measure this branch",
+      artifacts: [{ path: "results/performance.json" }],
+    });
+    const defaults = await Effect.runPromise(taskPlanWorkflow(rootDir, "local", "check"));
+    expect(defaults.executionPlan.task.input).toEqual({});
+  });
+
+  it("rejects unsafe invocation output paths before starting anything", async () => {
+    await expect(
+      Effect.runPromise(taskPlanWorkflow(rootDir, "local", "check", { outputs: ["../escape"] })),
+    ).rejects.toThrow(/must not contain/);
+  });
+
   it("rejects unknown tasks", async () => {
     await expect(Effect.runPromise(taskPlanWorkflow(rootDir, "local", "missing"))).rejects.toThrow(
-      'Task "missing" not found',
+      'Action "missing" not found',
     );
   });
 
@@ -65,6 +88,19 @@ describe("task workflows", () => {
           Effect.provide(NoOpEventStoreLive("test")),
         ),
       ),
-    ).rejects.toThrow('Task "missing" not found');
+    ).rejects.toThrow('Action "missing" not found');
+  });
+
+  it("rejects malformed ECS options during plan and run preflight", async () => {
+    await expect(
+      Effect.runPromise(taskPlanWorkflow(rootDir, "invalid-aws", "check")),
+    ).rejects.toThrow(/Invalid aws-ecs target options/);
+    await expect(
+      Effect.runPromise(
+        runTaskWorkflow(rootDir, "invalid-aws", "check").pipe(
+          Effect.provide(NoOpEventStoreLive("test")),
+        ),
+      ),
+    ).rejects.toThrow(/Invalid aws-ecs target options/);
   });
 });

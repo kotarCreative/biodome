@@ -78,15 +78,6 @@ function dockerSandboxOptions(target: RuntimeTarget): DockerSandboxOptions {
   return options ?? {};
 }
 
-export function inferSbxAgent(plan: Plan): DockerSandboxOptions["agent"] {
-  const harness = plan.deployment?.task?.harness;
-  if (!harness) return "shell";
-  if (plan.runtime.codexHarnesses.some((item) => item.name === harness)) return "codex";
-  if (plan.runtime.claudeHarnesses.some((item) => item.name === harness)) return "claude";
-  if (plan.runtime.agentHarnesses.some((item) => item.name === harness)) return "opencode";
-  return "shell";
-}
-
 function resolvedDockerSandboxOptions(input: RuntimeOperationInput): DockerSandboxOptions {
   const options = dockerSandboxOptions(input.target);
   const workspace = input.executionPlan?.task.workspace.strategy;
@@ -95,7 +86,7 @@ function resolvedDockerSandboxOptions(input: RuntimeOperationInput): DockerSandb
     // Task execution must use the workspace strategy that compatibility
     // validated, rather than an independent target option.
     clone: workspace ? workspace === "clone" : options.clone,
-    agent: options.agent ?? inferSbxAgent(input.plan),
+    agent: options.agent ?? "shell",
   };
 }
 
@@ -233,7 +224,6 @@ export const dockerSandboxDriver: RuntimeDriver &
     "lifecycle.start",
     "lifecycle.stop",
     "exec.inplace",
-    "exec.pty",
     "process.signal",
     "logs.stream",
     "status.read",
@@ -459,16 +449,22 @@ export const dockerSandboxDriver: RuntimeDriver &
     const id = sandboxId(input);
     const command = ["docker", "exec", `${input.deploymentId}-dev`, ...input.command];
     const args = buildSbxExecArgs(id, command, input.timeoutMs);
-    return captureTimedExec({ command: "sbx", args, cwd: input.rootDir });
+    return captureTimedExec({
+      command: "sbx",
+      args,
+      cwd: input.rootDir,
+      timeoutMs: input.timeoutMs,
+    });
   },
 
   collectArtifacts(
-    input: RuntimeOperationInput & { paths: string[] },
+    input: RuntimeOperationInput & { paths: string[]; artifactDir?: string },
   ): Effect.Effect<Artifact[], RuntimeError, EventStore> {
     return Effect.gen(function* () {
       const id = yield* requireSandboxId(input);
       return yield* collectArtifactsByCopying({
         outputDir: input.outputDir,
+        artifactDir: input.artifactDir,
         paths: input.paths,
         copy: (path, localPath) =>
           captureCommandOutput({
@@ -501,14 +497,23 @@ export const dockerSandboxDriver: RuntimeDriver &
   },
 
   logs(
-    input: RuntimeOperationInput & { processName?: string },
+    input: RuntimeOperationInput & { processName?: string; follow?: boolean },
   ): Effect.Effect<void, RuntimeError, EventStore> {
     const logDir = runtimeLayout(input.rootDir, input.target.name).container.logs;
     const logFile = supervisordLogFile(logDir, input.processName);
     const id = sandboxId(input);
     return runProcess({
       command: "sbx",
-      args: ["exec", id, "docker", "exec", `${input.deploymentId}-dev`, "tail", "-f", logFile],
+      args: [
+        "exec",
+        id,
+        "docker",
+        "exec",
+        `${input.deploymentId}-dev`,
+        "tail",
+        ...(input.follow === false ? ["-n", "200"] : ["-f"]),
+        logFile,
+      ],
       cwd: input.rootDir,
     });
   },

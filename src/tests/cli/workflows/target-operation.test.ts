@@ -17,6 +17,7 @@ import type {
   StartableDriver,
   StatusDriver,
   StoppableDriver,
+  TargetValidatingDriver,
 } from "../../../runtime/driver.js";
 import { createTargetOperation } from "../../../cli/target-operation.js";
 import {
@@ -27,6 +28,7 @@ import {
   psWorkflow,
   restartWorkflow,
   statusWorkflow,
+  shellWorkflow,
   upWorkflow,
 } from "../../../cli/workflows/target.js";
 import { targetValidateWorkflow } from "../../../cli/workflows/config.js";
@@ -83,6 +85,15 @@ function dependencies(runtimeDriver = driver()) {
 }
 
 describe("target workflows", () => {
+  it("rejects unsupported interactive sessions without touching deployment state", async () => {
+    await expect(
+      Effect.runPromise(
+        shellWorkflow("/project", "local", dependencies()).pipe(
+          Effect.provide(NoOpEventStoreLive("test")),
+        ),
+      ),
+    ).rejects.toThrow(/does not support interactive shells/);
+  });
   it("assembles target operations through the injected registry", async () => {
     const deps = dependencies();
     const operation = await Effect.runPromise(
@@ -122,6 +133,64 @@ describe("target workflows", () => {
     } finally {
       rmSync(rootDir, { recursive: true, force: true });
     }
+  });
+
+  it("runs provider validation before availability and rendering", async () => {
+    const base = driver();
+    const order: string[] = [];
+    const runtimeDriver = {
+      ...base,
+      validateTarget: () =>
+        Effect.sync(() => {
+          order.push("validate");
+        }),
+      ensureAvailable: () =>
+        Effect.sync(() => {
+          order.push("ensure");
+        }),
+      render: () =>
+        Effect.sync(() => {
+          order.push("render");
+          return [];
+        }),
+      build: () =>
+        Effect.sync(() => {
+          order.push("build");
+          return {};
+        }),
+    } satisfies TestDriver & TargetValidatingDriver;
+    const rootDir = mkdtempSync(join(tmpdir(), "biodome-validated-build-"));
+    try {
+      await Effect.runPromise(
+        buildWorkflow(rootDir, "local", dependencies(runtimeDriver)).pipe(
+          Effect.provide(NoOpEventStoreLive("test")),
+        ),
+      );
+      expect(order).toEqual(["validate", "ensure", "render", "build"]);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses side-effect-free provider validation in target validate", async () => {
+    const validateTarget = vi.fn(() =>
+      Effect.fail(new RuntimeError({ message: "invalid provider options" })),
+    );
+    const ensureAvailable = vi.fn(() => Effect.void);
+    const render = vi.fn(() => Effect.succeed<string[]>([]));
+    const runtimeDriver = {
+      ...driver(),
+      validateTarget,
+      ensureAvailable,
+      render,
+    } satisfies TestDriver & TargetValidatingDriver;
+
+    await expect(
+      Effect.runPromise(targetValidateWorkflow("/tmp", "local", dependencies(runtimeDriver))),
+    ).rejects.toThrow(/invalid provider options/);
+    expect(validateTarget).toHaveBeenCalledOnce();
+    expect(ensureAvailable).not.toHaveBeenCalled();
+    expect(render).not.toHaveBeenCalled();
   });
 
   it("rejects unsupported local target requirements before availability checks", async () => {

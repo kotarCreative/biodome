@@ -1,4 +1,6 @@
 import { Effect, Option, Stream } from "effect";
+import { CommandOutput } from "../core/command-output.js";
+import { ProcessOutput, type OutputStream } from "../core/process-output.js";
 import type { PlatformError } from "effect/PlatformError";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import { NodeRuntime } from "../core/runtime-node.js";
@@ -101,14 +103,43 @@ export function hostIdentityMappingEnv(): Record<string, string> {
  */
 export function runProcess(options: ProcessOptions): Effect.Effect<void, RuntimeError, never> {
   return Effect.gen(function* () {
+    const output = yield* Effect.serviceOption(CommandOutput);
+    const observer = yield* Effect.serviceOption(ProcessOutput);
+    const sink = Option.isSome(observer) ? observer.value : undefined;
+    const redirect = Option.isSome(output) && output.value.progressToStderr;
     const handle = yield* ChildProcess.make(options.command, options.args, {
       cwd: options.cwd,
       env: mergedEnv(options.env),
       stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
+      stdout: redirect || sink ? "pipe" : "inherit",
+      stderr: sink ? "pipe" : "inherit",
     });
-    const exitCode = yield* handle.exitCode;
+    const [exitCode] = yield* Effect.all(
+      [
+        handle.exitCode,
+        redirect || sink
+          ? Stream.runForEach(handle.stdout, (chunk) =>
+              Effect.gen(function* () {
+                if (sink) yield* sink.write("stdout", chunk);
+                yield* Effect.sync(() => {
+                  (redirect ? process.stderr : process.stdout).write(chunk);
+                });
+              }),
+            ).pipe(Effect.andThen(sink ? sink.end("stdout") : Effect.void))
+          : Effect.void,
+        sink
+          ? Stream.runForEach(handle.stderr, (chunk) =>
+              Effect.gen(function* () {
+                yield* sink.write("stderr", chunk);
+                yield* Effect.sync(() => {
+                  process.stderr.write(chunk);
+                });
+              }),
+            ).pipe(Effect.andThen(sink.end("stderr")))
+          : Effect.void,
+      ],
+      { concurrency: "unbounded" },
+    );
     if (exitCode !== 0) {
       return yield* new RuntimeError({
         message: `exited with code ${exitCode}`,
@@ -142,19 +173,23 @@ export interface CapturedOutput {
 function collectBoundedOutput(
   stream: Stream.Stream<Uint8Array, PlatformError>,
   maxBytes: number,
+  outputStream: OutputStream,
+  observer?: ProcessOutput,
 ): Effect.Effect<string, PlatformError> {
-  return Stream.runFold(
-    stream,
-    () => ({ chunks: [] as Uint8Array[], size: 0 }),
-    (output, chunk) => {
+  const output = { chunks: [] as Uint8Array[], size: 0 };
+  return Stream.runForEach(stream, (chunk) =>
+    Effect.gen(function* () {
+      if (observer) yield* observer.write(outputStream, chunk);
       const remaining = maxBytes - output.size;
-      if (remaining <= 0) return output;
+      if (remaining <= 0) return;
       const retained = chunk.byteLength > remaining ? chunk.subarray(0, remaining) : chunk;
       output.chunks.push(retained);
       output.size += retained.byteLength;
-      return output;
-    },
-  ).pipe(Effect.map(({ chunks, size }) => Buffer.concat(chunks, size).toString("utf8")));
+    }),
+  ).pipe(
+    Effect.andThen(observer ? observer.end(outputStream) : Effect.void),
+    Effect.map(() => Buffer.concat(output.chunks, output.size).toString("utf8")),
+  );
 }
 
 /**
@@ -166,6 +201,8 @@ export function captureProcess(
 ): Effect.Effect<CapturedOutput, RuntimeError, never> {
   const maxBytes = options.maxBytes ?? MAX_BUFFER_BYTES;
   return Effect.gen(function* () {
+    const observer = yield* Effect.serviceOption(ProcessOutput);
+    const sink = Option.isSome(observer) ? observer.value : undefined;
     const handle = yield* ChildProcess.make(options.command, options.args, {
       cwd: options.cwd,
       env: mergedEnv(options.env),
@@ -176,8 +213,8 @@ export function captureProcess(
     const wait = Effect.all(
       [
         handle.exitCode,
-        collectBoundedOutput(handle.stdout, maxBytes),
-        collectBoundedOutput(handle.stderr, maxBytes),
+        collectBoundedOutput(handle.stdout, maxBytes, "stdout", sink),
+        collectBoundedOutput(handle.stderr, maxBytes, "stderr", sink),
       ],
       { concurrency: "unbounded" },
     );

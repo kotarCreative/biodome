@@ -19,7 +19,7 @@ function mountIdentityOf(plan: Plan): RuntimeIdentity | undefined {
  *  - grant non-root identities read access to the generated tree with mode
  *    changes only (never recursive chown: the tree may be a host bind mount
  *    whose ownership must stay with the host user),
- *  - make container-owned writable state (logs, harness homes) group-shared,
+ *  - make container-owned logs group-shared,
  *  - warn deterministically when the workspace remains unwritable.
  */
 function initializeIdentities(lines: string[], plan: Plan): void {
@@ -83,12 +83,7 @@ function initializeIdentities(lines: string[], plan: Plan): void {
   // Writable state lives in biodome-generated directories. Sharing happens
   // through the runtime group so the host owner is never replaced.
   lines.push(`mkdir -p ${q(logDir)}`);
-  const writableStateDirs = [
-    logDir,
-    ...["opencode-homes", "pi-homes", "codex-homes", "claude-homes"].map(
-      (dir) => `${runtimeDir}/${dir}`,
-    ),
-  ];
+  const writableStateDirs = [logDir];
   for (const stateDir of writableStateDirs) {
     lines.push(`if [ -d ${q(stateDir)} ]; then`);
     lines.push(`  chgrp -R "$BIODOME_RUNTIME_GID" ${q(stateDir)}`);

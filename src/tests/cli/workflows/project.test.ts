@@ -48,7 +48,7 @@ describe("initWorkflow", () => {
     expect(existsSync(join(rootDir, ".biodome", "features", "auto-detect.mjs"))).toBe(true);
     expect(existsSync(join(rootDir, ".biodome", "targets", "local.mjs"))).toBe(true);
     expect(existsSync(join(rootDir, ".biodome", "apps", ".gitkeep"))).toBe(true);
-    expect(existsSync(join(rootDir, ".biodome", "tasks", ".gitkeep"))).toBe(true);
+    expect(existsSync(join(rootDir, ".biodome", "actions", ".gitkeep"))).toBe(true);
   });
 
   it("creates a minimal scaffold in bare mode", () => {

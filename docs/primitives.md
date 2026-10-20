@@ -1,841 +1,106 @@
 # Primitives
 
-Primitives are the building blocks of a biodome. You add them through the context object passed to your feature modules.
-
-## `addProcess(spec)`
-
-Declares a long-running process managed by `supervisord` inside the dev container. Daemon processes are started automatically when the container starts, expose ports on host loopback (`127.0.0.1`), and can have health checks.
+Each `.biodome/features/*.mjs` file contributes to one environment. Declare what
+the project needs rather than maintaining generated Docker and supervisor files.
 
 ```javascript
-export default function django(ctx) {
-  ctx.addProcess({
-    name: "django",
-    command: ["python", "manage.py", "runserver", "0.0.0.0:8000"],
-    port: 8000,
-    healthCheck: {
-      type: "http",
-      url: "http://localhost:8000/admin/login/",
-      interval: "5s",
-      timeout: "3s",
-      retries: 10,
-    },
-    environment: { DEBUG: "1" },
-  });
-}
-```
-
-- `name` — unique identifier.
-- `command` — array of command arguments.
-- `port` — single port to expose (host and container use the same port).
-- `ports` — named ports, e.g. `{ app: 8000, debug: 5678 }`.
-- `environment` — environment variables for the process.
-- `workingDir` — working directory inside the container.
-- `healthCheck` — see [health checks](#health-checks).
-- `mode` — defaults to `"daemon"`. Set to `"oneshot"` for a one-shot command.
-- `startOn` — lifecycle point for one-shot commands. Defaults to `"start.post"`.
-
-## `addHook(spec)`
-
-Sugar for `addProcess({ mode: "oneshot", ... })`. Hooks run once at a specific lifecycle point.
-
-```javascript
-export default function migrate(ctx) {
-  ctx.addHook({
-    name: "migrate",
-    command: ["python", "manage.py", "migrate"],
-    startOn: "start.post",
-  });
-}
-```
-
-Lifecycle points:
-
-- `build.pre` / `build.post`
-- `start.pre` / `start.post`
-- `stop.pre` / `stop.post`
-- `exec.pre` / `exec.post`
-
-## `addLanguage(name, options)`
-
-Adds a language runtime and configures dependency installation.
-
-```javascript
-export default function stack(ctx) {
-  ctx.addLanguage("python", { version: "3.12" });
-  ctx.addLanguage("node", { version: "20", packageManager: "pnpm" });
-  ctx.addLanguage("php", { version: "8.3" });
-}
-```
-
-Language setup affects:
-
-- The base Docker image.
-- Which manifest files are copied.
-- How dependencies are installed.
-- What artifacts are copied into the final dev stage.
-
-Manifest files are detected from the project root. For example, Node.js uses `npm ci` when `package-lock.json` exists and falls back to `npm install` when only `package.json` exists. PHP projects use `composer install` when `composer.json` is present. If no manifest is present, only the base image is configured and no dependency install step is emitted.
-
-When multiple languages are requested, the CLI uses a neutral base image (`debian:12-slim`) and installs every runtime on top of it, so processes can use any combination of languages in the same container.
-
-## `addPackage(manager, name, options)`
-
-Installs a package through a language-specific package manager.
-
-```javascript
-export default function packages(ctx) {
-  ctx.addPackage("npm", "typescript", { version: "5.4" });
-  ctx.addPackage("pip", "django", { version: "5.0" });
-  ctx.addPackage("cargo", "ripgrep");
-  ctx.addPackage("go", "github.com/air-verse/air");
-}
-```
-
-- `options.version` pins a version where the manager supports it.
-
-## `addTool(name, options)`
-
-Installs a CLI tool or system package. Well-known tools use custom install scripts; unknown names are treated as apt packages.
-
-```javascript
-export default function tools(ctx) {
-  ctx.addTool("gh");
-  ctx.addTool("kubectl");
-  ctx.addTool("terraform");
-  ctx.addTool("psql");
-  ctx.addTool("redis-cli");
-  ctx.addTool("docker");
-
-  // Unknown names are installed via apt.
+export default function web(ctx) {
+  ctx.addLanguage("node", { version: "22", packageManager: "npm" });
   ctx.addTool("curl");
-  ctx.addTool("git");
+  ctx.addProcess({
+    name: "web",
+    command: ["npm", "run", "dev"],
+    port: 3000,
+    healthCheck: { type: "http", url: "http://localhost:3000/health" },
+  });
+}
+```
+
+## Languages, packages, and tools
+
+`addLanguage(name, { version, packageManager })` selects the runtime and derives
+dependency installation from project manifests. `addPackage(manager, name,
+{ version })` adds tooling through a package manager. `addTool(name, options?)`
+adds a supported tool or system package. Declare only what you need: image
+generation and dependency layers stay Biodome's responsibility.
+
+```javascript
+export default function backend(ctx) {
+  ctx.addLanguage("python", { version: "3.12" });
+  ctx.addPackage("pip", "pytest");
   ctx.addTool("libpq-dev");
 }
 ```
 
-## `addService(name, options)`
-
-Declares a backing service. Services run as managed, ephemeral processes inside
-the dev image under dedicated system accounts — a deployment is exactly one
-image, with no sidecar containers. Supported types: `postgres` and `redis`.
-Use an external provider primitive when a task needs a managed or persistent
-database. See [services in file-layout.md](file-layout.md) for details.
-
-The built-in profiles are tuned for short-lived coding tasks: Postgres limits
-connections and memory, disables autovacuum, replication, and durable WAL
-flushes, and stores data under `/tmp`; Redis disables snapshots and append-only
-persistence with data under `/tmp`. Do not use them for data that must survive
-an unexpected container stop.
+## Services
 
 ```javascript
+// .biodome/services.mjs
 export default function services(ctx) {
   ctx.addService("postgres", {
-    port: 5432,
-    databases: [{ name: "myapp" }],
-    users: [{ name: "myapp", password: "devpassword" }],
-    extensions: ["postgis", "pgcrypto"],
+    databases: [{ name: "app" }],
+    users: [{ name: "app", password: { env: "DATABASE_PASSWORD" } }],
+    extensions: ["pgcrypto", "pg_trgm"],
   });
-
-  ctx.addService("redis", { port: 6379 });
+  ctx.addService("redis");
 }
 ```
 
-Postgres extensions are installed and enabled in the configured database during
-startup. Supported extensions are `citext`, `hstore`, `ltree`, `pg_trgm`,
-`pgcrypto`, `postgis`, `postgis_raster`, `postgis_topology`, `unaccent`, and
-`uuid-ossp`. PostGIS extensions install `postgresql-postgis`; the others install
-`postgresql-contrib`. Duplicate or unsupported extension names are rejected.
+Postgres and Redis run as supervised processes in the environment. Database data
+is ephemeral by default. Service configuration derives initialization and
+connection information; `biodome info` describes the environment.
 
-Each service's declared port is published from the dev container on host
-loopback (`127.0.0.1`) so host tooling keeps working and the port is never
-reachable from other machines; inside the environment the service is reachable
-on `localhost`.
+## Processes, lifecycle hooks, and actions
 
-## `addEndpoint(spec)`
-
-Declares an agent-discoverable endpoint — a custom API or resource a feature stands up — along with how to reach it and any credentials needed to use it. Endpoints appear in `biodome info`, the generated `AGENTS.md`, `.biodome-build/plan.json`, and the MCP `get_endpoints` tool, so an agent can discover the port, URL, credentials, and metadata for a service you created.
+`addProcess()` runs a daemon; `addHook()` runs a command at a lifecycle point.
+Both accept argv commands, scoped environment variables, and a working directory.
+Health checks support HTTP, TCP, and command probes.
 
 ```javascript
-export default function djangoApi(ctx) {
-  ctx.addEndpoint({
-    name: "django-api",
-    description: "Django REST API",
-    url: "http://localhost:8000",
-    port: 8000,
-    credentials: {
-      username: "admin",
-      // Env references are resolved from the running container at request time,
-      // so the secret is never written into plan.json.
-      password: { env: "DJANGO_ADMIN_PASSWORD" },
-      token: { env: "DJANGO_API_TOKEN" },
-    },
-    metadata: { framework: "django", docsPath: "/api/schema" },
+export default function seed(ctx) {
+  ctx.addHook({
+    name: "seed",
+    command: ["node", "scripts/seed.mjs"],
+    startOn: "start.pre",
+    intent: "Prepare test accounts",
+    input: { fixture: "checkout" },
+    outputs: ["results/seed.json"],
   });
 }
 ```
 
-- `name` — unique identifier.
-- `description` — optional human-readable summary.
-- `url` — optional address the endpoint is reachable at.
-- `port` — optional port the endpoint listens on.
-- `credentials` — optional map of named credentials. Each value is either a literal string or an `{ env: "VAR_NAME" }` reference.
-- `metadata` — optional map of free-form string key/value pairs for anything that doesn't fit the fields above.
+For an on-demand command, use `addAction()` in `.biodome/actions/`. See
+[actions](actions.md) for input/output delivery and QA/performance examples.
 
-### Credentials and secrets
-
-Credential values can be plain strings or environment-variable references:
-
-- **Literal** (`password: "devpassword"`) — stored verbatim. Convenient for throwaway local dev values, but it is written to `.biodome-build/plan.json` and surfaced by every info surface.
-- **Env reference** (`password: { env: "DJANGO_ADMIN_PASSWORD" }`) — the secret stays out of `plan.json` and the generated `AGENTS.md` (they show `$DJANGO_ADMIN_PASSWORD`). The MCP `get_endpoints` tool resolves the reference from the container's live environment when an agent asks, so real secrets are never persisted on disk.
-
-Prefer env references for anything sensitive.
-
-## `addProvider(spec)`
-
-Declares an external provider — a well-known SaaS API such as Jira, GitHub, or Slack. Providers are surfaced in `biodome info`, the generated `AGENTS.md`, `.biodome-build/plan.json`, and the MCP `get_providers` tool. When MCP is enabled and at least one provider is declared, the server exposes code-mode tools that aggregate successfully connected upstream MCP providers. A provider needs an `mcpUrl` and a resolvable configured credential to connect.
+## Repositories
 
 ```javascript
-export default function providers(ctx) {
-  ctx.addProvider({
-    name: "github",
-    type: "github",
-    url: "https://api.github.com",
-    credentials: {
-      token: { env: "GITHUB_TOKEN" },
-    },
-    metadata: { org: "acme" },
-  });
-}
+ctx.addRepo({
+  name: "backend",
+  url: "https://github.com/acme/backend.git",
+  branch: "feature/checkout",
+  path: "repos/backend",
+  credentials: { token: { env: "GITHUB_TOKEN" } },
+});
 ```
 
-- `name` — unique identifier.
-- `type` — provider type, e.g. `"jira"`, `"github"`, `"slack"`.
-- `url` — optional instance/base API URL.
-- `project` — optional project, team, or workspace scope.
-- `mcpUrl` — optional remote MCP endpoint the biodome-mcp aggregator connects to.
-- `authHeader` — header name for the credential (default `"Authorization"`).
-- `authScheme` — prefix prepended to the credential when sending (default `"Bearer "`).
-- `authCredential` — which key in `credentials` holds the token (default `"token"`).
-- `credentials` — map of named credentials. Each value is either a literal string or an `{ env: "VAR_NAME" }` reference.
-- `metadata` — optional map of free-form string key/value pairs.
-
-### Code mode
-
-When MCP is enabled and providers are declared, the server exposes these provider tools regardless of how many upstream tools are connected:
-
-- `provider_search` — discover available tools across all providers by keyword
-- `provider_describe` — get the full input schema for a specific tool
-- `provider_execute` — call a tool by its qualified name (`provider.tool`)
-
-Credentials are attached by the biodome-mcp server and never reach the agent or its container.
-
-## `addMcpProvider(spec)`
-
-Generic helper for declaring a remote MCP provider. Connects to a provider-hosted MCP endpoint and exposes all its tools through the code-mode facade.
-
-```javascript
-export default function sentry(ctx) {
-  ctx.addMcpProvider({
-    name: "sentry",
-    type: "sentry",
-    mcpUrl: "https://mcp.sentry.dev/mcp",
-    credentials: { token: { env: "SENTRY_TOKEN" } },
-  });
-}
-```
-
-- `name` — unique identifier.
-- `type` — provider type label.
-- `mcpUrl` — vendor MCP endpoint URL.
-- `authHeader` — header name (default `"Authorization"`).
-- `authScheme` — scheme prefix (default `"Bearer "`).
-- `project` — optional project or workspace scope.
-- `credentials.token` — the credential value (literal or `{ env }` reference).
-- `metadata` — optional free-form key/value pairs.
-
-## Sugar helpers
-
-These helpers preset the vendor MCP URL and credential key, and delegate to `addMcpProvider`.
-
-### `addJiraProvider(spec)`
-
-```javascript
-export default function jira(ctx) {
-  ctx.addJiraProvider({
-    name: "jira",
-    project: "PROJ",
-    credentials: { token: { env: "JIRA_TOKEN" } },
-  });
-}
-```
-
-Defaults `mcpUrl` to `https://mcp.atlassian.com/v1/mcp/authv2`.
-
-### `addLinearProvider(spec)`
-
-```javascript
-export default function linear(ctx) {
-  ctx.addLinearProvider({
-    name: "linear",
-    team: "TEAM",
-    credentials: { token: { env: "LINEAR_TOKEN" } },
-  });
-}
-```
-
-Defaults `mcpUrl` to `https://mcp.linear.app/mcp`. Accepts `team` (maps to `project`).
-
-### `addSentryProvider(spec)`
-
-```javascript
-export default function sentry(ctx) {
-  ctx.addSentryProvider({
-    name: "sentry",
-    credentials: { token: { env: "SENTRY_TOKEN" } },
-  });
-}
-```
-
-Defaults `mcpUrl` to `https://mcp.sentry.dev/mcp`.
-
-### `addSlackProvider(spec)`
-
-```javascript
-export default function slack(ctx) {
-  ctx.addSlackProvider({
-    name: "slack",
-    mcpUrl: "https://slack.example.com/mcp",
-    credentials: { token: { env: "SLACK_TOKEN" } },
-  });
-}
-```
-
-`mcpUrl` is **required** — there is no stable public default.
-
-### `addGithubProvider(spec)`
-
-```javascript
-export default function github(ctx) {
-  ctx.addGithubProvider({
-    name: "github",
-    credentials: { token: { env: "GITHUB_TOKEN" } },
-  });
-}
-```
-
-Defaults `mcpUrl` to `https://api.githubcopilot.com/mcp/`.
-
-## `addEnv(key, spec)`
-
-Declares an environment variable. A variable is either a **literal** value or a **passthrough** reference that is resolved from the host at `up` time — the safe way to inject secrets without baking them into the image or `plan.json`.
-
-```javascript
-export default function env(ctx) {
-  // Literal, non-secret config. Baked into the image / plan.
-  ctx.addEnv("DEBUG", { value: "1" });
-
-  // Passthrough: value is read from the host's DATABASE_URL at `up` time and is
-  // NEVER written to the Dockerfile or plan.json.
-  ctx.addEnv("DATABASE_URL", { from: { env: "DATABASE_URL" }, required: true });
-
-  // Passthrough with a fallback default.
-  ctx.addEnv("PORT", { from: { env: "PORT" }, default: "8000" });
-
-  // Build-time-only literal.
-  ctx.addEnv("PIP_INDEX_URL", { value: "https://pypi.org/simple", scope: "build" });
-}
-```
-
-The spec accepts exactly one of:
-
-- `value` — a literal string. Stored in the plan and baked into the image `ENV` layer / compose file.
-- `from` — one of:
-  - `{ env: "VAR_NAME" }`, passed through from the host environment via compose interpolation. The value is never persisted.
-  - `{ secretArn: "arn:<aws-partition>:secretsmanager|ssm:..." }`, an AWS-managed secret (Secrets Manager secret or SSM Parameter Store parameter). The `aws-ecs` target injects it natively at task launch via the ECS `secrets` field, so the value is never stored in the task definition; local Compose targets resolve it from a host variable named after the key and fail loudly when it is unset.
-
-Plus:
-
-- `scope` — `"runtime"` (default), `"build"`, or `"both"`. Controls whether the variable is available at image build time, container runtime, or both.
-- `required` — passthrough only. Fails `biodome up` if the host variable is unset.
-- `default` — passthrough only. Fallback used when the host variable is unset or empty.
-
-Keys must match `[A-Za-z_][A-Za-z0-9_]*`, and each key may only be declared once.
-
-### Literal vs passthrough
-
-Use `value` for non-secret configuration you're happy to see in the built image and `plan.json`. Use `from` for anything sensitive (API keys, database URLs, tokens): passthrough variables are emitted as `${VAR}` interpolations in the generated compose file and resolved from the host shell / `.env` at `up` time, so the secret never lands in a committed artifact.
-
-### AWS-managed secrets
-
-For `aws-ecs` deployments, prefer `{ secretArn }` over literals: ECS injects the value from Secrets Manager or SSM Parameter Store when the task starts, so nothing sensitive persists in the task definition (or its revision history). The execution role needs `secretsmanager:GetSecretValue` (and `kms:Decrypt` when the secret uses a customer-managed KMS key) or `ssm:GetParameter*` on the referenced ARN. Service credentials such as the Postgres password accept the same reference (`addService("postgres", { password: { secretArn } })`) and are injected under their container environment name automatically.
-
-One ARN-backed variable can back every other primitive that resolves secrets from the container environment: declare `ctx.addEnv("ACME_TOKEN", { from: { secretArn } })` once, then reference `{ env: "ACME_TOKEN" }` in repository credentials, volume credentials, provider options, or harness API keys. Where those primitives would normally declare the passthrough themselves (e.g. `apiKey: { env: "VAR" }`), an existing declaration for the same variable wins instead of conflicting.
-
-## `addVolume(spec)`
-
-Mounts data into Docker-based targets as a live read/write access point. Supports local bind mounts and cloud or network storage via `rclone`. No files are copied into the container. AWS ECS does not support mounted volumes.
-
-```javascript
-export default function volumes(ctx) {
-  // Local bind mount
-  ctx.addVolume({
-    name: "data",
-    type: "local",
-    source: "./data",
-    target: "/workspace/data",
-  });
-
-  // S3 bucket or prefix mount
-  ctx.addVolume({
-    name: "s3-data",
-    type: "s3",
-    bucket: "my-bucket",
-    prefix: "data/",
-    target: "/workspace/s3-data",
-    credentials: {
-      accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
-      secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
-    },
-  });
-
-  // S3-compatible service (MinIO, Wasabi, Cloudflare R2, ...)
-  ctx.addVolume({
-    name: "minio",
-    type: "s3",
-    bucket: "my-bucket",
-    target: "/workspace/minio",
-    credentials: {
-      accessKeyId: { env: "MINIO_ACCESS_KEY" },
-      secretAccessKey: { env: "MINIO_SECRET_KEY" },
-      endpoint: "http://minio:9000",
-    },
-  });
-
-  // Dropbox mount
-  ctx.addVolume({
-    name: "dropbox",
-    type: "dropbox",
-    path: "/Projects",
-    target: "/workspace/dropbox",
-    credentials: { token: { env: "DROPBOX_TOKEN" } },
-  });
-
-  // Google Drive mount
-  ctx.addVolume({
-    name: "gdrive",
-    type: "gdrive",
-    path: "/Documents",
-    target: "/workspace/gdrive",
-    credentials: {
-      clientId: { env: "GDRIVE_CLIENT_ID" },
-      clientSecret: { env: "GDRIVE_CLIENT_SECRET" },
-      token: { env: "GDRIVE_TOKEN" },
-    },
-  });
-}
-```
-
-- `name` — unique identifier.
-- `type` — `"local"`, `"s3"`, `"gcs"`, `"azure"`, `"sftp"`, `"smb"`, `"webdav"`, `"dropbox"`, or `"gdrive"`.
-- `target` — absolute path inside a Docker-based target.
-- `source` — local host path for `type: "local"`. Relative paths are resolved from the project root.
-- `bucket` / `prefix` — S3 or GCS location. Mount a prefix to access specific files inside it.
-- `account` / `container` / `path` — Azure Blob location.
-- `host` / `port` / `path` — SFTP location.
-- `host` / `share` — SMB share.
-- `url` / `path` / `vendor` — WebDAV location.
-- `path` — remote folder path for Dropbox or Google Drive.
-- `credentials` — map of provider credentials. Each value is either a literal string or an `{ env: "VAR_NAME" }` reference. Env references are resolved from the host at `up` time and never written to the generated files.
-- `options.readOnly` — set to `true` for a read-only local or `rclone` mount.
-- `directMount` — cloud volumes only. Explicit opt-in to a direct in-container FUSE mount (requires `SYS_ADMIN`; see the risk note below). Omit it and use `proxy: true` unless you have a tested workflow that needs the kernel-level mount.
-
-Cloud-backed volumes on Docker-based targets install `rclone` and `fuse3` and run an `rclone mount` daemon process under a dedicated non-root mount identity. Files are read and written directly against the remote source. Direct mounts require an explicit `directMount: true` opt-in because they need the `SYS_ADMIN` capability inside the dev container — that grants broad kernel access and is an explicitly unsafe mode; validation rejects direct mounts without it and emits a deterministic warning when enabled. **Proxy mode** (see below) is the recommended approach for agent workloads — it avoids granting any container-level capabilities.
-
-### Proxy mode (agent-safe access)
-
-By default, cloud volumes are mounted inside the dev container, so any process or agent in the container can read them. If you want to keep credentials and data access away from the sandbox, enable **proxy mode**:
-
-```javascript
-export default function volumes(ctx) {
-  ctx.addS3Volume({
-    name: "s3-data",
-    bucket: "my-bucket",
-    prefix: "reports/",
-    target: "/workspace/s3-data",
-    proxy: true,
-    readOnly: true,
-    allowedPaths: ["reports/**/*.pdf"],
-    credentials: {
-      accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
-      secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
-    },
-  });
-}
-```
-
-In proxy mode:
-
-- The volume is **not mounted** in the dev container.
-- Credentials are passed only to the MCP server process, never to the dev container's global environment.
-- Agents access files through MCP tools: `list_volumes`, `list_files`, `read_file`, `write_file`, `stat_file`.
-- Access rules are enforced by the MCP server (`allowedPaths`, `readOnly`).
-- **`allowedPaths` defaults to deny-all.** Without an explicit glob pattern like `["**"]`, no paths are accessible. This is a security-hardened default; existing proxy volume configurations must add an explicit `allowedPaths` entry.
-
-Proxy mode is supported only for `local`, `s3`, `gcs`, and `azure` volumes. Other volume types must use a non-proxy Docker-based mount; they cannot be proxied through MCP.
-
-### Volume wrappers
-
-For a simpler DX you can use provider-specific wrappers. They delegate to `addVolume` but accept friendlier field names.
-
-```javascript
-export default function volumes(ctx) {
-  ctx.addLocalVolume({ name: "data", source: "./data", target: "/workspace/data" });
-
-  ctx.addS3Volume({
-    name: "s3-data",
-    bucket: "my-bucket",
-    prefix: "data/",
-    target: "/workspace/s3-data",
-    credentials: {
-      accessKeyId: { env: "AWS_ACCESS_KEY_ID" },
-      secretAccessKey: { env: "AWS_SECRET_ACCESS_KEY" },
-    },
-  });
-
-  ctx.addGcsVolume({
-    name: "gcs-data",
-    bucket: "my-bucket",
-    prefix: "data/",
-    target: "/workspace/gcs-data",
-    credentials: { token: { env: "GCS_TOKEN" } },
-  });
-
-  ctx.addAzureVolume({
-    name: "azure-data",
-    account: "myaccount",
-    container: "mycontainer",
-    path: "data/",
-    target: "/workspace/azure-data",
-    credentials: { accountKey: { env: "AZURE_KEY" } },
-  });
-
-  ctx.addSftpVolume({
-    name: "sftp-data",
-    host: "files.example.com",
-    path: "/srv/data",
-    target: "/workspace/sftp-data",
-    credentials: { user: "admin", password: { env: "SFTP_PASS" } },
-  });
-
-  ctx.addSmbVolume({
-    name: "smb-data",
-    host: "nas.local",
-    share: "shared",
-    target: "/workspace/smb-data",
-    credentials: { user: { env: "SMB_USER" }, password: { env: "SMB_PASS" } },
-  });
-
-  ctx.addWebdavVolume({
-    name: "webdav-data",
-    url: "https://cloud.example.com/webdav",
-    path: "projects",
-    target: "/workspace/webdav-data",
-    credentials: { user: "admin", password: { env: "WEBDAV_PASS" } },
-  });
-
-  ctx.addDropboxVolume({
-    name: "dropbox",
-    path: "/Projects",
-    target: "/workspace/dropbox",
-    credentials: { token: { env: "DROPBOX_TOKEN" } },
-  });
-
-  ctx.addGdriveVolume({
-    name: "gdrive",
-    path: "/Documents",
-    target: "/workspace/gdrive",
-    credentials: {
-      clientId: { env: "GDRIVE_CLIENT_ID" },
-      clientSecret: { env: "GDRIVE_CLIENT_SECRET" },
-      token: { env: "GDRIVE_TOKEN" },
-    },
-  });
-}
-```
-
-## `addRepo(spec)`
-
-Declares a Git repository that should be cloned into the sandbox. Before managed processes start, biodome runs a generated `start.pre` hook that clones the repo if it is not present, or fetches, checks out, and pulls the tracked branch if it already is. It then installs dependencies from that repository using its declared Python and Node runtimes. This is useful for polyglot or microservice projects where the agent needs multiple repositories side by side.
-
-```javascript
-export default function repos(ctx) {
-  ctx.addRepo({
-    name: "backend",
-    url: "https://github.com/acme/backend.git",
-    branch: "main",
-    path: "backend",
-  });
-
-  ctx.addRepo({
-    name: "frontend",
-    url: "https://github.com/acme/frontend.git",
-    branch: "develop",
-    path: "frontend",
-  });
-}
-```
-
-- `name` — unique identifier for the repo.
-- `url` — Git clone URL (`https://...` or `git@...`).
-- `branch` — branch to track. Defaults to `"main"`.
-- `path` — target directory inside the sandbox. Relative paths are resolved under `/workspace`; absolute paths are used as-is. Defaults to `/workspace/repos/<name>`.
-- `depth` — optional shallow clone depth (e.g. `1`).
-- `credentials` — optional authentication.
-  - `token` — for HTTPS URLs. Must be an environment reference (`{ env: "VAR" }`). Git receives it through a temporary `GIT_ASKPASS` helper; the clone and remote URLs remain credential-free.
-  - `sshKey` — for SSH URLs. Must be an environment reference (`{ env: "VAR" }`). It is written to a temporary key file and used via `GIT_SSH_COMMAND`.
-  - `knownHosts` — required with `sshKey`. A pinned `known_hosts` entry (or entries) for the Git server. SSH uses strict host-key checking and refuses unknown hosts.
-
-```javascript
-credentials: {
-  sshKey: { env: "BACKEND_SSH_KEY" },
-  knownHosts: "github.com ssh-ed25519 <pinned-host-key>",
-}
-```
-
-Each repo generates a sync and setup script at `.biodome-build/repos/<name>.sh` and a `start.pre` hook named `repo-sync-<name>`. `git` and `openssh-client` are automatically installed in the dev image when any repo is declared.
-
-## `addOpencodeHarness(spec)`
-
-Runs a headless OpenCode agent inside the sandbox. The harness installs the OpenCode CLI (`opencode-ai`), the Bun runtime, and starts `opencode serve` as a daemon process. It also generates an isolated OpenCode config that registers `biodome-mcp` as an MCP server, includes any declared LLM providers, and installs a telemetry plugin.
-
-```javascript
-export default function agent(ctx) {
-  ctx.addOpencodeHarness({
-    name: "coder",
-    port: 3002,
-    mcpServers: {
-      biodome: { url: "http://localhost:3001" },
-    },
-    telemetry: {
-      enabled: true,
-      path: "/workspace/.biodome-build/logs/opencode-events.jsonl",
-    },
-  });
-}
-```
-
-- `name` — unique identifier for the harness.
-- `port` — port for `opencode serve`. Defaults to `3002`.
-- `mcpServers` — map of MCP servers the agent can use. Defaults to the authenticated Biodome MCP server only when MCP is enabled in `config.json`; otherwise it defaults to `{}`.
-- `telemetry` —
-  - `enabled` — whether to install the telemetry plugin. Defaults to `true`.
-  - `path` — JSONL file where OpenCode events are written. Defaults to `/workspace/.biodome-build/logs/opencode-events.jsonl`.
-  - `capturePayloads` — include prompts, tool arguments, and tool output. Defaults to `false`; enable only for temporary debugging because these payloads can contain secrets.
-- `config` — arbitrary extra values merged into `opencode.json`.
-
-The MCP server (`biodome-mcp`) writes its own structured events to `/workspace/.biodome-build/logs/mcp-events.jsonl`. Harness telemetry records event names, tool names, and correlation IDs by default; payload capture is opt-in.
-
-Telemetry directories and files are created with owner-only modes (`0700` and `0600`). Each telemetry log rotates at 10 MB and retains five prior files.
-
-## `addLlmProvider(spec)`
-
-Configures an LLM provider for OpenCode harnesses. The provider is written into each generated OpenCode config under the `provider` key, and credential env references are substituted at container startup so secrets never live in `plan.json` or the generated config files.
-
-```javascript
-export default function llm(ctx) {
-  ctx.addLlmProvider({
-    name: "lmstudio",
-    npm: "@ai-sdk/openai-compatible",
-    displayName: "LM Studio",
-    options: {
-      baseURL: "http://localhost:2877/v1",
-      apiKey: { env: "LMSTUDIO_API_KEY" },
-    },
-    models: {
-      "local-model": { name: "Local Model" },
-    },
-  });
-}
-```
-
-- `name` — unique provider key.
-- `npm` — optional npm package for the provider SDK.
-- `displayName` — human-readable provider name.
-- `options` — provider options such as `baseURL` and `apiKey`. Credential-like option keys (containing `key`) must be env references.
-- `models` — map of model IDs to display names.
-
-## `addPiHarness(spec)`
-
-Installs and configures the [Pi](https://pi.dev) coding agent inside the sandbox. Pi is a terminal/RPC agent rather than a persistent server, so this harness creates an isolated Pi home directory with settings, a telemetry extension, and a wrapper script you can run through `biodome exec`.
-
-```javascript
-export default function pi(ctx) {
-  ctx.addPiHarness({
-    name: "coder",
-    provider: "anthropic",
-    model: "claude-sonnet-4-20250514",
-    apiKey: { env: "ANTHROPIC_API_KEY" },
-    tools: ["read", "bash", "edit", "write"],
-    packages: ["pi-skills"],
-  });
-}
-```
-
-Run it with:
-
-```bash
-biodome exec /workspace/.biodome-build/pi-homes/coder/pi -p "Refactor src/utils.ts"
-```
-
-- `name` — unique identifier for the harness.
-- `provider` — default LLM provider.
-- `model` — default model ID.
-- `apiKey` — API key as an env reference.
-- `tools` — allowlist of built-in tools (default: all).
-- `extensions`, `skills`, `prompts`, `themes`, `packages` — Pi resources to load.
-- `telemetry` —
-  - `enabled` — whether to install the telemetry extension. Defaults to `true`.
-  - `path` — JSONL file where Pi events are written. Defaults to `/workspace/.biodome-build/logs/pi-<name>-events.jsonl`.
-  - `capturePayloads` — include agent messages and tool arguments. Defaults to `false`; enable only for temporary debugging.
-- `config` — arbitrary extra values merged into `settings.json`.
-
-The telemetry extension captures metadata for `agent_start`, `agent_end`, and `tool_execution_*` events so Pi activity can be correlated with other sandbox telemetry.
-
-## `addCodexHarness(spec)`
-
-Runs a headless [Codex](https://github.com/openai/codex) agent inside the sandbox. The harness installs the Codex CLI (`@openai/codex`) and starts `codex exec-server` as a daemon process. It generates an isolated Codex home directory with a TOML config, MCP server registration, lifecycle hooks for telemetry, and a start script.
-
-```javascript
-export default function agent(ctx) {
-  ctx.addCodexHarness({
-    name: "coder",
-    port: 3003,
-    model: "gpt-5.6",
-    apiKey: { env: "OPENAI_API_KEY" },
-    mcpServers: {
-      biodome: { url: "http://localhost:3001" },
-    },
-    telemetry: {
-      enabled: true,
-      path: "/workspace/.biodome-build/logs/codex-events.jsonl",
-    },
-  });
-}
-```
-
-- `name` — unique identifier for the harness.
-- `port` — port for `codex exec-server`. Defaults to `3003`.
-- `model` — default model ID.
-- `apiKey` — API key as an env reference (defaults to `OPENAI_API_KEY` from the container environment if not specified).
-- `mcpServers` — map of MCP servers the agent can use. Defaults to `{ biodome: { url: "http://localhost:<mcpPort>" } }`.
-- `telemetry` —
-  - `enabled` — whether to install telemetry hooks. Defaults to `true`.
-  - `path` — JSONL file where Codex events are written. Defaults to `/workspace/.biodome-build/logs/codex-<name>-events.jsonl`.
-  - `capturePayloads` — include hook input. Defaults to `false`; enable only for temporary debugging.
-- `config` — arbitrary extra values merged into `~/.codex/config.toml`.
-
-The generated config defaults `approval_policy` to `"never"` and `sandbox_mode` to `"workspace-write"` so the headless server can act without interactive prompts inside the sandbox. Lifecycle hooks capture metadata for `session_start`, `user_prompt_submit`, `pre_tool_use`, and `post_tool_use` events.
-
-## `addClaudeHarness(spec)`
-
-Installs and configures [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) inside the sandbox. Claude Code is a terminal/RPC agent rather than a persistent server, so this harness creates an isolated Claude home directory with settings, MCP configuration, telemetry hooks, and a wrapper script you can run through `biodome exec`.
-
-```javascript
-export default function agent(ctx) {
-  ctx.addClaudeHarness({
-    name: "assistant",
-    model: "claude-sonnet-4-20250514",
-    apiKey: { env: "ANTHROPIC_API_KEY" },
-    tools: ["Bash", "Read", "Edit"],
-    permissions: "acceptEdits",
-    telemetry: {
-      enabled: true,
-      path: "/workspace/.biodome-build/logs/claude-events.jsonl",
-    },
-  });
-}
-```
-
-Run it with:
-
-```bash
-biodome exec /workspace/.biodome-build/claude-homes/assistant/claude -p "Refactor src/utils.ts"
-```
-
-- `name` — unique identifier for the harness.
-- `model` — default model ID.
-- `apiKey` — API key as an env reference.
-- `tools` — list of tools to allow without prompting. Written to `permissions.allow` in settings and passed as `--allowedTools`.
-- `permissions` — permission mode for non-interactive runs. Use `"acceptEdits"`, `"dontAsk"`, `"plan"`, or `"bypassPermissions"`.
-- `telemetry` —
-  - `enabled` — whether to install telemetry hooks. Defaults to `true`.
-  - `path` — JSONL file where Claude events are written. Defaults to `/workspace/.biodome-build/logs/claude-<name>-events.jsonl`.
-  - `capturePayloads` — include hook input. Defaults to `false`; enable only for temporary debugging.
-- `config` — arbitrary extra values merged into `~/.claude/settings.json`.
-
-The wrapper sets `HOME` to the isolated Claude home so settings and MCP config are loaded from the generated directory, and exports the API key from the host environment. Lifecycle hooks capture metadata for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, and `PostToolUse` events.
-
-## Health checks
-
-Health checks are attached to daemon processes. Each daemon with a health check gets a generated shell script in `.biodome-build/healthchecks/<name>.sh`, and `supervisord` runs a companion `<name>-healthcheck` program that restarts the process after repeated failures. The dev service health check in the generated compose file runs all daemon health checks via `.biodome-build/healthchecks/all.sh`.
-
-```javascript
-export default function api(ctx) {
-  ctx.addProcess({
-    name: "api",
-    command: ["node", "server.js"],
-    port: 3000,
-    healthCheck: {
-      type: "http",
-      url: "http://localhost:3000/health",
-      interval: "5s",
-      timeout: "3s",
-      retries: 10,
-    },
-  });
-}
-```
-
-Supported types:
-
-- `http` — checks via `curl`. Default type.
-- `tcp` — checks via `nc` (netcat is installed automatically).
-- `exec` — runs a custom command.
-
-For `http`, if `url` is omitted, it is derived from the declared port.
-
-## Reading the project
-
-Features can inspect the project before contributing.
-
-```javascript
-export default function detect(ctx) {
-  if (ctx.fileExists("pyproject.toml")) {
-    ctx.addLanguage("python", { version: "3.12", packageManager: "poetry" });
-  } else {
-    ctx.addLanguage("python", { version: "3.12" });
-  }
-
-  const pkg = ctx.readJSON("package.json");
-  if (pkg?.dependencies?.next) {
-    ctx.addTool("vercel");
-  }
-}
-```
-
-## Running commands
-
-Features can run arbitrary commands during plan generation.
-
-```javascript
-export default function branchEnv(ctx) {
-  const result = ctx.exec("git branch --show-current");
-  const branch = result.stdout.trim();
-
-  if (branch !== "main") {
-    ctx.addEnv("DEBUG", { value: "1" });
-  }
-}
-```
-
-Commands are logged to stdout. Read-only commands such as `info`, `config validate`, and `generate agents.md` run feature modules in dry-run mode, so `ctx.exec` returns empty output and does not shell out.
+Repository sync runs during environment startup. Tokens stay out of clone URLs;
+SSH credentials require an environment-backed key and pinned `knownHosts`.
+For the current repository's branch, use a Git worktree as described in
+[branch sessions](actions.md#work-on-a-branch-without-changing-your-checkout).
+
+## Environment, endpoints, and storage
+
+- `addEnv(key, { value })` declares non-secret configuration.
+- `addEnv(key, { from: { env }, required })` injects runtime credentials.
+- `addEndpoint({ name, url, port, description, metadata })` describes how to reach
+  an application or service.
+- `addVolume()` and convenience methods provide local/cloud storage where the
+  target supports it. Proxy access needs MCP; direct cloud/FUSE mounts require
+  explicit unsafe opt-in. ECS does not support mounted volumes.
+- `addProvider()` and service-specific helpers describe optional external
+  connections, not LLM/model configuration.
+
+See the [API](api.md) for credential types and [apps](apps.md) for composing
+multiple applications. Configuration is trusted host-side JavaScript, not a
+security sandbox.

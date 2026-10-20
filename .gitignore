@@ -6,6 +6,10 @@
 !examples/apps-demo/.biodome/**
 !examples/multi-repo-qa/.biodome/
 !examples/multi-repo-qa/.biodome/**
+!examples/orchestration-demo/.biodome/
+!examples/orchestration-demo/.biodome/**
+!examples/environment-actions/.biodome/
+!examples/environment-actions/.biodome/**
 .biodome-build/
 node_modules
 dist

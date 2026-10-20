@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest";
 import { decodeExecutionPlan } from "../../orchestration/execution-plan.js";
 
 const document = {
-  version: 1,
+  version: 2,
   project: "demo",
   target: { name: "local", provider: "docker-sandbox", options: {} },
   task: {
     name: "review",
-    agent: { harness: "codex" },
-    prompt: "Review",
+    command: ["npm", "test"],
+    intent: "Review",
+    input: {},
     timeout: "30m",
     cleanup: "always",
     requiredServices: ["postgres"],
@@ -46,6 +47,6 @@ describe("ExecutionPlanSchema", () => {
   });
 
   it("rejects an invalid plan version", () => {
-    expect(() => decodeExecutionPlan({ ...document, version: 2 })).toThrow();
+    expect(() => decodeExecutionPlan({ ...document, version: 1 })).toThrow();
   });
 });

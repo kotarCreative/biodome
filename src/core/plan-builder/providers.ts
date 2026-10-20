@@ -1,28 +1,16 @@
 import { Schema } from "effect";
-import {
-  EndpointSpecSchema,
-  type LlmProvider,
-  LlmProviderSpecSchema,
-  type Plan,
-  type Provider,
-  ProviderSpecSchema,
-} from "../plan.js";
+import { EndpointSpecSchema, type Plan, type Provider, ProviderSpecSchema } from "../plan.js";
 import type {
   EndpointSpec,
-  EnvSpec,
   GithubProviderSpec,
   JiraProviderSpec,
   LinearProviderSpec,
-  LlmProviderSpec,
   McpProviderSpec,
   ProviderSpec,
   SentryProviderSpec,
   SlackProviderSpec,
 } from "../feature.js";
 import { ValidationError } from "../errors.js";
-
-type AddEnv = (key: string, spec: EnvSpec) => void;
-type HasEnv = (key: string) => boolean;
 
 function validatePort(value: unknown, label: string): void {
   if (value === undefined) return;
@@ -43,11 +31,7 @@ function validateMetadata(env: Record<string, unknown>, label: string): void {
 }
 
 export class ProviderBuilder {
-  constructor(
-    private readonly plan: Plan,
-    private readonly addEnv: AddEnv,
-    private readonly hasEnv: HasEnv = () => false,
-  ) {}
+  constructor(private readonly plan: Plan) {}
 
   addEndpoint(spec: EndpointSpec): void {
     const validated = Schema.decodeSync(EndpointSpecSchema)(spec);
@@ -201,38 +185,6 @@ export class ProviderBuilder {
       credentials: spec.credentials,
       metadata: spec.metadata,
     });
-  }
-
-  addLlmProvider(spec: LlmProviderSpec): void {
-    const validated = Schema.decodeSync(LlmProviderSpecSchema)(spec);
-    if (this.plan.runtime.llmProviders.some((provider) => provider.name === validated.name)) {
-      throw new ValidationError({ message: `Duplicate LLM provider name: ${validated.name}` });
-    }
-
-    const provider: LlmProvider = {
-      name: validated.name,
-      npm: validated.npm,
-      displayName: validated.displayName,
-      options: validated.options ? { ...validated.options } : {},
-      models: validated.models ? { ...validated.models } : {},
-    };
-    for (const [key, value] of Object.entries(provider.options)) {
-      if (typeof value === "string" && key.toLowerCase().includes("key")) {
-        throw new ValidationError({
-          message: `LLM provider ${validated.name}: option "${key}" looks like a credential and must be an environment reference ({ env: "VAR" }), not a literal string`,
-        });
-      }
-    }
-    for (const value of Object.values(provider.options)) {
-      if (value !== undefined && typeof value === "object" && "env" in value) {
-        // A declaration the user made already wins (e.g. an AWS secret ARN
-        // reference backing this variable); only ensure one exists otherwise.
-        if (!this.hasEnv(value.env)) {
-          this.addEnv(value.env, { from: { env: value.env } });
-        }
-      }
-    }
-    this.plan.runtime.llmProviders.push(provider);
   }
 
   mcpCredentialEnvironment(): Record<string, string> {

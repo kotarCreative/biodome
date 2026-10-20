@@ -6,7 +6,6 @@ import type { FeatureContext } from "../feature.js";
 import { createPlan, type Plan } from "../plan.js";
 import { BuildBuilder } from "./build.js";
 import { EnvironmentBuilder } from "./environment.js";
-import { HarnessBuilder } from "./harnesses.js";
 import { McpBuilder, type McpOptions } from "./mcp.js";
 import { ProcessBuilder } from "./processes.js";
 import { createNodeProjectIO, type ProjectIO } from "./project-io.js";
@@ -24,7 +23,6 @@ export class PlanBuilder {
   private readonly repositories: RepositoryBuilder;
   private readonly volumes: VolumeBuilder;
   private readonly providers: ProviderBuilder;
-  private readonly harnesses: HarnessBuilder;
   private readonly mcp: McpBuilder;
   private readonly rootDir: string;
   private readonly dryRun: boolean;
@@ -78,15 +76,7 @@ export class PlanBuilder {
       (name) => this.build.addAptPackage(name),
       addProcess,
     );
-    this.providers = new ProviderBuilder(this.plan, addEnv, (key) => this.environment.has(key));
-    this.harnesses = new HarnessBuilder(this.plan, layout, {
-      addLanguage,
-      addAptPackage: (name) => this.build.addAptPackage(name),
-      addLanguageSnippet: (snippet) => this.build.addLanguageSnippet(snippet),
-      addProcess,
-      addEnv,
-      hasEnv: (key) => this.environment.has(key),
-    });
+    this.providers = new ProviderBuilder(this.plan);
     this.mcp = new McpBuilder(this.plan, layout, {
       addLanguage,
       addProcess,
@@ -114,11 +104,6 @@ export class PlanBuilder {
       addEnv,
       addVolume: (spec) => this.mutate(() => this.volumes.add(spec)),
       addRepo: (spec) => this.mutate(() => this.repositories.add(spec)),
-      addOpencodeHarness: (spec) => this.mutate(() => this.harnesses.addOpencodeHarness(spec)),
-      addPiHarness: (spec) => this.mutate(() => this.harnesses.addPiHarness(spec)),
-      addCodexHarness: (spec) => this.mutate(() => this.harnesses.addCodexHarness(spec)),
-      addClaudeHarness: (spec) => this.mutate(() => this.harnesses.addClaudeHarness(spec)),
-      addLlmProvider: (spec) => this.mutate(() => this.providers.addLlmProvider(spec)),
       addLocalVolume: (spec) => this.mutate(() => this.volumes.addLocal(spec)),
       addS3Volume: (spec) => this.mutate(() => this.volumes.addS3(spec)),
       addGcsVolume: (spec) => this.mutate(() => this.volumes.addGcs(spec)),

@@ -18,8 +18,8 @@ my-project/
 │   │   └── npm-tools.mjs    # tools and packages
 │   ├── targets/
 │   │   └── local.mjs        # default Docker Compose target
-│   └── tasks/
-│       └── .gitkeep         # named task declarations
+│   └── actions/
+│       └── e2e.mjs          # command hook: intent, input, outputs
 ├── .biodome-build/
 │   ├── targets/
 │   │   └── local/           # target-scoped generated artifacts
@@ -100,7 +100,7 @@ target-specific runtime files below `.biodome-build/targets/<target>/`:
 - `supervisord.conf` — process manager config for daemon processes.
 - `docker-compose.yaml` — the dev service and any container-hosted backing services when the target uses Docker Compose.
 - `healthchecks/*.sh` — per-process health check and monitor scripts, plus an aggregate `all.sh`.
-- `repos/`, `services/`, and harness-home directories — generated repository, in-container service, and agent-harness helpers.
+- `repos/` and `services/` — generated repository and in-container service helpers. No agent homes are generated.
 - `artifacts/` — files collected after a successful named task.
 - `logs/events-<runId>.jsonl` and `logs/runs/<runId>.json` — structured lifecycle events and durable task-run records.
 - `state.json` — the provider state used to reuse or clean up the target.

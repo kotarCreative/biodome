@@ -545,8 +545,9 @@ describe.skipIf(!RUN)("aws-ecs opt-in integration", () => {
           deploymentId,
           task: {
             name: jobName,
-            harness: "aws-integration",
-            prompt: "Prove the uploaded workspace and AWS-native task contracts.",
+            command: ["true"],
+            intent: "Prove the uploaded workspace and AWS-native task contracts.",
+            input: {},
             artifacts: [artifactPath],
             timeout: "10m",
             cleanup: "never",
@@ -663,7 +664,6 @@ describe.skipIf(!RUN)("aws-ecs opt-in integration", () => {
           "artifact_dir=${BIODOME_INTEGRATION_ARTIFACT_PATH%/*}",
           'mkdir -p "/workspace/$artifact_dir"',
           'printf "%s\\n%s\\n" "$BIODOME_INTEGRATION_MARKER" "$BIODOME_INTEGRATION_JOB_NAME" > "/workspace/$BIODOME_INTEGRATION_ARTIFACT_PATH"',
-          'aws s3 cp "/workspace/$BIODOME_INTEGRATION_ARTIFACT_PATH" "s3://${BIODOME_ARTIFACT_BUCKET}/${BIODOME_ARTIFACT_PREFIX}/${BIODOME_DEPLOYMENT_ID}/${BIODOME_INTEGRATION_ARTIFACT_PATH}" --only-show-errors',
           'printf "%s\\n" "$BIODOME_INTEGRATION_LOG_MARKER"',
         ].join("\n");
         tracked.s3MayExist = true;
@@ -671,6 +671,13 @@ describe.skipIf(!RUN)("aws-ecs opt-in integration", () => {
           driver.runJob({
             ...statusInput,
             command: ["sh", "-c", jobScript],
+            validationCommands: [
+              [
+                "sh",
+                "-c",
+                'test "$(sed -n 2p "/workspace/$BIODOME_INTEGRATION_ARTIFACT_PATH")" = "$BIODOME_INTEGRATION_JOB_NAME"',
+              ],
+            ],
             timeoutMs: 600_000,
             artifactPaths: [artifactPath],
           }),

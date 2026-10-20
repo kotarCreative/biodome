@@ -152,44 +152,44 @@ describe("validateJsonSafeOptions", () => {
 describe("TaskSpecSchema", () => {
   it("validates a complete spec", () => {
     const result = Schema.decodeSync(TaskSpecSchema)({
-      harness: "codex",
-      prompt: "Review the code",
-      artifacts: ["review.md"],
+      command: ["npm", "test"],
+      intent: "Review the code",
+      outputs: ["review.md"],
       timeout: "20m",
       cleanup: "always",
     });
-    expect(result.harness).toBe("codex");
-    expect(result.prompt).toBe("Review the code");
-    expect(result.artifacts).toEqual(["review.md"]);
+    expect(result.command).toEqual(["npm", "test"]);
+    expect(result.intent).toBe("Review the code");
+    expect(result.outputs).toEqual(["review.md"]);
     expect(result.timeout).toBe("20m");
     expect(result.cleanup).toBe("always");
   });
 
   it("applies defaults for optional fields", () => {
     const result = Schema.decodeSync(TaskSpecSchema)({
-      harness: "claude",
-      prompt: "Fix bugs",
+      command: ["npm", "test"],
+      intent: "Fix bugs",
     });
-    expect(result.harness).toBe("claude");
-    expect(result.prompt).toBe("Fix bugs");
-    expect(result.artifacts).toBeUndefined();
+    expect(result.command).toEqual(["npm", "test"]);
+    expect(result.intent).toBe("Fix bugs");
+    expect(result.outputs).toBeUndefined();
     expect(result.timeout).toBeUndefined();
     expect(result.cleanup).toBeUndefined();
   });
 
-  it("rejects empty harness", () => {
-    expect(() => Schema.decodeSync(TaskSpecSchema)({ harness: "", prompt: "hi" })).toThrow();
+  it("rejects empty command", () => {
+    expect(() => Schema.decodeSync(TaskSpecSchema)({ command: [], intent: "hi" })).toThrow();
   });
 
-  it("rejects empty prompt", () => {
-    expect(() => Schema.decodeSync(TaskSpecSchema)({ harness: "codex", prompt: "" })).toThrow();
+  it("rejects empty intent", () => {
+    expect(() => Schema.decodeSync(TaskSpecSchema)({ command: ["true"], intent: "" })).toThrow();
   });
 
   it("rejects invalid cleanup value", () => {
     expect(() =>
       Schema.decodeSync(TaskSpecSchema)({
-        harness: "codex",
-        prompt: "hi",
+        command: ["true"],
+        intent: "hi",
         cleanup: "invalid" as "always",
       }),
     ).toThrow();
@@ -198,8 +198,8 @@ describe("TaskSpecSchema", () => {
   it("rejects invalid duration", () => {
     expect(() =>
       Schema.decodeSync(TaskSpecSchema)({
-        harness: "codex",
-        prompt: "hi",
+        command: ["true"],
+        intent: "hi",
         timeout: "not-a-duration",
       }),
     ).toThrow();
@@ -366,8 +366,9 @@ describe("TaskSchema", () => {
   it("validates a stored task", () => {
     const result = Schema.decodeSync(TaskSchema)({
       name: "review-pr",
-      harness: "codex",
-      prompt: "Review the PR",
+      command: ["npm", "test"],
+      intent: "Review the PR",
+      input: {},
       artifacts: ["review.md"],
       timeout: "20m",
       cleanup: "always",
@@ -393,8 +394,9 @@ describe("DeploymentPlanSchema", () => {
       target: { name: "dev", driver: "docker-compose", options: {} },
       task: {
         name: "review",
-        harness: "claude",
-        prompt: "Review",
+        command: ["npm", "test"],
+        intent: "Review",
+        input: {},
         artifacts: [],
         timeout: "10m",
         cleanup: "on-success",

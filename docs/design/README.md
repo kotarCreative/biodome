@@ -1,5 +1,11 @@
 # Biodome Design Plans
 
+The environment-first direction in [Environment actions](../actions.md) supersedes
+agent/harness requirements in these historical plans. Keep environment creation,
+services, hooks, runtime safety, and input/output contracts; do not reintroduce
+embedded agents or their generated configuration. Existing ECS acceptance and
+security requirements remain relevant.
+
 Status: active. These plans replace the historical named-target and
 security/performance plans, whose implementation status and architecture no longer
 matched the repository.
@@ -107,6 +113,8 @@ Files changed:
   - src/tests/integration/aws-ecs.test.ts (opt-in)
 Behavior changed:
   - ECS options declare the single upload workspace strategy and reject ttl
+  - ECS option and secret-materialization validation runs before availability or
+    provider calls in target validation, planning, building, starting, and task runs
   - Network allowlists are rejected for aws-ecs in preflight
   - The repository workspace is materialized inside the immutable image
   - Task definitions drop Linux capabilities, run direct jobs as the Plan 04
@@ -122,17 +130,23 @@ Behavior changed:
   - stop is idempotent, releases interrupted-start task definitions, requests
     deletion after deregistration, and propagates cleanup failures for retry
   - Artifact collection validates relative keys, enforces a byte cap, and
-    distinguishes not-produced, IAM, and size failures
+    distinguishes not-produced, IAM, and size failures; successful jobs upload
+    their declared artifacts without requiring task-specific AWS commands
+  - ECS workloads, validation commands, and artifact publication execute in one
+    job task so every stage sees the same changed workspace
   - Optional capacityProvider enables FARGATE or FARGATE_SPOT placement
   - The live proof covers workspace, native secrets, jobs, logs, S3 artifacts,
     task cleanup, task-definition cleanup, ECR image cleanup, and log cleanup
 Tests added: startup polling and rollback matrix, lost registration/RunTask
   reconciliation, durable failed cleanup state, deregister/delete sequencing,
   CloudWatch log scope, non-root task definitions, error classification,
-  artifact key/size/IAM cases, spot placement, and option preflight
-Verification run (2026-08-27): focused suite 278 passed; npm run check 821
+  artifact key/size/IAM and automatic-upload cases, spot placement, and option
+  preflight across target validation, plan, build, up, and run workflows; one-job
+  workspace continuity for validation and artifact publication
+Verification run (2026-09-17): focused ECS readiness suite 157 passed; npm run
+  check 859
   passed; npm run build passed; npm run test:integration 8 passed and AWS 1
-  skipped; npm audit high/critical gate passed with 7 moderate advisories
+  skipped; npm audit high/critical gate passed with 8 moderate advisories
 Acceptance criteria not met: the live AWS workflow was not run because the
   required account, networking, role, repository, bucket, and sentinel-secret
   environment variables were absent; ECS remains experimental

@@ -18,10 +18,6 @@ import { generateRepoScripts } from "../docker/generators/repositories.js";
 import { generateInContainerServiceFiles } from "../docker/generators/services.js";
 import { generateSupervisordConf } from "../docker/generators/supervisor.js";
 import { generateStartupScript } from "../docker/generators/startup.js";
-import { generateClaudeHarnessFiles } from "../docker/generators/harnesses/claude.js";
-import { generateCodexHarnessFiles } from "../docker/generators/harnesses/codex.js";
-import { generateHarnessFiles } from "../docker/generators/harnesses/opencode.js";
-import { generatePiHarnessFiles } from "../docker/generators/harnesses/pi.js";
 import { generatePlanJson } from "../mcp/generator.js";
 import type { RuntimeLayout } from "./layout.js";
 
@@ -111,10 +107,6 @@ export function renderCommonArtifacts(plan: Plan, layout: RuntimeLayout): readon
       layout.host.services,
       generateInContainerServiceFiles(plan),
     ),
-    ...generatedFiles(layout.host.projectRoot, layout.host.root, generateHarnessFiles(plan)),
-    ...generatedFiles(layout.host.projectRoot, layout.host.root, generatePiHarnessFiles(plan)),
-    ...generatedFiles(layout.host.projectRoot, layout.host.root, generateCodexHarnessFiles(plan)),
-    ...generatedFiles(layout.host.projectRoot, layout.host.root, generateClaudeHarnessFiles(plan)),
   ];
 
   if (plan.deployment?.target.driver === "aws-ecs") {

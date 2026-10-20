@@ -36,5 +36,4 @@ export default function stack(ctx) {
     environment: { PORT: "3100" },
   });
 
-  ctx.addOpencodeHarness({ name: "tester" });
 }

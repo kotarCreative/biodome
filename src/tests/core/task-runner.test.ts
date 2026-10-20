@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
 import {
   executeTask,
-  harnessTaskCommand,
+  actionCommand,
   shouldRunCleanup,
   type TaskResult,
 } from "../../core/task-runner.js";
@@ -19,6 +19,7 @@ import type {
   StartableDriver,
   StoppableDriver,
   ExecutableDriver,
+  JobDriver,
   ArtifactDriver,
   StatusDriver,
   CommandResult,
@@ -94,25 +95,19 @@ function createFakeDriver(overrides?: Partial<TestDriver>): TestDriver {
 function planWithTask(options?: {
   cleanup?: "always" | "on-success" | "never";
   artifacts?: string[];
-  harness?: string;
   deploymentId?: string;
   taskName?: string;
   timeout?: string;
 }): Plan {
   const plan = createPlan("test-project");
-  plan.runtime.piHarnesses.push({
-    name: options?.harness ?? "reviewer",
-    type: "pi",
-    telemetry: { enabled: false, path: "" },
-    config: {},
-  });
   plan.deployment = {
     target: { name: "local", driver: "docker-compose", options: {} },
     deploymentId: options?.deploymentId ?? "test-deploy",
     task: {
       name: options?.taskName ?? "review-pr",
-      harness: options?.harness ?? "reviewer",
-      prompt: "Review the code",
+      command: ["npm", "test"],
+      intent: "Review the code",
+      input: {},
       artifacts: options?.artifacts ?? ["review.md"],
       timeout: options?.timeout ?? "5m",
       cleanup: options?.cleanup ?? "always",
@@ -144,44 +139,19 @@ function setupStateFile(rootDir: string, plan: Plan): void {
   });
 }
 
-describe("harnessTaskCommand", () => {
-  it("returns Pi task wrapper path for Pi harness", () => {
-    const plan = planWithTask({ harness: "reviewer" });
-    const cmd = harnessTaskCommand(plan, "reviewer", "Review the code");
-    expect(cmd[0]).toBe("/workspace/.biodome-build/targets/local/pi-homes/reviewer/task");
-    expect(cmd[1]).toBe("Review the code");
-  });
-
-  it("returns the OpenCode task wrapper for an OpenCode harness", () => {
-    const plan = createPlan("test-project");
-    plan.runtime.agentHarnesses.push({
-      name: "my-agent",
-      type: "opencode",
-      port: 3002,
-      mcpServers: {},
-      telemetry: { enabled: false, path: "" },
-      config: {},
-    });
-    plan.deployment = {
-      target: { name: "local", driver: "docker-compose", options: {} },
-      deploymentId: "test",
-      task: {
-        name: "t",
-        harness: "my-agent",
-        prompt: "p",
-        artifacts: [],
-        timeout: "1m",
-        cleanup: "always",
-      },
-    };
-    const cmd = harnessTaskCommand(plan, "my-agent", "p");
-    expect(cmd[0]).toBe("/workspace/.biodome-build/targets/local/opencode-homes/my-agent/task");
-    expect(cmd[1]).toBe("p");
-  });
-
-  it("throws when harness not found", () => {
-    const plan = planWithTask({ harness: "reviewer" });
-    expect(() => harnessTaskCommand(plan, "nonexistent", "p")).toThrow(/not found/);
+describe("actionCommand", () => {
+  it("passes intent, inputs, and outputs as data without shell interpolation", () => {
+    const task = planWithTask().deployment!.task!;
+    task.input = { route: "$(touch /tmp/should-not-exist)", users: 5 };
+    expect(actionCommand(task)).toEqual([
+      "env",
+      "BIODOME_ACTION_NAME=review-pr",
+      "BIODOME_ACTION_INTENT=Review the code",
+      `BIODOME_ACTION_INPUT=${JSON.stringify(task.input)}`,
+      'BIODOME_ACTION_OUTPUTS=["review.md"]',
+      "npm",
+      "test",
+    ]);
   });
 });
 
@@ -216,6 +186,49 @@ describe("executeTask", () => {
     expect(artifacts[0].path).toBe("review.md");
   });
 
+  it("keeps available failure evidence before cleanup without hiding the original exit code", async () => {
+    const order: string[] = [];
+    const plan = planWithTask({ artifacts: ["missing.png", "review.md"] });
+    const driver = createFakeDriver({
+      exec: () =>
+        Effect.succeed({ exitCode: 7, stdout: "failed assertion", stderr: "", durationMs: 1 }),
+      collectArtifacts: (input) => {
+        order.push(input.paths[0]);
+        expect(input.artifactDir).toContain("artifacts/test");
+        return input.paths[0] === "missing.png"
+          ? Effect.fail(new RuntimeError({ message: "Screenshot unavailable" }))
+          : Effect.succeed([{ path: "review.md", sizeBytes: 42, localPath: "/tmp/review.md" }]);
+      },
+      stop: () =>
+        Effect.sync(() => {
+          order.push("stop");
+        }),
+    });
+    setupStateFile(rootDir, plan);
+    const result = await Effect.runPromise(Effect.result(runTask(driver, plan)));
+    expect(result._tag).toBe("Failure");
+    if (result._tag !== "Failure") throw new Error("Expected failed QA");
+    expect(result.failure.exitCode).toBe(7);
+    expect(result.failure.message).toContain("exit code 7");
+    expect(result.failure.artifacts?.map((artifact) => artifact.path)).toEqual(["review.md"]);
+    expect(order).toEqual(["missing.png", "review.md", "stop"]);
+  });
+
+  it("exposes cleanup failures independently of a successful QA outcome", async () => {
+    const plan = planWithTask();
+    setupStateFile(rootDir, plan);
+    const result = await Effect.runPromise(
+      runTask(
+        createFakeDriver({
+          stop: () => Effect.fail(new RuntimeError({ message: "Provider refused cleanup" })),
+        }),
+        plan,
+      ),
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.cleanupFailed).toBe(true);
+  });
+
   it("executes validation commands after the agent", async () => {
     const execFn = vi
       .fn()
@@ -231,6 +244,44 @@ describe("executeTask", () => {
     expect(execFn).toHaveBeenCalledTimes(3);
     expect(execFn.mock.calls[1][0].command).toEqual(["npm", "test"]);
     expect(execFn.mock.calls[2][0].command).toEqual(["npm", "run", "lint"]);
+  });
+
+  it("passes validation commands into one provider-native job", async () => {
+    const runJob = vi
+      .fn()
+      .mockReturnValue(
+        Effect.succeed<CommandResult>({ exitCode: 0, stdout: "", stderr: "", durationMs: 1 }),
+      );
+    const plan = planWithTask({ artifacts: ["review.md"] });
+    plan.deployment!.task!.validationCommands = [
+      ["npm", "test"],
+      ["npm", "run", "lint"],
+    ];
+    const driver = {
+      ...createFakeDriver(),
+      capabilities: capabilitiesOf(
+        "lifecycle.build",
+        "lifecycle.start",
+        "lifecycle.stop",
+        "status.read",
+        "job.run",
+        "artifact.collect",
+      ),
+      runJob,
+    } satisfies TestDriver & JobDriver;
+
+    await Effect.runPromise(runTask(driver, plan));
+
+    expect(runJob).toHaveBeenCalledTimes(1);
+    expect(runJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactPaths: ["review.md"],
+        validationCommands: [
+          ["npm", "test"],
+          ["npm", "run", "lint"],
+        ],
+      }),
+    );
   });
 
   it("reuses a running deployment", async () => {
@@ -356,21 +407,14 @@ describe("executeTask", () => {
         }),
     });
     const plan = createPlan("test-project");
-    plan.runtime.agentHarnesses.push({
-      name: "my-agent",
-      type: "opencode",
-      port: 3002,
-      mcpServers: {},
-      telemetry: { enabled: false, path: "" },
-      config: {},
-    });
     plan.deployment = {
       target: { name: "local", driver: "docker-compose", options: {} },
       deploymentId: "test",
       task: {
         name: "t",
-        harness: "my-agent",
-        prompt: "p",
+        command: ["npm", "test"],
+        intent: "Check the branch",
+        input: {},
         artifacts: [],
         timeout: "1m",
         cleanup: "always",
@@ -380,9 +424,7 @@ describe("executeTask", () => {
     expect(result.exitCode).toBe(0);
     expect(execFn).toHaveBeenCalledWith(
       expect.objectContaining({
-        command: expect.arrayContaining([
-          "/workspace/.biodome-build/targets/local/opencode-homes/my-agent/task",
-        ]),
+        command: expect.arrayContaining(["npm", "test"]),
       }),
     );
   });

@@ -1,210 +1,100 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { TaskContextImpl } from "../../core/task-context.js";
-import { ValidationError } from "../../core/errors.js";
+import type { TaskSpec } from "../../core/plan.js";
 
-describe("TaskContextImpl", () => {
-  describe("addTask", () => {
-    it("stores a task with all fields and getTask returns the merged result", () => {
-      const ctx = new TaskContextImpl("review-pr");
-      ctx.addTask({
-        harness: "opencode",
-        prompt: "Review the PR",
-        artifacts: ["output/review.md"],
-        timeout: "10m",
-        cleanup: "always",
-      });
+const action: TaskSpec = { command: ["npm", "test"], intent: "Validate the branch" };
 
-      const task = ctx.getTask();
-      expect(task.name).toBe("review-pr");
-      expect(task.harness).toBe("opencode");
-      expect(task.prompt).toBe("Review the PR");
-      expect(task.artifacts).toEqual(["output/review.md"]);
-      expect(task.timeout).toBe("10m");
-      expect(task.cleanup).toBe("always");
-    });
-
-    it("preserves portable orchestration requirements", () => {
-      const ctx = new TaskContextImpl("review-pr");
-      ctx.addTask({
-        harness: "opencode",
-        prompt: "Review the PR",
-        artifacts: [],
-        timeout: "10m",
-        cleanup: "always",
-        requiredServices: ["postgres"],
-        capabilities: [{ capability: "network.policy", level: "preferred" }],
-        resources: { cpu: 2, memoryMiB: 4096 },
-        network: { mode: "egress", allow: ["api.github.com:443"] },
-        workspace: { strategy: "clone", ref: "main" },
-        validationCommands: [["npm", "test"]],
-      });
-
-      expect(ctx.getTask()).toMatchObject({
-        requiredServices: ["postgres"],
-        resources: { cpu: 2, memoryMiB: 4096 },
-        workspace: { strategy: "clone", ref: "main" },
-        validationCommands: [["npm", "test"]],
-      });
-    });
-
-    it("accepts empty artifact list", () => {
-      const ctx = new TaskContextImpl("test");
-      ctx.addTask({
-        harness: "bash",
-        prompt: "run",
-        artifacts: [],
-        timeout: "20m",
-        cleanup: "never",
-      });
-
-      expect(ctx.getTask().artifacts).toEqual([]);
-    });
-
-    it("throws ValidationError when called twice", () => {
-      const ctx = new TaskContextImpl("dup");
-      ctx.addTask({
-        harness: "bash",
-        prompt: "first",
-        artifacts: [],
-        timeout: "10m",
-        cleanup: "never",
-      });
-
-      expect(() =>
-        ctx.addTask({
-          harness: "bash",
-          prompt: "second",
-          artifacts: [],
-          timeout: "10m",
-          cleanup: "never",
-        }),
-      ).toThrow(ValidationError);
-      expect(() =>
-        ctx.addTask({
-          harness: "bash",
-          prompt: "second",
-          artifacts: [],
-          timeout: "10m",
-          cleanup: "never",
-        }),
-      ).toThrow(/called addTask twice/);
-    });
-
-    it("throws ValidationError when harness is empty", () => {
-      const ctx = new TaskContextImpl("test");
-      expect(() =>
-        ctx.addTask({
-          harness: "",
-          prompt: "x",
-          artifacts: [],
-          timeout: "10m",
-          cleanup: "never",
-        }),
-      ).toThrow(ValidationError);
-      expect(() =>
-        ctx.addTask({
-          harness: "",
-          prompt: "x",
-          artifacts: [],
-          timeout: "10m",
-          cleanup: "never",
-        }),
-      ).toThrow(/harness is required/);
-    });
-
-    it("throws ValidationError when prompt is empty", () => {
-      const ctx = new TaskContextImpl("test");
-      expect(() =>
-        ctx.addTask({
-          harness: "bash",
-          prompt: "",
-          artifacts: [],
-          timeout: "10m",
-          cleanup: "never",
-        }),
-      ).toThrow(ValidationError);
-      expect(() =>
-        ctx.addTask({
-          harness: "bash",
-          prompt: "",
-          artifacts: [],
-          timeout: "10m",
-          cleanup: "never",
-        }),
-      ).toThrow(/prompt is required/);
-    });
-
-    it("throws ValidationError on absolute artifact path", () => {
-      const ctx = new TaskContextImpl("test");
-      expect(() =>
-        ctx.addTask({
-          harness: "bash",
-          prompt: "x",
-          artifacts: ["/absolute/path"],
-          timeout: "10m",
-          cleanup: "never",
-        }),
-      ).toThrow(ValidationError);
-    });
-
-    it("throws ValidationError on .. artifact path segment", () => {
-      const ctx = new TaskContextImpl("test");
-      expect(() =>
-        ctx.addTask({
-          harness: "bash",
-          prompt: "x",
-          artifacts: ["output/../secret"],
-          timeout: "10m",
-          cleanup: "never",
-        }),
-      ).toThrow(ValidationError);
-    });
-
-    it("throws ValidationError on NUL byte in artifact path", () => {
-      const ctx = new TaskContextImpl("test");
-      expect(() =>
-        ctx.addTask({
-          harness: "bash",
-          prompt: "x",
-          artifacts: ["good\0bad"],
-          timeout: "10m",
-          cleanup: "never",
-        }),
-      ).toThrow(ValidationError);
-    });
-
-    it("throws ValidationError on invalid timeout format", () => {
-      const ctx = new TaskContextImpl("test");
-      expect(() =>
-        ctx.addTask({
-          harness: "bash",
-          prompt: "x",
-          artifacts: [],
-          timeout: "forever",
-          cleanup: "never",
-        }),
-      ).toThrow(ValidationError);
-    });
-
-    it("throws ValidationError on non-positive timeout", () => {
-      const ctx = new TaskContextImpl("test");
-      expect(() =>
-        ctx.addTask({
-          harness: "bash",
-          prompt: "x",
-          artifacts: [],
-          timeout: "0m",
-          cleanup: "never",
-        }),
-      ).toThrow(ValidationError);
+describe("environment action declarations", () => {
+  it("needs no agent and supplies safe lifecycle defaults", () => {
+    const ctx = new TaskContextImpl("qa");
+    ctx.addAction(action);
+    expect(ctx.getTask()).toMatchObject({
+      name: "qa",
+      command: ["npm", "test"],
+      intent: action.intent,
+      input: {},
+      artifacts: [],
+      timeout: "20m",
+      cleanup: "never",
     });
   });
 
-  describe("getTask", () => {
-    it("throws ValidationError when addTask was never called", () => {
-      const ctx = new TaskContextImpl("never-called");
-      expect(() => ctx.getTask()).toThrow(ValidationError);
-      expect(() => ctx.getTask()).toThrow(/did not declare a task/);
+  it("preserves inputs, outputs, and execution requirements without sharing mutable input", () => {
+    const ctx = new TaskContextImpl("performance");
+    const input = { duration: 30, routes: ["/checkout"] };
+    ctx.addAction({
+      ...action,
+      input,
+      outputs: ["results/perf.json"],
+      timeout: "5m",
+      cleanup: "always",
+      requiredServices: ["postgres"],
+      validationCommands: [["npm", "run", "check"]],
     });
+    input.routes.push("/changed");
+    expect(ctx.getTask()).toMatchObject({
+      input: { duration: 30, routes: ["/checkout"] },
+      artifacts: ["results/perf.json"],
+      cleanup: "always",
+      requiredServices: ["postgres"],
+      validationCommands: [["npm", "run", "check"]],
+    });
+  });
+
+  it.each([{ command: [] }, { command: [""] }, { command: ["sh", "bad\0argument"] }])(
+    "rejects invalid commands $command",
+    ({ command }) => {
+      expect(() => new TaskContextImpl("qa").addAction({ ...action, command })).toThrow();
+    },
+  );
+
+  it.each(["/absolute", "../escape", "output/../escape", "bad\0file", "..\\escape", "C:\\outside"])(
+    "rejects unsafe output %s",
+    (output) => {
+      expect(() => new TaskContextImpl("qa").addAction({ ...action, outputs: [output] })).toThrow();
+    },
+  );
+
+  it.each(["", "  "])("rejects blank intent", (intent) => {
+    expect(() => new TaskContextImpl("qa").addAction({ ...action, intent })).toThrow();
+  });
+
+  it.each(["forever", "0m"])("rejects invalid deadlines", (timeout) => {
+    expect(() => new TaskContextImpl("qa").addAction({ ...action, timeout })).toThrow();
+  });
+
+  it.each([
+    { value: undefined },
+    { value: NaN },
+    { value: new Date() },
+    { value: () => 1 },
+    { value: "a".repeat(65536) },
+  ])("rejects invalid or oversized JSON input", (input) => {
+    expect(() => new TaskContextImpl("qa").addAction({ ...action, input })).toThrow();
+  });
+
+  it("rejects cyclic input", () => {
+    const input: Record<string, unknown> = {};
+    input.self = input;
+    expect(() => new TaskContextImpl("qa").addAction({ ...action, input })).toThrow();
+  });
+
+  it("requires exactly one declaration", () => {
+    const ctx = new TaskContextImpl("qa");
+    expect(() => ctx.getTask()).toThrow(/did not declare an action/);
+    ctx.addAction(action);
+    expect(() => ctx.addAction(action)).toThrow(/called addAction twice/);
+  });
+
+  it("validates follow-up commands", () => {
+    expect(() =>
+      new TaskContextImpl("qa").addAction({ ...action, validationCommands: [[]] }),
+    ).toThrow(/must name an executable/);
+    expect(() =>
+      new TaskContextImpl("qa").addAction({
+        ...action,
+        validationCommands: [["sh", "bad\0argument"]],
+      }),
+    ).toThrow(/must not contain NUL/);
   });
 });

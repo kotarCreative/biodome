@@ -1,6 +1,9 @@
 import { mkdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { Effect } from "effect";
+import { captureProcess } from "./proc.js";
+import { ProcessOutput, createProcessOutput } from "../core/process-output.js";
+import { writeState } from "./state.js";
 import { generateCompose } from "../docker/generators/compose.js";
 import { parseServiceStatusOutput } from "./compose-status.js";
 import {
@@ -19,6 +22,7 @@ import type {
   ArtifactDriver,
   BuildableDriver,
   ExecutableDriver,
+  InteractiveDriver,
   LogDriver,
   RenderableDriver,
   RestartDriver,
@@ -33,7 +37,7 @@ import type {
 import type { Plan, RuntimeTarget } from "../core/plan.js";
 import { RuntimeError } from "../core/errors.js";
 import { capabilitiesOf } from "../core/capabilities.js";
-import type { EventStore } from "../core/events.js";
+import { EventStore } from "../core/events.js";
 import { runtimeLayout } from "./layout.js";
 import { renderCommonArtifacts, writeArtifacts } from "./artifacts.js";
 import {
@@ -61,6 +65,22 @@ export function buildDockerExecArgs(
   return execArgsWithTimeout(["exec", `${deploymentId}-dev`], command, timeoutMs);
 }
 
+export function buildDockerShellArgs(deploymentId: string, user: string, tty: boolean): string[] {
+  return [
+    "exec",
+    "--interactive",
+    ...(tty ? ["--tty"] : []),
+    "--user",
+    user,
+    "--env",
+    `HOME=/home/${user}`,
+    "--workdir",
+    "/workspace",
+    `${deploymentId}-dev`,
+    "sh",
+  ];
+}
+
 export const dockerComposeDriver: RuntimeDriver &
   AvailableDriver &
   RenderableDriver &
@@ -68,6 +88,7 @@ export const dockerComposeDriver: RuntimeDriver &
   StartableDriver &
   StoppableDriver &
   ExecutableDriver &
+  InteractiveDriver &
   ArtifactDriver &
   StatusDriver &
   LogDriver &
@@ -80,6 +101,7 @@ export const dockerComposeDriver: RuntimeDriver &
     "lifecycle.stop",
     "lifecycle.restart",
     "exec.inplace",
+    "exec.pty",
     "logs.stream",
     "status.read",
     "process.status",
@@ -162,6 +184,53 @@ export const dockerComposeDriver: RuntimeDriver &
           message: "Docker Compose build manifest is missing its immutable image reference",
         });
       }
+      const store = yield* EventStore;
+      const startupOutput = createProcessOutput(
+        store,
+        { runId: store.runId, target: input.target.name, provider: "docker-compose" },
+        "startup",
+      );
+      // Retain cleanup ownership even if readiness fails after resource creation.
+      writeState(input.rootDir, input.target.name, {
+        driver: "docker-compose",
+        deploymentId: input.deploymentId,
+        resourceIds: { project: input.deploymentId },
+        createdAt: new Date().toISOString(),
+      });
+      // Follow the container's startup/hook diagnostics while Compose waits for
+      // readiness. Killing `docker logs` closes a subscription, not a guest job.
+      yield* Effect.forkScoped(
+        Effect.gen(function* () {
+          while (true) {
+            const exists = yield* captureProcess({
+              command: "docker",
+              args: [
+                "container",
+                "inspect",
+                "--format",
+                "{{.State.Status}}",
+                `${input.deploymentId}-dev`,
+              ],
+            }).pipe(
+              Effect.provideService(ProcessOutput, {
+                write: () => Effect.void,
+                end: () => Effect.void,
+                flush: () => Effect.void,
+              }),
+            );
+            if (exists.exitCode === 0) break;
+            yield* Effect.sleep("500 millis");
+          }
+          yield* runProcess({
+            command: "docker",
+            args: ["logs", "--follow", "--timestamps", `${input.deploymentId}-dev`],
+          });
+        }).pipe(
+          Effect.provideService(ProcessOutput, startupOutput),
+          Effect.ensuring(startupOutput.flush()),
+          Effect.ignore,
+        ),
+      );
       yield* runProcess({
         command: "docker",
         args: [
@@ -184,7 +253,7 @@ export const dockerComposeDriver: RuntimeDriver &
         resourceIds: { project: input.deploymentId },
         createdAt: new Date().toISOString(),
       };
-    });
+    }).pipe(Effect.scoped);
   },
 
   stop(input: RuntimeOperationInput): Effect.Effect<void, RuntimeError, EventStore> {
@@ -199,14 +268,15 @@ export const dockerComposeDriver: RuntimeDriver &
     input: RuntimeOperationInput & { command: string[]; timeoutMs?: number },
   ): Effect.Effect<CommandResult, RuntimeError, EventStore> {
     const finalArgs = buildDockerExecArgs(input.deploymentId, input.command, input.timeoutMs);
-    return captureTimedExec({ command: "docker", args: finalArgs });
+    return captureTimedExec({ command: "docker", args: finalArgs, timeoutMs: input.timeoutMs });
   },
 
   collectArtifacts(
-    input: RuntimeOperationInput & { paths: string[] },
+    input: RuntimeOperationInput & { paths: string[]; artifactDir?: string },
   ): Effect.Effect<Artifact[], RuntimeError, EventStore> {
     return collectArtifactsByCopying({
       outputDir: input.outputDir,
+      artifactDir: input.artifactDir,
       paths: input.paths,
       copy: (path, localPath) =>
         captureCommandOutput({
@@ -253,15 +323,31 @@ export const dockerComposeDriver: RuntimeDriver &
     });
   },
 
+  shell(input: RuntimeOperationInput): Effect.Effect<void, RuntimeError, EventStore> {
+    // The runtime uid can be remapped at startup; resolve it by user name.
+    const user =
+      input.plan.runtime.identities.find((identity) => identity.role === "runtime")?.user ??
+      "biodome";
+    return runProcess({
+      command: "docker",
+      args: buildDockerShellArgs(
+        input.deploymentId,
+        user,
+        Boolean(process.stdin.isTTY && process.stdout.isTTY),
+      ),
+      cwd: input.outputDir,
+    });
+  },
+
   logs(
-    input: RuntimeOperationInput & { processName?: string },
+    input: RuntimeOperationInput & { processName?: string; follow?: boolean },
   ): Effect.Effect<void, RuntimeError, EventStore> {
     const logDir = runtimeLayout(input.rootDir, input.target.name).container.logs;
     const args = [
       "exec",
       `${input.deploymentId}-dev`,
       "tail",
-      "-f",
+      ...(input.follow === false ? ["-n", "200"] : ["-f"]),
       supervisordLogFile(logDir, input.processName),
     ];
     return runProcess({ command: "docker", args, cwd: input.outputDir });

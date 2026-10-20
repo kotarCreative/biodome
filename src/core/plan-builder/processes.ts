@@ -12,6 +12,8 @@ import {
 import type { HookSpec, ProcessSpec } from "../feature.js";
 import { ValidationError } from "../errors.js";
 import { assertNoControlChars } from "../validation.js";
+import { TaskContextImpl } from "../task-context.js";
+import { actionCommand } from "../action-command.js";
 
 export class ProcessBuilder {
   constructor(
@@ -29,7 +31,23 @@ export class ProcessBuilder {
     if (!hook.startOn) {
       throw new ValidationError({ message: "Hook requires a startOn lifecycle point" });
     }
-    this.add(hook, "oneshot", hook.startOn, "Hook");
+    if (hook.intent !== undefined || hook.input !== undefined || hook.outputs !== undefined) {
+      const context = new TaskContextImpl(hook.name);
+      context.addAction({
+        command: [...hook.command],
+        intent: hook.intent ?? hook.name,
+        input: hook.input ? { ...hook.input } : undefined,
+        outputs: hook.outputs ? [...hook.outputs] : undefined,
+      });
+      this.add(
+        { ...hook, command: actionCommand(context.getTask()) },
+        "oneshot",
+        hook.startOn,
+        "Hook",
+      );
+    } else {
+      this.add(hook, "oneshot", hook.startOn, "Hook");
+    }
   }
 
   private add(
@@ -129,8 +147,8 @@ export class ProcessBuilder {
   }
 
   private mergeEnvironment(process: Process): void {
-    // Process environments are scoped by default: volume, provider, MCP, and
-    // harness credentials must not leak into sibling processes or the compose
+    // Process environments are scoped by default: volume, provider, and MCP
+    // credentials must not leak into sibling processes or the compose
     // dev service. Sharing is an explicit opt-in.
     if (process.mergeEnv !== true) return;
     for (const [key, value] of Object.entries(process.environment)) {

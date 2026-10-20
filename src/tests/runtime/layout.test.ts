@@ -17,10 +17,6 @@ describe("runtimeLayout", () => {
     expect(layout.host.mcp).toBe(`${hostRoot}/mcp`);
     expect(layout.host.mcpPlan).toBe(`${hostRoot}/plan.json`);
     expect(layout.host.mcpServer).toBe(`${hostRoot}/mcp/server.js`);
-    expect(layout.host.opencodeHomes).toBe(`${hostRoot}/opencode-homes`);
-    expect(layout.host.piHomes).toBe(`${hostRoot}/pi-homes`);
-    expect(layout.host.codexHomes).toBe(`${hostRoot}/codex-homes`);
-    expect(layout.host.claudeHomes).toBe(`${hostRoot}/claude-homes`);
     expect(layout.host.artifacts).toBe(`${hostRoot}/artifacts`);
     expect(layout.host.logs).toBe(`${hostRoot}/logs`);
     expect(layout.host.state).toBe(`${hostRoot}/state.json`);

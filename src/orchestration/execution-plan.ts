@@ -6,7 +6,7 @@
 import { Schema } from "effect";
 import type { Capability } from "../core/capabilities.js";
 
-export const EXECUTION_PLAN_VERSION = 1;
+export const EXECUTION_PLAN_VERSION = 2;
 
 export type RequirementLevel = "required" | "preferred";
 
@@ -67,10 +67,11 @@ export interface ProcessRequirement {
   workingDirectory?: string;
 }
 
-export interface AgentTaskRequirement {
+export interface ActionRequirement {
   name: string;
-  agent: { harness: string; model?: string };
-  prompt: string;
+  command: string[];
+  intent: string;
+  input: Record<string, unknown>;
   timeout: string;
   cleanup: "always" | "on-success" | "never";
   requiredServices: string[];
@@ -89,7 +90,7 @@ export interface ExecutionPlan {
   version: typeof EXECUTION_PLAN_VERSION;
   project: string;
   target: { name: string; provider: string; options: Record<string, unknown> };
-  task: AgentTaskRequirement;
+  task: ActionRequirement;
   services: ServiceRequirement[];
   processes: ProcessRequirement[];
 }
@@ -139,13 +140,11 @@ const ProcessRequirementSchema = Schema.Struct({
   mode: Schema.Literals(["daemon", "oneshot"]),
   workingDirectory: Schema.optional(Schema.String),
 });
-const AgentTaskRequirementSchema = Schema.Struct({
+const ActionRequirementSchema = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1)),
-  agent: Schema.Struct({
-    harness: Schema.String.check(Schema.isMinLength(1)),
-    model: Schema.optional(Schema.String),
-  }),
-  prompt: Schema.String.check(Schema.isMinLength(1)),
+  command: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+  intent: Schema.String.check(Schema.isMinLength(1)),
+  input: Schema.Record(Schema.String, Schema.Unknown),
   timeout: Schema.String.check(Schema.isMinLength(1)),
   cleanup: Schema.Literals(["always", "on-success", "never"]),
   requiredServices: Schema.Array(Schema.String),
@@ -167,7 +166,7 @@ export const ExecutionPlanSchema = Schema.Struct({
     provider: Schema.String.check(Schema.isMinLength(1)),
     options: Schema.Record(Schema.String, Schema.Unknown),
   }),
-  task: AgentTaskRequirementSchema,
+  task: ActionRequirementSchema,
   services: Schema.Array(ServiceRequirementSchema),
   processes: Schema.Array(ProcessRequirementSchema),
 });

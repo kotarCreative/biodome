@@ -186,23 +186,13 @@ describe("generateStartupScript", () => {
       mode: "daemon",
       startOn: "start.post",
     });
-    plan.runtime.agentHarnesses.push({
-      name: "agent",
-      type: "opencode",
-      port: 3002,
-      mcpServers: {},
-      telemetry: { enabled: true, path: "/workspace/.biodome-build/logs/agent.jsonl" },
-      config: {},
-    });
 
     const script = generateStartupScript(plan)!;
     // Read access for every identity without touching host ownership.
     expect(script).toContain("chmod -R a+rX /workspace/.biodome-build");
     // Writable state is shared through the runtime group instead.
-    expect(script).toContain(
-      'chgrp -R "$BIODOME_RUNTIME_GID" /workspace/.biodome-build/opencode-homes',
-    );
-    expect(script).toContain("chmod -R g+rwX /workspace/.biodome-build/opencode-homes");
+    expect(script).toContain('chgrp -R "$BIODOME_RUNTIME_GID" /workspace/.biodome-build/logs');
+    expect(script).toContain("chmod -R g+rwX /workspace/.biodome-build/logs");
     expect(script).toContain(
       'install -d -o "$BIODOME_RUNTIME_UID" -g "$BIODOME_RUNTIME_GID" -m 0750 /home/biodome',
     );

@@ -4,7 +4,7 @@ export {
   decodeExecutionPlan,
 } from "./execution-plan.js";
 export type {
-  AgentTaskRequirement,
+  ActionRequirement,
   ArtifactRequirement,
   CapabilityRequirement,
   ExecutionPlan,

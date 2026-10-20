@@ -4,7 +4,6 @@ import {
   buildSbxExecArgs,
   parseSbxListOutput,
   translateWorkspaceCommand,
-  inferSbxAgent,
   dockerSandboxDriver,
 } from "../../runtime/docker-sandbox.js";
 import { createPlan } from "../../core/plan.js";
@@ -100,33 +99,6 @@ describe("parseSbxListOutput", () => {
       state: "unknown",
       message: "Sandbox not found",
     });
-  });
-});
-
-describe("inferSbxAgent", () => {
-  it("selects the Docker Sandbox agent matching the task harness", () => {
-    const plan = createPlan("test");
-    plan.runtime.codexHarnesses.push({
-      name: "reviewer",
-      type: "codex",
-      port: 3003,
-      mcpServers: {},
-      telemetry: { enabled: false, path: "" },
-      config: {},
-    });
-    plan.deployment = {
-      target: { name: "secure", driver: "docker-sandbox", options: {} },
-      deploymentId: "test-secure",
-      task: {
-        name: "review",
-        harness: "reviewer",
-        prompt: "review",
-        artifacts: [],
-        timeout: "5m",
-        cleanup: "always",
-      },
-    };
-    expect(inferSbxAgent(plan)).toBe("codex");
   });
 });
 

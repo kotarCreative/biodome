@@ -27,7 +27,7 @@ export function compileExecutionPlan(plan: Plan): ExecutionPlan {
     {
       capability: executionCapability(driverId),
       level: "required",
-      reason: "agent tasks execute a command",
+      reason: "actions execute a command",
     },
   ];
   if (task.artifacts.length > 0) {
@@ -57,8 +57,9 @@ export function compileExecutionPlan(plan: Plan): ExecutionPlan {
     },
     task: {
       name: task.name,
-      agent: { harness: task.harness },
-      prompt: task.prompt,
+      command: [...task.command],
+      intent: task.intent,
+      input: task.input,
       timeout: task.timeout,
       cleanup: task.cleanup,
       requiredServices:
@@ -238,34 +239,6 @@ function compileSecrets(plan: Plan): SecretRequirement[] {
         true,
       );
     }
-  }
-
-  for (const harness of plan.runtime.piHarnesses) {
-    add(
-      envReference(harness.apiKey),
-      `API key for harness ${harness.name}`,
-      "agent-forwarding",
-      [],
-      true,
-    );
-  }
-  for (const harness of plan.runtime.codexHarnesses) {
-    add(
-      envReference(harness.apiKey),
-      `API key for harness ${harness.name}`,
-      "agent-forwarding",
-      [],
-      true,
-    );
-  }
-  for (const harness of plan.runtime.claudeHarnesses) {
-    add(
-      envReference(harness.apiKey),
-      `API key for harness ${harness.name}`,
-      "agent-forwarding",
-      [],
-      true,
-    );
   }
 
   add(

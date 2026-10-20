@@ -15,7 +15,8 @@ import type { BuildManifest } from "../../runtime/build-manifest.js";
 import { RuntimeError } from "../../core/errors.js";
 import { NoOpEventStoreLive, type EventStore } from "../../core/events.js";
 import { tmpdir } from "node:os";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { runtimeLayout } from "../../runtime/layout.js";
@@ -135,11 +136,6 @@ const samplePlan: Plan = {
     endpoints: [],
     providers: [],
     repos: [],
-    agentHarnesses: [],
-    piHarnesses: [],
-    codexHarnesses: [],
-    claudeHarnesses: [],
-    llmProviders: [],
     applications: [],
     contributions: [],
   },
@@ -1401,12 +1397,28 @@ describe("createAwsEcsDriver", () => {
         // One-shot job commands are plain non-root workloads.
         expect(container.user).toBe("10001:10001");
         expect(container.privileged).toBe(false);
-        expect(container.command).toEqual(["echo", "hello"]);
+        expect(container.command).toEqual([
+          "sh",
+          "-c",
+          [
+            "job_status=0",
+            '"$@" || job_status=$?',
+            'if [ "$job_status" -eq 0 ]; then',
+            '  aws s3 cp /workspace/summary.md "s3://${BIODOME_ARTIFACT_BUCKET}/${BIODOME_ARTIFACT_PREFIX}/${BIODOME_DEPLOYMENT_ID}/"summary.md --only-show-errors || job_status=$?',
+            "fi",
+            'exit "$job_status"',
+          ].join("\n"),
+          "biodome-artifact-job",
+          "echo",
+          "hello",
+        ]);
         expect(container.logConfiguration.options["awslogs-stream-prefix"]).toBe(
           "test-deploy-001-exec",
         );
         expect(container.environment).toEqual(
           expect.arrayContaining([
+            { name: "AWS_REGION", value: "us-east-1" },
+            { name: "AWS_DEFAULT_REGION", value: "us-east-1" },
             { name: "BIODOME_ARTIFACT_BUCKET", value: "task-artifacts" },
             { name: "BIODOME_ARTIFACT_PREFIX", value: "task-output" },
             { name: "BIODOME_DEPLOYMENT_ID", value: "test-deploy-001" },
@@ -1545,6 +1557,117 @@ describe("createAwsEcsDriver", () => {
           "SYS_CHROOT",
         ],
       });
+    });
+
+    it("runs validation commands in the same one-shot task after the workload", async () => {
+      const ecsSend = vi
+        .fn()
+        .mockResolvedValueOnce({
+          taskDefinition: { taskDefinitionArn: "arn:aws:ecs:...:task-def/exec:1" },
+        })
+        .mockResolvedValueOnce({ tasks: [{ taskArn: "arn:aws:ecs:...:task/exec-123" }] })
+        .mockResolvedValueOnce({
+          tasks: [{ lastStatus: "STOPPED", containers: [{ name: "dev", exitCode: 0 }] }],
+        })
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({});
+      const driver = createAwsEcsDriver(makeClients({ ecsSend }));
+
+      await run(
+        driver.runJob({
+          ...makeInput(),
+          command: ["sh", "-c", "printf changed > changed.txt"],
+          validationCommands: [
+            ["test", "-f", "changed.txt"],
+            ["sh", "-c", "grep changed changed.txt"],
+          ],
+        }),
+      );
+
+      const command = ecsSend.mock.calls[0][0].input.containerDefinitions[0].command;
+      expect(command.slice(-3)).toEqual(["sh", "-c", "printf changed > changed.txt"]);
+      expect(command[2]).toContain('"$@"');
+      expect(command[2]).toContain("if ! test -f changed.txt; then");
+      expect(command[2]).toContain("if ! sh -c 'grep changed changed.txt'; then");
+      expect(command[2]).not.toContain("printf changed > changed.txt");
+
+      const workspace = mkdtempSync(join(tmpdir(), "biodome-ecs-validation-"));
+      try {
+        const executed = spawnSync(command[0], command.slice(1), {
+          cwd: workspace,
+          encoding: "utf-8",
+        });
+        expect(executed.status, executed.stderr).toBe(0);
+        expect(readFileSync(join(workspace, "changed.txt"), "utf-8")).toBe("changed");
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    });
+
+    it("wraps daemon-backed jobs with automatic artifact upload without interpolating argv", async () => {
+      process.env.TEST_TASK_ROLE_ARN = "arn:aws:iam::123456789012:role/task";
+      const ecsSend = vi
+        .fn()
+        .mockResolvedValueOnce({
+          taskDefinition: { taskDefinitionArn: "arn:aws:ecs:...:task-def/exec:1" },
+        })
+        .mockResolvedValueOnce({ tasks: [{ taskArn: "arn:aws:ecs:...:task/exec-123" }] })
+        .mockResolvedValueOnce({
+          tasks: [{ lastStatus: "STOPPED", containers: [{ name: "dev", exitCode: 0 }] }],
+        })
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({});
+      const plan: Plan = {
+        ...samplePlan,
+        runtime: {
+          ...samplePlan.runtime,
+          processes: [
+            {
+              name: "postgres",
+              command: ["postgres"],
+              mode: "daemon",
+              bootstrap: true,
+              environment: {},
+              ports: [],
+              startOn: "start.post",
+            },
+          ],
+        },
+      };
+      const target: RuntimeTarget = {
+        ...sampleTarget,
+        options: {
+          ...sampleTarget.options,
+          taskRoleArn: { env: "TEST_TASK_ROLE_ARN" },
+          artifactBucket: "task-artifacts",
+        },
+      };
+
+      try {
+        const driver = createAwsEcsDriver(makeClients({ ecsSend }));
+        await run(
+          driver.runJob({
+            ...makeInput({ plan, target }),
+            command: ["sh", "-c", "printf %s '$TOKEN' > 'proof file.txt'"],
+            artifactPaths: ["proof file.txt"],
+          }),
+        );
+
+        const command = ecsSend.mock.calls[0][0].input.containerDefinitions[0].command;
+        expect(command.slice(-6)).toEqual([
+          "sh",
+          "/workspace/.biodome-build/targets/test-target/startup.sh",
+          "--job",
+          "sh",
+          "-c",
+          "printf %s '$TOKEN' > 'proof file.txt'",
+        ]);
+        expect(command[2]).toContain("aws s3 cp '/workspace/proof file.txt'");
+        expect(command[2]).toContain("'proof file.txt' --only-show-errors");
+        expect(command[2]).not.toContain("printf %s '$TOKEN'");
+      } finally {
+        delete process.env.TEST_TASK_ROLE_ARN;
+      }
     });
 
     it("rejects unsafe artifact paths before making cloud calls", async () => {
@@ -1901,8 +2024,9 @@ describe("createAwsEcsDriver", () => {
           deploymentId: "test-deploy-001",
           task: {
             name: "proof-job",
-            harness: "shell",
-            prompt: "",
+            command: ["true"],
+            intent: "Prove job logs",
+            input: {},
             artifacts: [],
             timeout: "5m",
             cleanup: "always",

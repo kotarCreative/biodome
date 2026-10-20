@@ -15,11 +15,6 @@ import type {
   EnvSpecSchema,
   VolumeSpecSchema,
   RepoSpecSchema,
-  AgentHarnessSpecSchema,
-  PiHarnessSpecSchema,
-  CodexHarnessSpecSchema,
-  ClaudeHarnessSpecSchema,
-  LlmProviderSpecSchema,
 } from "./plan.js";
 
 export type ProcessSpec = typeof ProcessSpecSchema.Type;
@@ -33,11 +28,6 @@ export type ProviderSpec = typeof ProviderSpecSchema.Type;
 export type EnvSpec = typeof EnvSpecSchema.Type;
 export type VolumeSpec = typeof VolumeSpecSchema.Type;
 export type RepoSpec = typeof RepoSpecSchema.Type;
-export type AgentHarnessSpec = typeof AgentHarnessSpecSchema.Type;
-export type PiHarnessSpec = typeof PiHarnessSpecSchema.Type;
-export type CodexHarnessSpec = typeof CodexHarnessSpecSchema.Type;
-export type ClaudeHarnessSpec = typeof ClaudeHarnessSpecSchema.Type;
-export type LlmProviderSpec = typeof LlmProviderSpecSchema.Type;
 
 // A non-credential value that may be supplied literally or via an environment
 // reference. Credential-bearing fields should use `SecretReference` directly.
@@ -253,11 +243,6 @@ export interface FeatureContext {
   addEnv(key: string, spec: EnvSpec): void;
   addVolume(spec: VolumeSpec): void;
   addRepo(spec: RepoSpec): void;
-  addOpencodeHarness(spec: AgentHarnessSpec): void;
-  addPiHarness(spec: PiHarnessSpec): void;
-  addCodexHarness(spec: CodexHarnessSpec): void;
-  addClaudeHarness(spec: ClaudeHarnessSpec): void;
-  addLlmProvider(spec: LlmProviderSpec): void;
 
   // Volume wrappers for a simpler DX.
   addLocalVolume(spec: LocalVolumeSpec): void;
@@ -281,5 +266,5 @@ export interface TargetContext {
 }
 
 export interface TaskContext {
-  addTask(spec: TaskSpec): void;
+  addAction(spec: TaskSpec): void;
 }

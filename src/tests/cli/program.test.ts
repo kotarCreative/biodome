@@ -4,6 +4,7 @@ import type { Command } from "commander";
 import { createProgram } from "../../cli/program.js";
 import type { ProgramDependencies } from "../../cli/program.js";
 import type { SandboxError } from "../../core/errors.js";
+import { RuntimeError } from "../../core/errors.js";
 
 function exitOverrides(command: Command): Command {
   command.exitOverride();
@@ -50,6 +51,90 @@ describe("CLI program parsing", () => {
     ).rejects.toMatchObject({ exitCode: 1, message: /--limit must be an integer between 1 and/ });
     expect(events).not.toHaveBeenCalled();
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it("passes action metadata through the CLI without interpreting the input", async () => {
+    const taskPlan = vi.fn(() => Effect.fail(new RuntimeError({ message: "Stop after parsing" })));
+    const { program } = testProgram({ taskPlan });
+    await expect(
+      program.parseAsync([
+        "node",
+        "biodome",
+        "plan",
+        "local",
+        "qa",
+        "--input",
+        '{"route":"$(no-shell)"}',
+        "--intent",
+        "Check checkout",
+        "--output",
+        "qa/result.json",
+      ]),
+    ).rejects.toThrow();
+    expect(taskPlan).toHaveBeenCalledWith("/project", "local", "qa", {
+      input: { route: "$(no-shell)" },
+      intent: "Check checkout",
+      outputs: ["qa/result.json"],
+    });
+  });
+
+  it.each(["[]", "null", "not-json"])(
+    "rejects non-object action input %s before calling a workflow",
+    async (input) => {
+      const { program, run } = testProgram({});
+      await expect(
+        exitOverrides(program).parseAsync([
+          "node",
+          "biodome",
+          "plan",
+          "local",
+          "qa",
+          "--input",
+          input,
+        ]),
+      ).rejects.toMatchObject({ exitCode: 1 });
+      expect(run).not.toHaveBeenCalled();
+    },
+  );
+
+  it("returns machine-readable evidence when a JSON action fails", async () => {
+    const artifacts = [
+      { path: "qa/result.json", sizeBytes: 12, localPath: "/evidence/run/qa/result.json" },
+    ];
+    const { program } = testProgram({
+      runTask: () =>
+        Effect.fail(new RuntimeError({ message: "Assertion failed", exitCode: 7, artifacts })),
+    });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        program.parseAsync(["node", "biodome", "--no-events", "run", "local", "qa", "--json"]),
+      ).rejects.toThrow("Assertion failed");
+      expect(log).toHaveBeenCalledOnce();
+      const result = JSON.parse(String(log.mock.calls[0][0]));
+      expect(result).toMatchObject({ exitCode: 7, error: "Assertion failed", artifacts });
+      expect(result.runId).toEqual(expect.any(String));
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it.each([
+    ["--no-events", "run", "local", "qa", "--stream"],
+    ["run", "local", "qa", "--stream", "--json"],
+  ])("rejects incompatible stream options %j", async (...args) => {
+    const { program, run } = testProgram({});
+    await expect(exitOverrides(program).parseAsync(["node", "biodome", ...args])).rejects.toThrow(
+      "--stream requires event capture",
+    );
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("routes interactive shells without turning them into actions", async () => {
+    const shell = vi.fn(() => Effect.succeed(undefined));
+    const { program } = testProgram({ shell });
+    await program.parseAsync(["node", "biodome", "--no-events", "shell", "local"]);
+    expect(shell).toHaveBeenCalledWith("/project", "local");
   });
 
   it("routes down through a stubbed workflow", async () => {

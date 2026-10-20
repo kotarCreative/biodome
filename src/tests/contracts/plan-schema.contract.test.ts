@@ -7,8 +7,9 @@ plan.deployment = {
   deploymentId: "complete-schema-contract-staging",
   task: {
     name: "review",
-    harness: "reviewer",
-    prompt: "Review the repository",
+    command: ["npm", "test"],
+    intent: "Review the repository",
+    input: {},
     artifacts: ["reports/review.md"],
     timeout: "10m",
     cleanup: "on-success",
@@ -113,49 +114,6 @@ plan.runtime.repos.push({
   branch: "main",
   depth: 1,
   credentials: { sshKey: { env: "SSH_KEY" } },
-});
-plan.runtime.agentHarnesses.push({
-  name: "agent",
-  type: "opencode",
-  port: 4096,
-  mcpServers: { local: { url: "http://localhost:3001/mcp" } },
-  telemetry: { enabled: true, path: "/logs/events.jsonl", capturePayloads: false },
-  config: { theme: "dark" },
-});
-plan.runtime.piHarnesses.push({
-  name: "reviewer",
-  type: "pi",
-  provider: "openai",
-  model: "gpt",
-  apiKey: { env: "OPENAI_API_KEY" },
-  tools: ["read"],
-  telemetry: { enabled: false, path: "/logs/pi.jsonl" },
-  config: {},
-});
-plan.runtime.codexHarnesses.push({
-  name: "codex",
-  type: "codex",
-  port: 4097,
-  mcpServers: {},
-  apiKey: { env: "OPENAI_API_KEY" },
-  telemetry: { enabled: false, path: "/logs/codex.jsonl" },
-  config: {},
-});
-plan.runtime.claudeHarnesses.push({
-  name: "claude",
-  type: "claude",
-  apiKey: { env: "ANTHROPIC_API_KEY" },
-  tools: ["read"],
-  permissions: "default",
-  telemetry: { enabled: false, path: "/logs/claude.jsonl" },
-  config: {},
-});
-plan.runtime.llmProviders.push({
-  name: "openai",
-  npm: "@ai-sdk/openai",
-  displayName: "OpenAI",
-  options: { apiKey: { env: "OPENAI_API_KEY" }, retries: 2, enabled: true },
-  models: { fast: { name: "gpt-4.1-mini" } },
 });
 plan.runtime.applications.push({
   name: "app",

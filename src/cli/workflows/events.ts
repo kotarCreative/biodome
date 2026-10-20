@@ -78,3 +78,38 @@ export function eventsWorkflow(rootDir: string, query: EventQuery = eventQuery()
     ];
   });
 }
+
+/** Cursor pages are ordered within one run, including rotated segments. */
+export function eventPageWorkflow(
+  rootDir: string,
+  runId: string,
+  after = 0,
+  limit = DEFAULT_EVENT_QUERY_LIMIT,
+) {
+  return Effect.sync(() => {
+    if (!runId || !Number.isSafeInteger(after) || after < 0)
+      throw new Error("A run ID and a non-negative integer --after cursor are required");
+    const query = eventQuery(runId, limit);
+    const results = eventFiles(rootDir, query).map(readEventFile);
+    const all = results
+      .flatMap((result) => result.events)
+      .filter((event) => event.runId === runId)
+      .sort((a, b) => a.sequence - b.sequence);
+    const pending = all.filter((event) => event.sequence > after);
+    const events = pending.slice(0, limit);
+    const terminal = [...all]
+      .reverse()
+      .find((event) => event.type === "run.completed" || event.type === "run.failed");
+    return {
+      runId,
+      events,
+      nextSequence: events.at(-1)?.sequence ?? after,
+      hasMore: pending.length > events.length,
+      complete: terminal !== undefined,
+      outcome: terminal?.type === "run.completed" ? "succeeded" : terminal ? "failed" : undefined,
+      firstAvailableSequence: all[0]?.sequence,
+      gap: all.length > 0 && all[0].sequence > after + 1,
+      diagnostics: results.flatMap((result) => result.diagnostics),
+    };
+  });
+}

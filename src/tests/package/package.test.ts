@@ -83,6 +83,8 @@ describe("published package", () => {
       },
     ).trim();
     expect(exportedNames.split(",")).toEqual([
+      "buildActionPlan",
+      "buildActionPlanEffect",
       "buildPlan",
       "buildPlanEffect",
       "buildTargetPlan",
@@ -116,11 +118,7 @@ describe("published package", () => {
       ],
       { cwd: projectDir, encoding: "utf8" },
     ).trim();
-    expect(recipeExportedNames.split(",")).toEqual([
-      "COMPUTER_USE_ARTIFACTS",
-      "computerUse",
-      "manualQaTask",
-    ]);
+    expect(recipeExportedNames.split(",")).toEqual(["COMPUTER_USE_ARTIFACTS", "computerUse"]);
 
     execFileSync(join(installedDir, installedPackage.bin.biodome), ["--help"], {
       cwd: projectDir,

@@ -3,12 +3,7 @@ import { ApplicationBuilderImpl } from "../../apps/application-builder.js";
 import { app } from "../../apps/references.js";
 import type { ApplicationBuilder } from "../../apps/types.js";
 import { PlanBuilder } from "../../core/plan-builder/plan-builder.js";
-import {
-  COMPUTER_USE_ARTIFACTS,
-  computerUse,
-  type ComputerUseOptions,
-  manualQaTask,
-} from "../../recipes/computer-use.js";
+import { computerUse, type ComputerUseOptions } from "../../recipes/computer-use.js";
 
 describe("computer-use recipe", () => {
   it("installs browser automation and records its target dependency", async () => {
@@ -97,34 +92,6 @@ describe("computer-use recipe", () => {
     ).toThrow("allowedDomains must include the baseUrl host");
     expect(() => invalidTarget.expand({} as ApplicationBuilder, invalidTarget.options)).toThrow(
       "target must be an app endpoint reference",
-    );
-  });
-});
-
-describe("manualQaTask", () => {
-  it("declares portable, non-empty evidence files and branch-specific instructions", () => {
-    const task = manualQaTask({
-      harness: "tester",
-      instructions: "Verify the new checkout validation and its mobile error state.",
-      requiredProcesses: ["app-3-web-web"],
-    });
-
-    expect(task.artifacts).toEqual(COMPUTER_USE_ARTIFACTS);
-    expect(task.artifacts).toContain("qa/session.webm");
-    expect(task.artifacts).toContain("qa/desktop.png");
-    expect(task.artifacts).toContain("qa/trace.json");
-    expect(task.prompt).toContain("new checkout validation");
-    expect(task.prompt).toContain("Do not modify application source code");
-    expect(task.prompt).toContain("run test -s for every declared artifact");
-    expect(task.prompt).toContain("write [] (an empty JSON array)");
-    expect(task.requiredProcesses).toEqual(["app-3-web-web"]);
-    expect(task.validationCommands).toBeUndefined();
-  });
-
-  it("requires a harness and QA instructions", () => {
-    expect(() => manualQaTask({ harness: "", instructions: "test" })).toThrow("requires a harness");
-    expect(() => manualQaTask({ harness: "tester", instructions: "" })).toThrow(
-      "requires instructions",
     );
   });
 });

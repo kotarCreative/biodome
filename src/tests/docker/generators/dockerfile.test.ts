@@ -108,7 +108,11 @@ describe("generateDockerfile", () => {
     plan.runtime.envVars.push({ key: "DEBUG", scope: "both", value: "1" });
 
     const dockerfile = generateDockerfile(plan);
-    expect(dockerfile).toContain("DEBUG=1");
+    expect(dockerfile).toContain('ENV DEBUG="1"');
+    expect(dockerfile.indexOf('ENV DEBUG="1"')).toBeLessThan(
+      dockerfile.indexOf("FROM base AS deps"),
+    );
+    expect(dockerfile).not.toMatch(/^ENV\s*$/m);
   });
 
   it("never bakes passthrough env vars into the image", () => {

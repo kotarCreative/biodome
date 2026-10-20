@@ -9,13 +9,14 @@ import { createAwsEcsDriver } from "../../runtime/aws-ecs.js";
 
 function plan(requirements: ExecutionPlan["task"]["capabilities"]): ExecutionPlan {
   return {
-    version: 1,
+    version: 2,
     project: "demo",
     target: { name: "local", provider: "example", options: {} },
     task: {
       name: "review",
-      agent: { harness: "codex" },
-      prompt: "Review this repository",
+      command: ["npm", "test"],
+      intent: "Review this repository",
+      input: {},
       timeout: "30m",
       cleanup: "always",
       requiredServices: [],

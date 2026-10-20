@@ -1,18 +1,4 @@
-import {
-  Plan,
-  Service,
-  Port,
-  SecretReference,
-  EnvVar,
-  Volume,
-  Provider,
-  Repo,
-  AgentHarness,
-  PiHarness,
-  CodexHarness,
-  ClaudeHarness,
-  LlmProvider,
-} from "./plan.js";
+import { Plan, Service, Port, SecretReference, EnvVar, Volume, Provider, Repo } from "./plan.js";
 import { isSecretArnReference } from "./secrets.js";
 
 function formatPort(p: Port): string {
@@ -75,57 +61,6 @@ function formatRepo(repo: Repo): string {
   if (repo.credentials?.token) parts.push("token $VAR");
   if (repo.credentials?.sshKey) parts.push("ssh key $VAR");
   return `${repo.name} (${parts.join(", ")}) → ${repo.path}`;
-}
-
-function formatAgentHarness(harness: AgentHarness): string {
-  const parts: string[] = [harness.type];
-  parts.push(`port ${harness.port}`);
-  if (Object.keys(harness.mcpServers).length > 0) {
-    parts.push(`mcp ${Object.keys(harness.mcpServers).join(", ")}`);
-  }
-  if (harness.telemetry.enabled) {
-    parts.push(`telemetry → ${harness.telemetry.path}`);
-  }
-  return `${harness.name} (${parts.join(", ")})`;
-}
-
-function formatLlmProvider(provider: LlmProvider): string {
-  const parts: string[] = [];
-  if (provider.npm) parts.push(`npm ${provider.npm}`);
-  if (provider.displayName) parts.push(`"${provider.displayName}"`);
-  const modelNames = Object.keys(provider.models);
-  if (modelNames.length > 0) parts.push(`models ${modelNames.join(", ")}`);
-  return `${provider.name} (${parts.join(", ")})`;
-}
-
-function formatPiHarness(harness: PiHarness): string {
-  const parts: string[] = [];
-  if (harness.provider) parts.push(`provider ${harness.provider}`);
-  if (harness.model) parts.push(`model ${harness.model}`);
-  if (harness.tools && harness.tools.length > 0) parts.push(`tools ${harness.tools.join(", ")}`);
-  if (harness.telemetry.enabled) parts.push(`telemetry → ${harness.telemetry.path}`);
-  return `${harness.name} (${parts.join(", ")})`;
-}
-
-function formatCodexHarness(harness: CodexHarness): string {
-  const parts: string[] = [];
-  parts.push("codex");
-  parts.push(`port ${harness.port}`);
-  if (harness.model) parts.push(`model ${harness.model}`);
-  if (Object.keys(harness.mcpServers).length > 0) {
-    parts.push(`mcp ${Object.keys(harness.mcpServers).join(", ")}`);
-  }
-  if (harness.telemetry.enabled) parts.push(`telemetry → ${harness.telemetry.path}`);
-  return `${harness.name} (${parts.join(", ")})`;
-}
-
-function formatClaudeHarness(harness: ClaudeHarness): string {
-  const parts: string[] = [];
-  if (harness.model) parts.push(`model ${harness.model}`);
-  if (harness.tools && harness.tools.length > 0) parts.push(`tools ${harness.tools.join(", ")}`);
-  if (harness.permissions) parts.push(`permissions ${harness.permissions}`);
-  if (harness.telemetry.enabled) parts.push(`telemetry → ${harness.telemetry.path}`);
-  return `${harness.name} (${parts.join(", ")})`;
 }
 
 export interface ServiceConnection {
@@ -222,46 +157,6 @@ export function formatInfo(plan: Plan): string {
     lines.push("Repos:");
     for (const repo of plan.runtime.repos) {
       lines.push(`  - ${formatRepo(repo)}`);
-    }
-  }
-
-  if (plan.runtime.agentHarnesses.length > 0) {
-    lines.push("");
-    lines.push("Agent harnesses:");
-    for (const harness of plan.runtime.agentHarnesses) {
-      lines.push(`  - ${formatAgentHarness(harness)}`);
-    }
-  }
-
-  if (plan.runtime.llmProviders.length > 0) {
-    lines.push("");
-    lines.push("LLM providers:");
-    for (const provider of plan.runtime.llmProviders) {
-      lines.push(`  - ${formatLlmProvider(provider)}`);
-    }
-  }
-
-  if (plan.runtime.piHarnesses.length > 0) {
-    lines.push("");
-    lines.push("Pi harnesses:");
-    for (const harness of plan.runtime.piHarnesses) {
-      lines.push(`  - ${formatPiHarness(harness)}`);
-    }
-  }
-
-  if (plan.runtime.codexHarnesses.length > 0) {
-    lines.push("");
-    lines.push("Codex harnesses:");
-    for (const harness of plan.runtime.codexHarnesses) {
-      lines.push(`  - ${formatCodexHarness(harness)}`);
-    }
-  }
-
-  if (plan.runtime.claudeHarnesses.length > 0) {
-    lines.push("");
-    lines.push("Claude harnesses:");
-    for (const harness of plan.runtime.claudeHarnesses) {
-      lines.push(`  - ${formatClaudeHarness(harness)}`);
     }
   }
 
@@ -413,51 +308,6 @@ export function formatAgentsMd(plan: Plan): string {
     lines.push("");
   }
 
-  if (plan.runtime.agentHarnesses.length > 0) {
-    lines.push("## Agent harnesses");
-    lines.push("");
-    for (const harness of plan.runtime.agentHarnesses) {
-      lines.push(`- \`${formatAgentHarness(harness)}\``);
-    }
-    lines.push("");
-  }
-
-  if (plan.runtime.llmProviders.length > 0) {
-    lines.push("## LLM providers");
-    lines.push("");
-    for (const provider of plan.runtime.llmProviders) {
-      lines.push(`- \`${formatLlmProvider(provider)}\``);
-    }
-    lines.push("");
-  }
-
-  if (plan.runtime.piHarnesses.length > 0) {
-    lines.push("## Pi harnesses");
-    lines.push("");
-    for (const harness of plan.runtime.piHarnesses) {
-      lines.push(`- \`${formatPiHarness(harness)}\``);
-    }
-    lines.push("");
-  }
-
-  if (plan.runtime.codexHarnesses.length > 0) {
-    lines.push("## Codex harnesses");
-    lines.push("");
-    for (const harness of plan.runtime.codexHarnesses) {
-      lines.push(`- \`${formatCodexHarness(harness)}\``);
-    }
-    lines.push("");
-  }
-
-  if (plan.runtime.claudeHarnesses.length > 0) {
-    lines.push("## Claude harnesses");
-    lines.push("");
-    for (const harness of plan.runtime.claudeHarnesses) {
-      lines.push(`- \`${formatClaudeHarness(harness)}\``);
-    }
-    lines.push("");
-  }
-
   if (plan.runtime.endpoints.length > 0) {
     lines.push("## Endpoints");
     lines.push("");
@@ -547,9 +397,11 @@ export function formatAgentsMd(plan: Plan): string {
 
   lines.push("## Common commands");
   lines.push("");
-  lines.push("- `biodome up` — start the environment");
-  lines.push("- `biodome down` — stop the environment");
-  lines.push("- `biodome exec <command>` — run a command in the dev container");
+  lines.push("- `biodome up <target> --build` — prepare and start the environment");
+  lines.push("- `biodome down <target>` — stop the environment");
+  lines.push("- `biodome exec <target> <command>` — run a command in the environment");
+  lines.push("- `biodome shell <target>` — open an interactive Compose session");
+  lines.push("- `biodome run <target> <action> --input '<json>'` — invoke a command hook");
   lines.push("- `biodome info` — show this summary");
   lines.push("");
 

@@ -1,77 +1,79 @@
-import { type Task, type TaskSpec, parseDuration, validateArtifactPath } from "./plan.js";
+import { Schema } from "effect";
+import { type Task, type TaskSpec, TaskSpecSchema, validateArtifactPath } from "./plan.js";
 import type { TaskContext } from "./feature.js";
 import { ValidationError } from "./errors.js";
 
-export class TaskContextImpl implements TaskContext {
-  private taskName: string;
-  private declared: TaskSpec | null = null;
-
-  constructor(taskName: string) {
-    this.taskName = taskName;
+function validateJson(value: unknown): void {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return;
+  if (typeof value === "number" && Number.isFinite(value)) return;
+  if (Array.isArray(value)) {
+    value.forEach(validateJson);
+    return;
   }
+  if (typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    Object.values(value).forEach(validateJson);
+    return;
+  }
+  throw new Error("input must contain only JSON values");
+}
 
-  addTask(spec: TaskSpec): void {
+export class TaskContextImpl implements TaskContext {
+  private declared: Task | null = null;
+
+  constructor(private readonly taskName: string) {}
+
+  addAction(spec: TaskSpec): void {
     if (this.declared !== null) {
-      throw new ValidationError({
-        message: `Task "${this.taskName}" called addTask twice. A task module may declare only one task.`,
-      });
+      throw new ValidationError({ message: `Action "${this.taskName}" called addAction twice` });
     }
-
-    if (!spec.harness || typeof spec.harness !== "string") {
-      throw new ValidationError({ message: `Task "${this.taskName}": harness is required` });
-    }
-
-    if (!spec.prompt || typeof spec.prompt !== "string") {
-      throw new ValidationError({ message: `Task "${this.taskName}": prompt is required` });
-    }
-
-    const artifacts = spec.artifacts ?? [];
-    for (const artifact of artifacts) {
-      try {
-        validateArtifactPath(artifact);
-      } catch (e) {
-        throw new ValidationError({
-          message: `Task "${this.taskName}": invalid artifact path "${artifact}": ${(e as Error).message}`,
-        });
-      }
-    }
-
-    const timeout = spec.timeout ?? "20m";
     try {
-      parseDuration(timeout);
-    } catch (e) {
-      throw new ValidationError({
-        message: `Task "${this.taskName}": invalid timeout "${timeout}": ${(e as Error).message}`,
-      });
+      Schema.decodeUnknownSync(TaskSpecSchema)(spec);
+      if (!spec.intent.trim()) throw new Error("intent must not be blank");
+      if (spec.intent.includes("\0") || Buffer.byteLength(spec.intent) > 16384) {
+        throw new Error("intent must not contain NUL bytes or exceed 16 KiB");
+      }
+      for (const command of [spec.command, ...(spec.validationCommands ?? [])]) {
+        if (!command[0]?.trim()) throw new Error("command must name an executable");
+        if (command.some((argument) => typeof argument !== "string" || argument.includes("\0"))) {
+          throw new Error("command arguments must be strings and must not contain NUL bytes");
+        }
+      }
+      // Bound serialized input before recursing: cyclic values fail here too.
+      const input = spec.input ?? {};
+      const json = JSON.stringify(input);
+      if (json === undefined || Buffer.byteLength(json) > 65536) {
+        throw new Error("input must be a JSON object of at most 64 KiB");
+      }
+      validateJson(input);
+      const artifacts = spec.outputs ?? [];
+      artifacts.forEach(validateArtifactPath);
+      this.declared = {
+        name: this.taskName,
+        command: [...spec.command],
+        intent: spec.intent,
+        input: structuredClone(input),
+        artifacts: [...artifacts],
+        timeout: spec.timeout ?? "20m",
+        cleanup: spec.cleanup ?? "never",
+        requiredServices: spec.requiredServices,
+        requiredProcesses: spec.requiredProcesses,
+        capabilities: spec.capabilities,
+        resources: spec.resources,
+        network: spec.network,
+        workspace: spec.workspace,
+        validationCommands: spec.validationCommands,
+      };
+    } catch (error) {
+      throw new ValidationError({ message: `Action "${this.taskName}": ${String(error)}` });
     }
-
-    const cleanup = spec.cleanup ?? "never";
-
-    this.declared = {
-      harness: spec.harness,
-      prompt: spec.prompt,
-      artifacts,
-      timeout,
-      cleanup,
-      requiredServices: spec.requiredServices,
-      requiredProcesses: spec.requiredProcesses,
-      capabilities: spec.capabilities,
-      resources: spec.resources,
-      network: spec.network,
-      workspace: spec.workspace,
-      validationCommands: spec.validationCommands,
-    };
   }
 
   getTask(): Task {
-    if (this.declared === null) {
+    if (!this.declared) {
       throw new ValidationError({
-        message: `Task "${this.taskName}" did not declare a task. Call addTask() in the task module.`,
+        message: `Action "${this.taskName}" did not declare an action. Call addAction().`,
       });
     }
-    return {
-      name: this.taskName,
-      ...this.declared,
-    };
+    return structuredClone(this.declared);
   }
 }

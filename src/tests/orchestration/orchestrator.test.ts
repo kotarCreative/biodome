@@ -32,19 +32,14 @@ function eventStore(): EventStoreService {
 
 function taskPlan(): Plan {
   const plan = createPlan("orchestration-test");
-  plan.runtime.piHarnesses.push({
-    name: "agent",
-    type: "pi",
-    telemetry: { enabled: false, path: "" },
-    config: {},
-  });
   plan.deployment = {
     target: { name: "local", driver: "fake", options: {} },
     deploymentId: "orchestration-test-local",
     task: {
       name: "review",
-      harness: "agent",
-      prompt: "Review this project",
+      command: ["npm", "test"],
+      intent: "Review this project",
+      input: {},
       artifacts: ["review.md"],
       timeout: "1m",
       cleanup: "always",

@@ -6,6 +6,8 @@ import { createTargetOperation } from "../target-operation.js";
 import type { TargetOperationDependencies } from "../target-operation.js";
 import { providerProfile } from "../../orchestration/compiler.js";
 import { preflightTargetCompatibility } from "../../orchestration/compatibility.js";
+import { supportsTargetValidation } from "../../runtime/driver.js";
+import { operationInput } from "../target-operation.js";
 
 export function configValidateWorkflow(rootDir: string) {
   return Effect.gen(function* () {
@@ -32,6 +34,9 @@ export function targetValidateWorkflow(
     );
     const { plan, driver } = operation;
     yield* validatePlan(plan);
+    if (supportsTargetValidation(driver)) {
+      yield* driver.validateTarget(operationInput(operation));
+    }
     const compatibility = preflightTargetCompatibility(plan, providerProfile(driver));
     if (!compatibility.compatible) {
       const details = compatibility.missing

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { SourceRevision } from "./source.js";
 
 export const RUN_RECORD_VERSION = 1;
 
@@ -51,6 +52,10 @@ export interface RunRecord {
   deployment?: ProviderDeploymentReference;
   attempts: RunAttempt[];
   artifacts: RunArtifact[];
+  source?: SourceRevision;
+  phase?: string;
+  outcome?: "succeeded" | "failed" | "timed-out";
+  cleanupStatus?: "completed" | "failed" | "not-requested";
 }
 
 const TRANSITIONS: Readonly<Record<RunState, readonly RunState[]>> = {
@@ -58,7 +63,7 @@ const TRANSITIONS: Readonly<Record<RunState, readonly RunState[]>> = {
   preparing: ["ready", "failed", "cleaning-up"],
   ready: ["executing", "cleaning-up", "failed"],
   executing: ["collecting", "succeeded", "failed", "timed-out", "cleaning-up"],
-  collecting: ["succeeded", "failed", "cleaning-up"],
+  collecting: ["succeeded", "failed", "timed-out", "cleaning-up"],
   succeeded: ["cleaning-up", "complete"],
   failed: ["cleaning-up", "complete"],
   "timed-out": ["cleaning-up", "complete"],
@@ -106,5 +111,6 @@ export function createRunRecord(
     createdAt: input.createdAt ?? new Date().toISOString(),
     attempts: [],
     artifacts: [],
+    ...(input.source ? { source: input.source } : {}),
   };
 }

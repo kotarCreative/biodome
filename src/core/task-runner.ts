@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { Effect } from "effect";
 import { parseDuration, type Plan, type RuntimeTarget, type Task } from "./plan.js";
 import type { RuntimeDriver } from "../runtime/driver.js";
@@ -17,7 +18,7 @@ import {
   type BuildManifest,
 } from "../runtime/build-manifest.js";
 import { EventStore, commandMetadata, instrumentOperation, type EventScope } from "./events.js";
-import { RuntimeError, ValidationError } from "./errors.js";
+import { RuntimeError } from "./errors.js";
 import {
   supportsArtifacts,
   supportsBuild,
@@ -27,6 +28,7 @@ import {
   supportsStart,
   supportsStatus,
   supportsStop,
+  supportsLogs,
 } from "../runtime/driver.js";
 import type {
   Artifact,
@@ -38,17 +40,17 @@ import type {
   StatusDriver,
   StoppableDriver,
 } from "../runtime/driver.js";
-import { agentTaskCommand } from "../agents/registry.js";
 import type { ExecutionPlan } from "../orchestration/execution-plan.js";
-
-export function harnessTaskCommand(plan: Plan, harnessName: string, prompt: string): string[] {
-  return agentTaskCommand(plan, harnessName, prompt);
-}
+import { actionCommand } from "./action-command.js";
+export { actionCommand } from "./action-command.js";
 
 export interface TaskResult {
   exitCode: number;
   outputDir: string;
   durationMs: number;
+  stdout?: string;
+  stderr?: string;
+  cleanupFailed?: boolean;
   artifacts?: Array<{ path: string; sizeBytes: number; localPath: string }>;
 }
 
@@ -82,18 +84,6 @@ interface TaskCommandInput extends RuntimeOperationInput {
 interface ResolvedDeployment {
   state: DeploymentState;
   buildManifest: ReturnType<typeof readBuildManifest>;
-}
-
-function resolveHarnessCommand(plan: Plan, task: Task): Effect.Effect<string[], unknown> {
-  return Effect.try({
-    try: () => harnessTaskCommand(plan, task.harness, task.prompt),
-    catch: (error) => {
-      if (error instanceof ValidationError) {
-        return new RuntimeError({ message: error.message });
-      }
-      return error;
-    },
-  });
 }
 
 function ensureDriverCapabilities(
@@ -142,7 +132,8 @@ function buildAndStartDeployment(
 ): Effect.Effect<ResolvedDeployment, RuntimeError, EventStore> {
   return Effect.gen(function* () {
     const targetName = context.target.name;
-    yield* driverOps.render(context);
+    const generated = yield* driverOps.render(context);
+    yield* store.emit("files.generated", { rootDir: context.rootDir, files: generated }, scope);
     const buildResult = yield* instrumentOperation(
       store,
       scope,
@@ -231,15 +222,22 @@ function createCommandRunner(
 ): (
   command: string[],
   artifactPaths?: string[],
+  validationCommands?: string[][],
 ) => Effect.Effect<CommandResult, RuntimeError, EventStore> {
-  return (command, artifactPaths) => {
+  return (command, artifactPaths, validationCommands) => {
     if (supportsJob(driverOps)) {
       return instrumentOperation(
         store,
         scope,
         "job",
         commandMetadata(command),
-        driverOps.runJob({ ...commandInput, command, timeoutMs, artifactPaths }),
+        driverOps.runJob({
+          ...commandInput,
+          command,
+          validationCommands,
+          timeoutMs,
+          artifactPaths,
+        }),
       );
     }
     if (supportsInplaceExec(driverOps)) {
@@ -263,6 +261,7 @@ function collectTaskArtifacts(
   driver: RuntimeDriver,
   commandInput: TaskCommandInput,
   paths: string[],
+  bestEffort = false,
 ): Effect.Effect<Artifact[], RuntimeError, EventStore> {
   if (!supportsArtifacts(driver)) {
     return Effect.fail(
@@ -272,12 +271,30 @@ function collectTaskArtifacts(
     );
   }
   return Effect.gen(function* () {
-    const collected = yield* driver.collectArtifacts({ ...commandInput, paths });
-    return collected.map((a) => ({
-      path: a.path,
-      sizeBytes: a.sizeBytes,
-      localPath: a.localPath,
-    }));
+    const store = yield* EventStore;
+    const collected: Artifact[] = [];
+    const failures: string[] = [];
+    for (const path of paths) {
+      const result = yield* Effect.result(
+        driver.collectArtifacts({
+          ...commandInput,
+          paths: [path],
+          artifactDir: join(commandInput.outputDir, "artifacts", store.runId),
+        }),
+      );
+      if (result._tag === "Failure") {
+        failures.push(result.failure.message);
+        yield* store.emit("artifact.failed", { path, error: result.failure.message });
+      } else {
+        for (const artifact of result.success) {
+          collected.push(artifact);
+          yield* store.emit("artifact.collected", artifact);
+        }
+      }
+    }
+    if (!bestEffort && failures.length > 0)
+      return yield* new RuntimeError({ message: failures.join("; "), artifacts: collected });
+    return collected;
   });
 }
 
@@ -320,12 +337,25 @@ function createCleanupEffect(
 function suppressCleanupFailure(
   cleanup: Effect.Effect<void, RuntimeError, EventStore>,
   taskName: string,
+  target: string,
+  onFailure: () => void,
 ): Effect.Effect<void, never, EventStore> {
   return cleanup.pipe(
+    Effect.tap(() =>
+      Effect.gen(function* () {
+        const store = yield* EventStore;
+        yield* store.emit("cleanup.completed", { target });
+      }),
+    ),
     Effect.catch((cleanupError) =>
-      Effect.logWarning(
-        `Task cleanup failed for "${taskName}": ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
-      ).pipe(Effect.andThen(Effect.void)),
+      Effect.gen(function* () {
+        onFailure();
+        const store = yield* EventStore;
+        yield* store.emit("cleanup.failed", { target, error: cleanupError.message });
+        yield* Effect.logWarning(
+          `Task cleanup failed for "${taskName}": ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+        );
+      }),
     ),
   );
 }
@@ -359,6 +389,7 @@ export function executeTask(
   plan: Plan,
   driver: RuntimeDriver,
   executionPlan?: ExecutionPlan,
+  onPhase?: (phase: string) => Effect.Effect<void, RuntimeError>,
 ): Effect.Effect<TaskResult, RuntimeError, EventStore> {
   const deployment = plan.deployment;
   const task = deployment?.task;
@@ -372,9 +403,39 @@ export function executeTask(
   const deploymentId = deployment.deploymentId;
   const startTime = Date.now();
   const context: TaskRunContext = { rootDir, outputDir, plan, target, deploymentId, executionPlan };
+  let evidenceInput: TaskCommandInput | undefined;
+  let collectionAttempted = false;
+  let cleanupFailed = false;
+  const snapshotLogs = () =>
+    Effect.gen(function* () {
+      if (!evidenceInput || !supportsLogs(driver) || supportsJob(driver)) return;
+      const processes = plan.runtime.processes.filter((process) => process.mode === "daemon");
+      if (processes.length === 0) return;
+      const store = yield* EventStore;
+      for (const processName of [undefined, ...processes.map((process) => process.name)]) {
+        yield* instrumentOperation(
+          store,
+          { runId: store.runId, target: targetName, provider: driver.id },
+          "logs",
+          { processName },
+          driver.logs({ ...evidenceInput, processName, follow: false }),
+        ).pipe(Effect.ignore);
+      }
+    });
+  const phase = (value: string) =>
+    Effect.gen(function* () {
+      const store = yield* EventStore;
+      yield* store.emit(
+        "action.phase",
+        { phase: value, action: task.name },
+        { runId: store.runId, target: targetName, provider: driver.id },
+      );
+      if (onPhase) yield* onPhase(value);
+    });
 
   const runEffect = Effect.gen(function* () {
-    const cmd = yield* resolveHarnessCommand(plan, task);
+    const cmd = actionCommand(task);
+    yield* phase("preparing");
 
     const driverOps = yield* ensureDriverCapabilities(driver, task.artifacts.length > 0);
     const timeoutSeconds = parseDuration(task.timeout);
@@ -392,20 +453,33 @@ export function executeTask(
         target: targetName,
         driver: driver.id,
         task: task.name,
-        harness: task.harness,
       },
       scope,
     );
 
     const deployed = yield* ensureDeployed(driverOps, context, store, scope);
+    yield* phase("ready");
+    yield* store.emit(
+      "environment.ready",
+      { imageRef: deployed.buildManifest.imageRef, digest: deployed.buildManifest.digest },
+      scope,
+    );
     const commandInput: TaskCommandInput = {
       ...context,
       state: deployed.state,
       buildManifest: deployed.buildManifest,
     };
+    evidenceInput = commandInput;
+    yield* phase("executing");
     const runCommand = createCommandRunner(driverOps, commandInput, timeoutMs, store, scope);
 
-    const execResult = yield* runCommand(cmd, task.artifacts);
+    const usesOneShotJob = supportsJob(driverOps);
+    const validationCommands = task.validationCommands ?? [];
+    const execResult = yield* runCommand(
+      cmd,
+      task.artifacts,
+      usesOneShotJob ? validationCommands : undefined,
+    );
 
     const durationMs = Date.now() - startTime;
 
@@ -416,7 +490,6 @@ export function executeTask(
           target: targetName,
           driver: driver.id,
           task: task.name,
-          harness: task.harness,
           durationMs,
           error: `timed out after ${task.timeout}`,
         },
@@ -425,6 +498,8 @@ export function executeTask(
       return yield* Effect.fail(
         new RuntimeError({
           message: `Task "${task.name}" timed out after ${task.timeout}`,
+          exitCode: execResult.exitCode,
+          timedOut: true,
         }),
       );
     }
@@ -436,7 +511,6 @@ export function executeTask(
           target: targetName,
           driver: driver.id,
           task: task.name,
-          harness: task.harness,
           durationMs,
           exitCode: execResult.exitCode,
           error: `exit code ${execResult.exitCode}`,
@@ -446,11 +520,13 @@ export function executeTask(
       return yield* Effect.fail(
         new RuntimeError({
           message: `Task "${task.name}" failed with exit code ${execResult.exitCode}`,
+          exitCode: execResult.exitCode,
         }),
       );
     }
 
-    for (const validationCommand of task.validationCommands ?? []) {
+    for (const validationCommand of usesOneShotJob ? [] : validationCommands) {
+      yield* phase("validating");
       const validation = yield* runCommand(validationCommand);
       if (validation.timedOut || validation.exitCode !== 0) {
         const reason = validation.timedOut
@@ -462,19 +538,26 @@ export function executeTask(
             target: targetName,
             driver: driver.id,
             task: task.name,
-            harness: task.harness,
             durationMs: Date.now() - startTime,
             exitCode: validation.exitCode,
             error: reason,
           },
           scope,
         );
-        return yield* Effect.fail(new RuntimeError({ message: reason }));
+        return yield* Effect.fail(
+          new RuntimeError({
+            message: reason,
+            exitCode: validation.exitCode,
+            timedOut: validation.timedOut,
+          }),
+        );
       }
     }
 
     let taskArtifacts: Artifact[] | undefined;
     if (task.artifacts.length > 0) {
+      yield* phase("collecting");
+      collectionAttempted = true;
       taskArtifacts = yield* collectTaskArtifacts(driver, commandInput, task.artifacts);
     }
 
@@ -484,21 +567,73 @@ export function executeTask(
         target: targetName,
         driver: driver.id,
         task: task.name,
-        harness: task.harness,
         durationMs,
         exitCode: execResult.exitCode,
         artifacts: taskArtifacts,
       },
       scope,
     );
+    yield* snapshotLogs();
 
-    return { exitCode: execResult.exitCode, outputDir, artifacts: taskArtifacts, durationMs };
+    return {
+      exitCode: execResult.exitCode,
+      outputDir,
+      artifacts: taskArtifacts,
+      durationMs: Date.now() - startTime,
+      stdout: execResult.stdout,
+      stderr: execResult.stderr,
+    };
   });
+
+  const withEvidence = runEffect.pipe(
+    Effect.catch((cause) =>
+      Effect.gen(function* () {
+        const error =
+          cause instanceof RuntimeError ? cause : new RuntimeError({ message: String(cause) });
+        let artifacts = error.artifacts ? [...error.artifacts] : [];
+        if (evidenceInput && !collectionAttempted && task.artifacts.length > 0) {
+          yield* phase("collecting");
+          collectionAttempted = true;
+          artifacts = yield* collectTaskArtifacts(driver, evidenceInput, task.artifacts, true);
+        }
+        yield* snapshotLogs();
+        yield* phase(error.timedOut ? "timed-out" : "failed");
+        return yield* new RuntimeError({
+          message: error.message,
+          command: error.command,
+          exitCode: error.exitCode,
+          timedOut: error.timedOut,
+          artifacts,
+        });
+      }),
+    ),
+  );
 
   const cleanup = createCleanupEffect(context, driver);
   return applyCleanupPolicy(
-    runEffect,
-    () => suppressCleanupFailure(cleanup, task.name),
+    withEvidence,
+    () =>
+      phase("cleaning-up").pipe(
+        Effect.ignore,
+        Effect.andThen(
+          suppressCleanupFailure(cleanup, task.name, targetName, () => {
+            cleanupFailed = true;
+          }),
+        ),
+      ),
     task.cleanup,
+  ).pipe(
+    Effect.map((result) => ({ ...result, cleanupFailed })),
+    Effect.mapError(
+      (error) =>
+        new RuntimeError({
+          message: error.message,
+          command: error.command,
+          exitCode: error.exitCode,
+          timedOut: error.timedOut,
+          artifacts: error.artifacts,
+          cleanupFailed,
+        }),
+    ),
   );
 }

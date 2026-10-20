@@ -17,7 +17,15 @@ export class FeatureError extends Schema.TaggedErrorClass<FeatureError>()("Featu
 
 export class RuntimeError extends Schema.TaggedErrorClass<RuntimeError>()("RuntimeError", {
   message: Schema.String,
-  command: Schema.optionalKey(Schema.String),
+  command: Schema.optional(Schema.String),
+  exitCode: Schema.optional(Schema.Number),
+  timedOut: Schema.optional(Schema.Boolean),
+  cleanupFailed: Schema.optional(Schema.Boolean),
+  artifacts: Schema.optional(
+    Schema.Array(
+      Schema.Struct({ path: Schema.String, sizeBytes: Schema.Number, localPath: Schema.String }),
+    ),
+  ),
 }) {}
 
 export class PlanError extends Schema.TaggedErrorClass<PlanError>()("PlanError", {

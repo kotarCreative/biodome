@@ -47,6 +47,7 @@ import type {
   StatusResult,
   StartableDriver,
   StoppableDriver,
+  TargetValidatingDriver,
 } from "./driver.js";
 import type { RuntimeTarget } from "../core/plan.js";
 import type { Plan } from "../core/plan.js";
@@ -58,6 +59,7 @@ import type { EventStore } from "../core/events.js";
 import { runtimeLayout } from "./layout.js";
 import { renderCommonArtifacts, writeArtifacts } from "./artifacts.js";
 import { needsStartupScript } from "../docker/generators/startup.js";
+import { shellQuote } from "../docker/generators/shell.js";
 import { TIMEOUT_EXIT_CODE, platformErrorMessage, runProcess, toRuntimeError } from "./proc.js";
 import { assertRelativeArtifactPath } from "./driver-kit.js";
 import { writeState, removeState } from "./state.js";
@@ -611,6 +613,64 @@ function requireImmutableImageRef(buildManifest: StartInput["buildManifest"]): s
   return imageRef;
 }
 
+/**
+ * Run a job and, only after it succeeds, publish every declared artifact to
+ * the deployment-scoped S3 prefix. The original command remains positional
+ * argv rather than interpolated shell text; only already-validated artifact
+ * paths are rendered into the uploader script.
+ */
+function commandWithArtifactUpload(command: string[], artifactPaths: string[]): string[] {
+  if (artifactPaths.length === 0) return command;
+
+  const lines = ["job_status=0", '"$@" || job_status=$?', 'if [ "$job_status" -eq 0 ]; then'];
+  for (const artifactPath of artifactPaths) {
+    const source = shellQuote(`/workspace/${artifactPath}`);
+    const destination =
+      '"s3://${BIODOME_ARTIFACT_BUCKET}/${BIODOME_ARTIFACT_PREFIX}/${BIODOME_DEPLOYMENT_ID}/"' +
+      shellQuote(artifactPath);
+    lines.push(`  aws s3 cp ${source} ${destination} --only-show-errors || job_status=$?`);
+  }
+  lines.push("fi", 'exit "$job_status"');
+
+  return ["sh", "-c", lines.join("\n"), "biodome-artifact-job", ...command];
+}
+
+/**
+ * Keep provider-native one-shot validation in the same task as the workload so
+ * every command observes the workspace mutations made by the preceding one.
+ */
+function commandWithValidations(command: string[], validationCommands: string[][]): string[] {
+  if (validationCommands.length === 0) return command;
+
+  const lines = [
+    '"$@"',
+    "command_status=$?",
+    'if [ "$command_status" -ne 0 ]; then',
+    '  exit "$command_status"',
+    "fi",
+  ];
+  for (const validationCommand of validationCommands) {
+    if (
+      validationCommand.length === 0 ||
+      !validationCommand[0] ||
+      validationCommand.some((argument) => argument.includes("\0"))
+    ) {
+      throw new RuntimeError({
+        message: "ECS validation commands must name an executable and contain no NUL bytes",
+      });
+    }
+    const rendered = validationCommand.map(shellQuote).join(" ");
+    lines.push(
+      `if ! ${rendered}; then`,
+      `  echo ${shellQuote(`biodome: validation command failed: ${validationCommand.join(" ")}`)} >&2`,
+      "  exit 1",
+      "fi",
+    );
+  }
+
+  return ["sh", "-c", lines.join("\n"), "biodome-validated-job", ...command];
+}
+
 function ecsClientToken(taskDefinitionArn: string, operation: string): string {
   return createHash("sha256").update(`${operation}:${taskDefinitionArn}`).digest("hex");
 }
@@ -692,7 +752,7 @@ function ensureLogGroup(
  * setuid-drops hooks, daemons, and job commands onto their declared identity.
  *
  * Filesystem: the root filesystem stays writable because the dev image writes
- * workspace content, logs, harness homes, and artifacts; ownership is confined
+ * workspace content, logs, and artifacts; ownership is confined
  * to the runtime identity by the generated Dockerfile.
  *
  * Networking: Fargate awsvpc gives every task its own ENI; there is no host
@@ -777,6 +837,7 @@ export function createAwsEcsDriver(
   polling: Partial<EcsPollingPolicy> = {},
 ): RuntimeDriver &
   AvailableDriver &
+  TargetValidatingDriver &
   RenderableDriver &
   BuildableDriver &
   StartableDriver &
@@ -849,6 +910,7 @@ export function createAwsEcsDriver(
 
   const driver: RuntimeDriver &
     AvailableDriver &
+    TargetValidatingDriver &
     RenderableDriver &
     BuildableDriver &
     StartableDriver &
@@ -869,6 +931,21 @@ export function createAwsEcsDriver(
       "artifact.collect",
     ),
 
+    validateTarget(input): Effect.Effect<void, RuntimeError, never> {
+      return Effect.try({
+        try: () => {
+          validateAwsEcsOptions(input.target.options);
+          materializeContainerEnvironment(input.plan);
+        },
+        catch: (error) =>
+          error instanceof RuntimeError
+            ? error
+            : new RuntimeError({
+                message: `Invalid ECS target: ${error instanceof Error ? error.message : String(error)}`,
+              }),
+      });
+    },
+
     render(input: {
       rootDir: string;
       outputDir: string;
@@ -877,8 +954,8 @@ export function createAwsEcsDriver(
     }): Effect.Effect<string[], RuntimeError, never> {
       return Effect.try({
         try: () => {
-          // Validate options and fail before writing artifacts when declared
-          // variables cannot be materialized on ECS (host passthrough refs).
+          // Keep render defensive for direct driver consumers. CLI workflows
+          // invoke validateTarget before availability checks or provider calls.
           validateAwsEcsOptions(input.target.options);
           materializeContainerEnvironment(input.plan);
           const layout = runtimeLayout(input.rootDir, input.target.name);
@@ -1515,24 +1592,36 @@ export function createAwsEcsDriver(
             try: () => resolveSecret(opts.artifactBucket, "the S3 artifact bucket"),
             catch: toRuntimeError,
           });
-          env.environment.push({ name: "BIODOME_ARTIFACT_BUCKET", value: bucket });
-          env.environment.push({
-            name: "BIODOME_ARTIFACT_PREFIX",
-            value: opts.artifactPrefix ? opts.artifactPrefix.replace(/\/+$/, "") : "artifacts",
-          });
-          env.environment.push({ name: "BIODOME_DEPLOYMENT_ID", value: input.deploymentId });
-          env.environment.push({
-            name: "BIODOME_ARTIFACT_PATHS",
-            value: JSON.stringify(input.artifactPaths),
-          });
+          const setJobEnvironment = (name: string, value: string): void => {
+            const existing = env.environment.find((entry) => entry.name === name);
+            if (existing) existing.value = value;
+            else env.environment.push({ name, value });
+          };
+          // The AWS CLI does not infer a region from ECS task credentials.
+          // Pin both variables so the in-task artifact publisher is
+          // deterministic even when the repository declares neither one.
+          setJobEnvironment("AWS_REGION", opts.region);
+          setJobEnvironment("AWS_DEFAULT_REGION", opts.region);
+          setJobEnvironment("BIODOME_ARTIFACT_BUCKET", bucket);
+          setJobEnvironment(
+            "BIODOME_ARTIFACT_PREFIX",
+            opts.artifactPrefix ? opts.artifactPrefix.replace(/\/+$/, "") : "artifacts",
+          );
+          setJobEnvironment("BIODOME_DEPLOYMENT_ID", input.deploymentId);
+          setJobEnvironment("BIODOME_ARTIFACT_PATHS", JSON.stringify(input.artifactPaths));
         }
 
         const hasStartupProcesses = needsStartupScript(input.plan);
         const layout = runtimeLayout(input.rootDir, input.target.name).container;
         const readinessFile = `${layout.root}/ready`;
-        const jobCommand = hasStartupProcesses
-          ? ["sh", layout.startupScript, "--job", ...input.command]
-          : input.command;
+        const validatedCommand = yield* Effect.try({
+          try: () => commandWithValidations(input.command, input.validationCommands ?? []),
+          catch: toRuntimeError,
+        });
+        const workloadCommand = hasStartupProcesses
+          ? ["sh", layout.startupScript, "--job", ...validatedCommand]
+          : validatedCommand;
+        const jobCommand = commandWithArtifactUpload(workloadCommand, input.artifactPaths ?? []);
 
         yield* ensureLogGroup(c.cloudwatch, lgGroup);
 
@@ -1771,7 +1860,7 @@ export function createAwsEcsDriver(
     },
 
     collectArtifacts(
-      input: RuntimeOperationInput & { paths: string[] },
+      input: RuntimeOperationInput & { paths: string[]; artifactDir?: string },
     ): Effect.Effect<Artifact[], RuntimeError, EventStore> {
       return Effect.gen(function* () {
         const opts = yield* Effect.try({
@@ -1792,7 +1881,7 @@ export function createAwsEcsDriver(
         const c = getClients(opts);
         const s3 = c.s3 ?? new S3Client({ region: opts.region });
 
-        const artifactsDir = join(input.outputDir, "artifacts");
+        const artifactsDir = input.artifactDir ?? join(input.outputDir, "artifacts");
         yield* Effect.try({
           try: () => mkdirSync(artifactsDir, { recursive: true }),
           catch: toRuntimeError,

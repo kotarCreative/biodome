@@ -2,14 +2,17 @@ import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as driverKit from "../../runtime/driver-kit.js";
 import { createPlan, type RuntimeTarget } from "../../core/plan.js";
 import {
   buildDockerExecArgs,
+  buildDockerShellArgs,
   dockerComposeDriver,
   imageRefFromLocalDigest,
 } from "../../runtime/docker-compose.js";
 import { runtimeLayout } from "../../runtime/layout.js";
+import { NoOpEventStoreLive } from "../../core/events.js";
 
 describe("buildDockerExecArgs", () => {
   it("preserves normal docker exec arguments", () => {
@@ -32,6 +35,54 @@ describe("buildDockerExecArgs", () => {
       "echo",
       "hello",
     ]);
+  });
+
+  it("forwards the timeout to result classification as well as command wrapping", async () => {
+    const capture = vi
+      .spyOn(driverKit, "captureTimedExec")
+      .mockReturnValue(
+        Effect.succeed({ exitCode: 124, timedOut: true, stdout: "", stderr: "", durationMs: 3000 }),
+      );
+    try {
+      const result = await Effect.runPromise(
+        dockerComposeDriver
+          .exec({
+            rootDir: "/project",
+            outputDir: "/project/.biodome-build",
+            plan: createPlan("test"),
+            target: { name: "local", driver: "docker-compose", options: {} },
+            deploymentId: "test-deploy",
+            command: ["node", "qa.mjs"],
+            timeoutMs: 3000,
+          })
+          .pipe(Effect.provide(NoOpEventStoreLive())),
+      );
+      expect(capture).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 3000 }));
+      expect(result.timedOut).toBe(true);
+    } finally {
+      capture.mockRestore();
+    }
+  });
+});
+
+describe("interactive environment sessions", () => {
+  it("attaches a terminal as the workload user with a writable home", () => {
+    expect(buildDockerShellArgs("branch-a", "biodome", true)).toEqual([
+      "exec",
+      "--interactive",
+      "--tty",
+      "--user",
+      "biodome",
+      "--env",
+      "HOME=/home/biodome",
+      "--workdir",
+      "/workspace",
+      "branch-a-dev",
+      "sh",
+    ]);
+  });
+  it("does not request a TTY for piped input", () => {
+    expect(buildDockerShellArgs("branch-a", "biodome", false)).not.toContain("--tty");
   });
 });
 

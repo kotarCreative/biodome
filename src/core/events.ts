@@ -21,6 +21,7 @@ import { randomUUID } from "node:crypto";
 import { runtimeLayout } from "../runtime/layout.js";
 import { RuntimeError } from "./errors.js";
 import { redactSecrets } from "./secrets.js";
+import { createProcessOutput, ProcessOutput, type ActionReport } from "./process-output.js";
 
 export const EVENT_TYPES = [
   "run.started",
@@ -67,6 +68,19 @@ export const EVENT_TYPES = [
   "task.started",
   "task.completed",
   "task.failed",
+  "source.resolved",
+  "environment.ready",
+  "action.phase",
+  "action.report",
+  "action.report.invalid",
+  "artifact.collected",
+  "artifact.failed",
+  "cleanup.completed",
+  "cleanup.failed",
+  "runtime.output",
+  "runtime.output.truncated",
+  "runtime.heartbeat",
+  "action.result",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
@@ -100,6 +114,30 @@ export interface CommandMetadata {
 }
 
 export interface EventData {
+  "environment.ready": { imageRef?: string; digest?: string };
+  "source.resolved": { revision?: string; trackedChanges?: boolean; untrackedFiles?: number };
+  "action.phase": { phase: string; action: string; message?: string };
+  "action.report": { operation: string; reported: true; report: ActionReport };
+  "action.report.invalid": { operation: string; reason: string };
+  "artifact.collected": { path: string; sizeBytes: number; localPath: string };
+  "artifact.failed": { path: string; error: string };
+  "cleanup.completed": { target: string };
+  "cleanup.failed": { target: string; error: string };
+  "runtime.output": { operation: string; stream: "stdout" | "stderr"; text: string };
+  "runtime.output.truncated": {
+    operation: string;
+    stream: "stdout" | "stderr";
+    limitBytes: number;
+    droppedBytes: number;
+  };
+  "runtime.heartbeat": { operation: string; elapsedMs: number };
+  "action.result": {
+    action: string;
+    exitCode: number;
+    artifacts: Array<{ path: string; sizeBytes: number; localPath: string }>;
+    error?: string;
+    cleanupFailed?: boolean;
+  };
   "run.started": { command: string; cwd: string };
   "run.completed": { command: string; durationMs: number };
   "run.failed": { command: string; durationMs: number; error: string };
@@ -141,12 +179,11 @@ export interface EventData {
   "service.stop.failed": { name: string; error: string };
   "service.health_check": { name: string; status: string; failingStreak?: number };
   "config.validated": { project: string; valid: boolean };
-  "task.started": { target: string; driver: string; task: string; harness: string };
+  "task.started": { target: string; driver: string; task: string };
   "task.completed": {
     target: string;
     driver: string;
     task: string;
-    harness: string;
     durationMs: number;
     exitCode: number;
     artifacts?: Array<{ path: string; sizeBytes: number; localPath: string }>;
@@ -155,7 +192,6 @@ export interface EventData {
     target: string;
     driver: string;
     task: string;
-    harness: string;
     durationMs: number;
     exitCode?: number;
     error: string;
@@ -164,6 +200,7 @@ export interface EventData {
 
 export interface EventStore {
   readonly runId: string;
+  readonly path?: string;
   readonly emit: <T extends EventType>(
     type: T,
     data: EventData[T],
@@ -206,6 +243,7 @@ export interface FileEventStoreOptions {
   readonly maxFiles?: number;
   readonly target?: string;
   readonly provider?: string;
+  readonly onEvent?: (event: SandboxEvent) => void;
 }
 
 export function createFileEventStore(options: FileEventStoreOptions): EventStore {
@@ -303,6 +341,7 @@ export function createFileEventStore(options: FileEventStoreOptions): EventStore
       }
     }
     appendFileSync(path, line, { mode: 0o600 });
+    options.onEvent?.(event);
     bytes += lineBytes;
     // Pruning scans the whole log directory, so it runs once per store and
     // again only when a rotation adds a new rotated file.
@@ -340,7 +379,7 @@ export function createFileEventStore(options: FileEventStoreOptions): EventStore
       closed = true;
     });
 
-  return { runId, emit, events, close };
+  return { runId, path, emit, events, close };
 }
 
 export const FileEventStoreLive = (options: FileEventStoreOptions): Layer.Layer<EventStore> =>
@@ -369,7 +408,9 @@ export function readEventFile(path: string): EventReadResult {
   if (!existsSync(path)) return { events: [], diagnostics: [] };
   const events: SandboxEvent[] = [];
   const diagnostics: EventDiagnostic[] = [];
-  for (const [index, line] of readFileSync(path, "utf-8").split("\n").entries()) {
+  const text = readFileSync(path, "utf-8");
+  const lines = text.split("\n");
+  for (const [index, line] of lines.entries()) {
     if (line.trim().length === 0) continue;
     try {
       const parsed: unknown = JSON.parse(line);
@@ -385,6 +426,8 @@ export function readEventFile(path: string): EventReadResult {
       const decoded = Schema.decodeUnknownSync(SandboxEventSchema)(normalized);
       events.push(decoded);
     } catch (error) {
+      // Readers may observe an in-flight final append. Re-read it on the next poll.
+      if (!text.endsWith("\n") && index === lines.length - 1) continue;
       diagnostics.push({
         path,
         line: index + 1,
@@ -442,10 +485,44 @@ export function instrumentOperation<A, R>(
   return Effect.gen(function* () {
     yield* store.emit(startedType, started, scope);
     const startedAt = Date.now();
-    const result = yield* effect.pipe(
-      Effect.tap(() =>
-        store.emit(completedType, { ...started, durationMs: Date.now() - startedAt }, scope),
+    const output = createProcessOutput(store, scope, kind);
+    yield* Effect.forkScoped(
+      Effect.forever(
+        Effect.sleep("5 seconds").pipe(
+          Effect.andThen(
+            Effect.suspend(() =>
+              store.emit(
+                "runtime.heartbeat",
+                { operation: kind, elapsedMs: Date.now() - startedAt },
+                scope,
+              ),
+            ),
+          ),
+        ),
       ),
+    );
+    const result = yield* effect.pipe(
+      Effect.provideService(ProcessOutput, output),
+      Effect.ensuring(output.flush()),
+      Effect.tap((value) => {
+        const failed =
+          value !== null &&
+          typeof value === "object" &&
+          "exitCode" in value &&
+          typeof value.exitCode === "number" &&
+          value.exitCode !== 0;
+        return failed
+          ? store.emit(
+              failedType,
+              {
+                ...started,
+                durationMs: Date.now() - startedAt,
+                error: `Command exited with code ${value.exitCode}`,
+              },
+              scope,
+            )
+          : store.emit(completedType, { ...started, durationMs: Date.now() - startedAt }, scope);
+      }),
       Effect.catch((error) =>
         Effect.gen(function* () {
           const message = error instanceof Error ? error.message : String(error);
@@ -459,7 +536,7 @@ export function instrumentOperation<A, R>(
       ),
     );
     return result;
-  });
+  }).pipe(Effect.scoped);
 }
 
 /** Preserve useful command telemetry without persisting prompts or arguments. */

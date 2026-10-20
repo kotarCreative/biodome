@@ -1,6 +1,5 @@
 import { ValidationError } from "../errors.js";
 import type { EnvSpec, LanguageOptions, ProcessSpec } from "../feature.js";
-import { mcpClientAuthFromToken } from "../mcp-client.js";
 import type { Plan } from "../plan.js";
 
 export interface McpOptions {
@@ -35,10 +34,6 @@ interface McpCapabilities {
 
 const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-// Built-in harness types that can send an authorization header to the MCP
-// server. Anything else that references the biodome MCP server is rejected.
-const AUTHENTICATED_MCP_CLIENT_TYPES = new Set(["opencode", "codex"]);
-
 export class McpBuilder {
   private tokenStrengthAdvised = false;
 
@@ -49,7 +44,6 @@ export class McpBuilder {
   ) {}
 
   configure(port: number, options: McpOptions = {}): void {
-    const previousPort = this.plan.build.mcpPort;
     this.plan.build.mcpEnabled = true;
     this.plan.build.mcpPort = port;
     this.plan.build.mcpConfig.enabled = true;
@@ -131,8 +125,6 @@ export class McpBuilder {
       }
     }
 
-    this.finalizeBiodomeMcpServers(port, previousPort);
-
     this.capabilities.addProcess({
       name: "biodome-mcp",
       command: [
@@ -152,46 +144,5 @@ export class McpBuilder {
       mergeEnv: false,
       identity: "mcp",
     });
-  }
-
-  private finalizeBiodomeMcpServers(port: number, previousPort: number): void {
-    const token = this.plan.build.mcpConfig.token;
-    if (!token || typeof token === "string") return;
-    const auth = mcpClientAuthFromToken(token);
-    const candidates = new Set([`http://localhost:${previousPort}`, `http://localhost:${port}`]);
-    const target = `http://localhost:${port}`;
-
-    const harnesses: Array<{
-      name: string;
-      type: string;
-      servers: Record<string, { url: string }>;
-    }> = [
-      ...this.plan.runtime.agentHarnesses.map((harness) => ({
-        name: harness.name,
-        type: harness.type,
-        servers: harness.mcpServers,
-      })),
-      ...this.plan.runtime.codexHarnesses.map((harness) => ({
-        name: harness.name,
-        type: harness.type,
-        servers: harness.mcpServers,
-      })),
-    ];
-
-    for (const harness of harnesses) {
-      let referencesBiodome = false;
-      for (const server of Object.values(harness.servers)) {
-        if (!candidates.has(server.url)) continue;
-        referencesBiodome = true;
-        server.url = target;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (server as any).auth = { ...auth };
-      }
-      if (referencesBiodome && !AUTHENTICATED_MCP_CLIENT_TYPES.has(harness.type)) {
-        throw new ValidationError({
-          message: `MCP is enabled but harness "${harness.name}" (type "${harness.type}") cannot send authorization headers; remove the harness or disable MCP`,
-        });
-      }
-    }
   }
 }

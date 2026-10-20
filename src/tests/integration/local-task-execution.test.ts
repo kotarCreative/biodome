@@ -18,7 +18,7 @@ const ARTIFACT_BODY = [
   "dependency: ok",
   "daemon: ok",
   "environment: ok",
-  "pi-arguments: ok",
+  "action-input: ok",
   "working-directory: ok",
   "",
 ].join("\n");
@@ -41,9 +41,12 @@ function hasDocker(): boolean {
   return result.status === 0;
 }
 
-function deploymentId(project: string, target: string): string {
+function deploymentId(project: string, target: string, rootDir: string): string {
   const slug = `${project}-${target}`.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
-  const hash = createHash("sha256").update(slug).digest("hex").slice(0, 8);
+  const hash = createHash("sha256")
+    .update(`${slug}\0${resolve(rootDir)}`)
+    .digest("hex")
+    .slice(0, 8);
   return `${slug.slice(0, 48)}-${hash}`;
 }
 
@@ -83,10 +86,12 @@ export default function dev(ctx) {
   });
   ctx.addHook({
     name: "fixture-setup",
-    command: ["sh", "-c", "printf hook-ready > /workspace/hook-marker"],
+    command: ["node", "-e", "require('node:fs').writeFileSync('/workspace/hook-marker', JSON.parse(process.env.BIODOME_ACTION_INPUT).value)"],
     startOn: "start.pre",
+    intent: "Prepare the branch fixture",
+    input: { value: "hook-ready" },
+    outputs: ["hook-marker"],
   });
-  ctx.addPiHarness({ name: "reviewer", telemetry: { enabled: false } });
 }
 `,
     ".biodome/targets/local.mjs": `
@@ -94,12 +99,13 @@ export default function local(ctx) {
   ctx.useRuntime("docker-compose");
 }
 `,
-    ".biodome/tasks/review-pr.mjs": `
+    ".biodome/actions/review-pr.mjs": `
 export default function reviewPr(ctx) {
-  ctx.addTask({
-    harness: "reviewer",
-    prompt: ${JSON.stringify(PRIVATE_PROMPT)},
-    artifacts: ["review.md"],
+  ctx.addAction({
+    command: ["node", "/workspace/bin/check.mjs"],
+    intent: "Verify this branch environment",
+    input: { assignment: ${JSON.stringify(PRIVATE_PROMPT)} },
+    outputs: ["review.md"],
     timeout: "30s",
     cleanup: "always",
   });
@@ -167,12 +173,12 @@ createServer((request, response) => {
   response.end(\`worker-cwd-ok:\${process.cwd()}\`);
 }).listen(4318, "127.0.0.1");
 `,
-    "bin/pi": `#!/usr/bin/env node
+    "bin/check.mjs": `#!/usr/bin/env node
 import { readFile, writeFile } from "node:fs/promises";
 import pc from "picocolors";
 
-if (process.argv.length !== 4 || process.argv[2] !== "-p") {
-  throw new Error("Pi shim expected exactly: -p <prompt>");
+if (JSON.parse(process.env.BIODOME_ACTION_INPUT).assignment !== ${JSON.stringify(PRIVATE_PROMPT)}) {
+  throw new Error("Action input was not delivered");
 }
 
 const source = await readFile("/workspace/src/app.mjs", "utf8");
@@ -218,14 +224,14 @@ await writeFile("/workspace/review.md", ${JSON.stringify(ARTIFACT_BODY)});
   for (const [path, content] of Object.entries(files)) {
     writeFixtureFile(rootDir, path, content.trimStart());
   }
-  chmodSync(join(rootDir, "bin/pi"), 0o755);
+  chmodSync(join(rootDir, "bin/check.mjs"), 0o755);
 }
 
 function runCli(rootDir: string): Promise<ProcessResult> {
   return new Promise((resolveResult, reject) => {
     const child = spawn(
       process.execPath,
-      [CLI_PATH, "--no-events", "run", TARGET_NAME, TASK_NAME],
+      [CLI_PATH, "--no-events", "run", TARGET_NAME, TASK_NAME, "--json"],
       {
         cwd: rootDir,
         env: process.env,
@@ -284,7 +290,7 @@ function removeComposeProject(rootDir: string): void {
       "-f",
       composePath,
       "-p",
-      deploymentId(PROJECT_NAME, TARGET_NAME),
+      deploymentId(PROJECT_NAME, TARGET_NAME, rootDir),
       "down",
       "--volumes",
       "--remove-orphans",
@@ -322,7 +328,7 @@ describeDocker("built CLI local task execution", () => {
   });
 
   it(
-    "runs a Pi task in the complete environment and returns only its artifact",
+    "runs an ordinary action in the complete environment and returns only its artifact",
     async () => {
       fixtureRoot = join(tmpdir(), `biodome-local-task-${process.pid}-${Date.now()}`);
       createFixture(fixtureRoot);
@@ -332,17 +338,20 @@ describeDocker("built CLI local task execution", () => {
       expect(result.timedOut, diagnostics).toBe(false);
       expect(result.outputExceeded, diagnostics).toBe(false);
       expect(result.exitCode, diagnostics).toBe(0);
+      const actionResult = JSON.parse(result.stdout);
+      expect(actionResult.exitCode).toBe(0);
+      expect(actionResult.artifacts[0].path).toBe("review.md");
 
       const output = `${result.stdout}\n${result.stderr}`;
       expect(output).toContain(TARGET_NAME);
       expect(output).toContain(TASK_NAME);
-      expect(output).toContain("artifacts/review.md");
+      expect(output).toContain("review.md");
       expect(output).not.toContain(PRIVATE_PROMPT);
       expect(output).not.toContain("pi-homes/reviewer/task");
       expect(output).not.toContain(ARTIFACT_BODY.trim());
 
       const targetDir = join(fixtureRoot, ".biodome-build/targets/local");
-      const artifactPath = join(targetDir, "artifacts/review.md");
+      const artifactPath = actionResult.artifacts[0].localPath;
       expect(readFileSync(artifactPath, "utf8")).toBe(ARTIFACT_BODY);
       expect(existsSync(join(targetDir, "state.json"))).toBe(false);
 
@@ -353,7 +362,7 @@ describeDocker("built CLI local task execution", () => {
           "-f",
           join(targetDir, "docker-compose.yaml"),
           "-p",
-          deploymentId(PROJECT_NAME, TARGET_NAME),
+          deploymentId(PROJECT_NAME, TARGET_NAME, fixtureRoot),
           "ps",
           "-q",
           "dev",

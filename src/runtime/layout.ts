@@ -15,10 +15,6 @@ export interface RuntimeLayout {
     mcp: string;
     mcpPlan: string;
     mcpServer: string;
-    opencodeHomes: string;
-    piHomes: string;
-    codexHomes: string;
-    claudeHomes: string;
     artifacts: string;
     logs: string;
     state: string;
@@ -48,10 +44,6 @@ export function runtimeLayout(rootDir: string, targetName?: string): RuntimeLayo
       mcp: join(hostRoot, "mcp"),
       mcpPlan: join(hostRoot, "plan.json"),
       mcpServer: join(hostRoot, "mcp", "server.js"),
-      opencodeHomes: join(hostRoot, "opencode-homes"),
-      piHomes: join(hostRoot, "pi-homes"),
-      codexHomes: join(hostRoot, "codex-homes"),
-      claudeHomes: join(hostRoot, "claude-homes"),
       artifacts: join(hostRoot, "artifacts"),
       logs: join(hostRoot, "logs"),
       state: join(hostRoot, "state.json"),
@@ -67,10 +59,6 @@ export function runtimeLayout(rootDir: string, targetName?: string): RuntimeLayo
       mcp: join(containerRoot, "mcp"),
       mcpPlan: join(containerRoot, "plan.json"),
       mcpServer: join(containerRoot, "mcp", "server.js"),
-      opencodeHomes: join(containerRoot, "opencode-homes"),
-      piHomes: join(containerRoot, "pi-homes"),
-      codexHomes: join(containerRoot, "codex-homes"),
-      claudeHomes: join(containerRoot, "claude-homes"),
       artifacts: join(containerRoot, "artifacts"),
       logs: join(containerRoot, "logs"),
     },

@@ -7,11 +7,14 @@ Status: partial. Priority: P0. Dependencies: Plans 03 and 04.
 > running the opt-in integration workflow against a real AWS account
 > (`BIODOME_AWS_INTEGRATION=1 npm run test:integration`), including its
 > workspace, secret, job, log, artifact, and zero-leak assertions.
-> Local verification was rerun on 2026-08-27: `npm run check` passed with
-> 821 unit tests, the build passed, and all 8 local/package integration tests
-> passed. The AWS test remained skipped because its required account, network,
-> role, bucket, repository, and sentinel-secret environment variables were not
-> configured. ECS therefore remains experimental.
+> Local verification was rerun on 2026-09-18: `npm run check` passed with
+> 859 unit tests, the build passed, and all 9 local/package integration tests
+> passed. This includes building and running the generated ECS image to prove
+> its uploaded workspace, target runtime files, secret-file exclusions, AWS
+> artifact client, and non-root writable runtime identity. The AWS test remained
+> skipped because its required account, network, role, bucket, repository, and
+> sentinel-secret environment variables were not configured. ECS therefore
+> remains experimental.
 
 ## Objective
 
@@ -36,6 +39,8 @@ contracts.
 ## Locked Decisions
 
 - ECS named tasks use the one-shot job operation from Plan 03, not in-place exec.
+- An ECS named task's workload, validation commands, and artifact publication run
+  inside one Fargate task so they share the same mutated workspace.
 - `biodome exec` fails for ECS unless true ECS ExecuteCommand is designed and enabled
   separately.
 - ECS supports only explicit remote workspace strategies such as clone, upload, or
@@ -70,6 +75,8 @@ contracts.
 
 1. Update ECS options to declare one supported workspace source and validate all
    strategy-specific fields.
+   Provider-specific validation must run during `target validate`, `plan`, `build`,
+   `up`, and `run` before availability checks or AWS calls.
 2. Reject bind workspaces, unsupported backing services, unsupported secret exposure,
    and incompatible network requirements during compatibility preflight.
 3. Implement deterministic workspace materialization before agent execution.
@@ -90,7 +97,8 @@ contracts.
     them.
 12. Keep CloudWatch log-group and stream identity explicit in state; do not enumerate
     account-wide streams.
-13. Validate S3 artifact keys, sizes, required/optional semantics, and IAM failures.
+13. Upload declared job artifacts to S3 automatically, then validate collected
+    keys, sizes, required/optional semantics, and IAM failures.
 14. Remove the misleading in-place `exec.command` capability and advertise the job
     operation instead.
 15. Add a manually enabled integration test that builds, starts, observes, collects,
@@ -99,6 +107,8 @@ contracts.
 ## Required Tests
 
 - Workspace strategies are accepted or rejected before AWS calls.
+- Malformed ECS options and unsupported host-secret materialization fail in every
+  CLI preflight path without rendering files or contacting AWS.
 - Build returns and persists a real `sha256` digest; registration uses that digest.
 - Secret mapping includes required references and no resolved value reaches artifacts,
   state, events, snapshots, or errors.
@@ -113,7 +123,10 @@ contracts.
 - Stop is idempotent for stopped and missing tasks.
 - Rollback, stop, and job cleanup deregister task definitions before requesting
   deletion and accept the provider's `DELETE_IN_PROGRESS` lifecycle state.
-- Artifact collection enforces declared keys and byte limits.
+- Successful jobs automatically upload declared artifacts; collection enforces
+  declared keys and byte limits.
+- One-shot validation runs after the workload and before artifact publication in
+  the same ECS task.
 - Driver contracts advertise job execution and reject in-place exec.
 
 ## Acceptance Criteria
@@ -139,13 +152,15 @@ BIODOME_AWS_INTEGRATION=1 npm run test:integration
 The AWS integration variables may be exported by the shell or stored in
 `.biodome/.env`, which the integration test loads before checking its opt-in flag.
 
-Results from 2026-08-27:
+Results from 2026-09-18:
 
-- Focused ECS/generator/app/orchestration suite: 278 tests passed.
-- `npm run check`: formatting, lint, typecheck, and 821 tests passed.
+- Focused ECS readiness suite: 157 tests passed, including runtime,
+  orchestration, task-runner, artifact-path, and CLI preflight coverage.
+- `npm run check`: formatting, lint, typecheck, and 859 tests passed.
 - `npm run build`: passed.
-- `npm run test:integration`: 8 tests passed; the opt-in AWS test was skipped.
-- `npm audit --omit=dev --audit-level=high`: passed the high/critical gate; 7
+- `npm run test:integration`: 9 tests passed, including the generated ECS image
+  build/run proof; the opt-in AWS test was skipped.
+- `npm audit --omit=dev --audit-level=high`: passed the high/critical gate; 8
   moderate transitive advisories remain visible.
 - The credentialed AWS command was not run because `AWS_REGION`, ECS cluster,
   ECR repository, subnets, security groups, execution/task roles, S3 bucket, and

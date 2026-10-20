@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ProcessBuilder } from "../../../core/plan-builder/processes.js";
 import { createPlan } from "../../../core/plan.js";
+import { spawnSync } from "node:child_process";
 
 function makeBuilder() {
   const plan = createPlan("test");
@@ -42,6 +43,40 @@ describe("ProcessBuilder", () => {
     builder.addHook({ name: "migrate", command: ["npm", "run", "migrate"], startOn: "start.post" });
 
     expect(plan.runtime.processes[0]).toMatchObject({ mode: "oneshot", startOn: "start.post" });
+  });
+
+  it("delivers hook intent, input, and outputs without shell interpolation or global environment leakage", () => {
+    const { builder, plan } = makeBuilder();
+    const input = { route: "$(echo not-executed)\ncheckout" };
+    builder.addHook({
+      name: "seed",
+      startOn: "start.pre",
+      intent: "Prepare QA data",
+      input,
+      outputs: ["results/seed.json"],
+      command: [
+        process.execPath,
+        "-e",
+        "process.stdout.write(JSON.stringify([process.env.BIODOME_ACTION_INTENT, process.env.BIODOME_ACTION_INPUT, process.env.BIODOME_ACTION_OUTPUTS]))",
+      ],
+    });
+    const command = plan.runtime.processes[0].command;
+    const result = spawnSync(command[0], command.slice(1), { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual([
+      "Prepare QA data",
+      JSON.stringify(input),
+      '["results/seed.json"]',
+    ]);
+    expect(plan.runtime.environment).toEqual({});
+    expect(() =>
+      builder.addHook({
+        name: "invalid",
+        startOn: "start.pre",
+        command: ["true"],
+        outputs: ["../escape"],
+      }),
+    ).toThrow();
   });
 
   it("rejects invalid ports and duplicate process names", () => {

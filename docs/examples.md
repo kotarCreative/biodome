@@ -1,5 +1,11 @@
 # Examples
 
+For a runnable, credential-free example of branch QA, performance measurement,
+and interactive sessions, see [environment-actions](../examples/environment-actions/README.md).
+See [actions](actions.md) for the input/output/intent contract and Git worktree usage.
+For pinned TodoMVC, Express, and FastAPI trials with live event consumption,
+cursor polling, and failure evidence, see [public-repo-qa](../examples/public-repo-qa/README.md).
+
 ## Django + Postgres + Redis
 
 ```javascript

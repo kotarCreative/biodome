@@ -3,8 +3,6 @@
 
 import { Schema } from "effect";
 import type { Application, ContributionProvenance } from "../apps/types.js";
-import type { McpClientAuth } from "./mcp-client.js";
-import { McpClientAuthSchema } from "./mcp-client.js";
 import type { SecretReference } from "./secrets.js";
 import { SecretArnReferenceSchema, SecretReferenceSchema } from "./secrets.js";
 import { KNOWN_HOSTS_HEREDOC_DELIMITER } from "./validation.js";
@@ -63,75 +61,6 @@ export interface RepoCredentials {
   knownHosts?: string;
 }
 
-export interface AgentHarnessMcpServer {
-  url: string;
-  // Authenticated-client metadata for the built-in MCP server. Present only when
-  // MCP is enabled and this entry targets the biodome MCP server.
-  auth?: McpClientAuth;
-}
-
-export interface AgentHarnessTelemetry {
-  enabled: boolean;
-  path: string;
-  capturePayloads?: boolean;
-}
-
-export interface AgentHarness {
-  name: string;
-  type: string;
-  port: number;
-  mcpServers: Record<string, AgentHarnessMcpServer>;
-  telemetry: AgentHarnessTelemetry;
-  config: Record<string, unknown>;
-}
-
-export interface LlmProvider {
-  name: string;
-  npm?: string;
-  displayName?: string;
-  // Options may be literal config values or env references for sensitive fields.
-  options: Record<string, string | number | boolean | SecretReference | undefined>;
-  models: Record<string, { name?: string }>;
-}
-
-export interface PiHarness {
-  name: string;
-  type: "pi";
-  provider?: string;
-  model?: string;
-  apiKey?: SecretReference;
-  tools?: string[];
-  extensions?: string[];
-  skills?: string[];
-  prompts?: string[];
-  themes?: string[];
-  packages?: string[];
-  telemetry: AgentHarnessTelemetry;
-  config: Record<string, unknown>;
-}
-
-export interface CodexHarness {
-  name: string;
-  type: "codex";
-  port: number;
-  mcpServers: Record<string, AgentHarnessMcpServer>;
-  apiKey?: SecretReference;
-  model?: string;
-  telemetry: AgentHarnessTelemetry;
-  config: Record<string, unknown>;
-}
-
-export interface ClaudeHarness {
-  name: string;
-  type: "claude";
-  apiKey?: SecretReference;
-  model?: string;
-  tools?: string[];
-  permissions?: string;
-  telemetry: AgentHarnessTelemetry;
-  config: Record<string, unknown>;
-}
-
 // --- Target and task types ---
 
 export type RuntimeDriverId = "docker-compose" | "docker-sandbox" | "aws-ecs" | (string & {});
@@ -143,11 +72,12 @@ export interface RuntimeTarget {
 }
 
 export interface TaskSpec {
-  harness: string;
-  prompt: string;
-  artifacts: string[];
-  timeout: string;
-  cleanup: "always" | "on-success" | "never";
+  command: string[];
+  intent: string;
+  input?: Record<string, unknown>;
+  outputs?: string[];
+  timeout?: string;
+  cleanup?: "always" | "on-success" | "never";
   requiredServices?: string[];
   requiredProcesses?: string[];
   capabilities?: Array<{
@@ -168,8 +98,9 @@ export interface TaskSpec {
 
 export interface Task {
   name: string;
-  harness: string;
-  prompt: string;
+  command: string[];
+  intent: string;
+  input: Record<string, unknown>;
   artifacts: string[];
   timeout: string;
   cleanup: "always" | "on-success" | "never";
@@ -350,7 +281,7 @@ export interface Process {
   bootstrap?: boolean;
   // When true, the process environment is merged into the global runtime
   // environment. The default is scoped: process environments stay private to the
-  // process so volume, provider, MCP, and harness credentials never leak into
+  // process so volume, provider, and MCP credentials never leak into
   // sibling processes or the compose dev service.
   mergeEnv?: boolean;
   // Which generated non-root identity runs this process. Resolved against
@@ -537,11 +468,6 @@ export function createPlan(project: string): Plan {
       providers: [],
       envVars: [],
       repos: [],
-      agentHarnesses: [],
-      piHarnesses: [],
-      codexHarnesses: [],
-      claudeHarnesses: [],
-      llmProviders: [],
       applications: [],
       contributions: [],
     },
@@ -606,6 +532,9 @@ export function validateArtifactPath(path: string): void {
   if (path.startsWith("/")) {
     throw new Error("Artifact path must not be absolute");
   }
+  if (path.includes("\\") || /^[A-Za-z]:/.test(path)) {
+    throw new Error("Artifact path must use workspace-relative POSIX paths");
+  }
   for (const segment of path.split("/")) {
     if (segment === "..") {
       throw new Error("Artifact path must not contain .. segments");
@@ -661,7 +590,12 @@ export const ProcessSpecSchema = Schema.Struct({
   identity: Schema.optional(RuntimeIdentityRoleSchema),
 });
 
-export const HookSpecSchema = ProcessSpecSchema.pipe(
+export const HookSpecSchema = Schema.Struct({
+  ...ProcessSpecSchema.fields,
+  intent: Schema.optional(Schema.String),
+  input: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+  outputs: Schema.optional(Schema.Array(Schema.String)),
+}).pipe(
   Schema.check(
     Schema.makeFilter((spec) =>
       spec.startOn !== undefined ? undefined : "Hook requires a startOn lifecycle point",
@@ -752,149 +686,6 @@ export const RepoSchema = Schema.Struct({
   branch: Schema.String,
   depth: Schema.optional(Schema.Number),
   credentials: Schema.optional(RepoCredentialsSchema),
-});
-
-export const AgentHarnessMcpServerSchema = Schema.Struct({
-  url: Schema.String,
-  auth: Schema.optional(McpClientAuthSchema),
-});
-
-export const AgentHarnessTelemetrySchema = Schema.Struct({
-  enabled: Schema.Boolean,
-  path: Schema.String,
-  capturePayloads: Schema.optional(Schema.Boolean),
-});
-
-export const AgentHarnessSpecSchema = Schema.Struct({
-  name: Schema.String.check(Schema.isMinLength(1)),
-  port: Schema.optional(Schema.Number),
-  mcpServers: Schema.optional(Schema.Record(Schema.String, AgentHarnessMcpServerSchema)),
-  telemetry: Schema.optional(
-    Schema.Struct({
-      enabled: Schema.optional(Schema.Boolean),
-      path: Schema.optional(Schema.String),
-      capturePayloads: Schema.optional(Schema.Boolean),
-    }),
-  ),
-  config: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
-});
-
-export const AgentHarnessSchema = Schema.Struct({
-  name: Schema.String,
-  type: Schema.String,
-  port: Schema.Number,
-  mcpServers: Schema.Record(Schema.String, AgentHarnessMcpServerSchema),
-  telemetry: AgentHarnessTelemetrySchema,
-  config: Schema.Record(Schema.String, Schema.Unknown),
-});
-
-export const PiHarnessSpecSchema = Schema.Struct({
-  name: Schema.String.check(Schema.isMinLength(1)),
-  provider: Schema.optional(Schema.String),
-  model: Schema.optional(Schema.String),
-  apiKey: Schema.optional(SecretReferenceSchema),
-  tools: Schema.optional(Schema.Array(Schema.String)),
-  extensions: Schema.optional(Schema.Array(Schema.String)),
-  skills: Schema.optional(Schema.Array(Schema.String)),
-  prompts: Schema.optional(Schema.Array(Schema.String)),
-  themes: Schema.optional(Schema.Array(Schema.String)),
-  packages: Schema.optional(Schema.Array(Schema.String)),
-  telemetry: Schema.optional(
-    Schema.Struct({
-      enabled: Schema.optional(Schema.Boolean),
-      path: Schema.optional(Schema.String),
-      capturePayloads: Schema.optional(Schema.Boolean),
-    }),
-  ),
-  config: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
-});
-
-export const PiHarnessSchema = Schema.Struct({
-  name: Schema.String,
-  type: Schema.Literals(["pi"]),
-  provider: Schema.optional(Schema.String),
-  model: Schema.optional(Schema.String),
-  apiKey: Schema.optional(SecretReferenceSchema),
-  tools: Schema.optional(Schema.Array(Schema.String)),
-  extensions: Schema.optional(Schema.Array(Schema.String)),
-  skills: Schema.optional(Schema.Array(Schema.String)),
-  prompts: Schema.optional(Schema.Array(Schema.String)),
-  themes: Schema.optional(Schema.Array(Schema.String)),
-  packages: Schema.optional(Schema.Array(Schema.String)),
-  telemetry: AgentHarnessTelemetrySchema,
-  config: Schema.Record(Schema.String, Schema.Unknown),
-});
-
-export const CodexHarnessSpecSchema = Schema.Struct({
-  name: Schema.String.check(Schema.isMinLength(1)),
-  port: Schema.optional(Schema.Number),
-  mcpServers: Schema.optional(Schema.Record(Schema.String, AgentHarnessMcpServerSchema)),
-  apiKey: Schema.optional(SecretReferenceSchema),
-  model: Schema.optional(Schema.String),
-  telemetry: Schema.optional(
-    Schema.Struct({
-      enabled: Schema.optional(Schema.Boolean),
-      path: Schema.optional(Schema.String),
-      capturePayloads: Schema.optional(Schema.Boolean),
-    }),
-  ),
-  config: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
-});
-
-export const CodexHarnessSchema = Schema.Struct({
-  name: Schema.String,
-  type: Schema.Literals(["codex"]),
-  port: Schema.Number,
-  mcpServers: Schema.Record(Schema.String, AgentHarnessMcpServerSchema),
-  apiKey: Schema.optional(SecretReferenceSchema),
-  model: Schema.optional(Schema.String),
-  telemetry: AgentHarnessTelemetrySchema,
-  config: Schema.Record(Schema.String, Schema.Unknown),
-});
-
-export const ClaudeHarnessSpecSchema = Schema.Struct({
-  name: Schema.String.check(Schema.isMinLength(1)),
-  apiKey: Schema.optional(SecretReferenceSchema),
-  model: Schema.optional(Schema.String),
-  tools: Schema.optional(Schema.Array(Schema.String)),
-  permissions: Schema.optional(Schema.String),
-  telemetry: Schema.optional(
-    Schema.Struct({
-      enabled: Schema.optional(Schema.Boolean),
-      path: Schema.optional(Schema.String),
-      capturePayloads: Schema.optional(Schema.Boolean),
-    }),
-  ),
-  config: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
-});
-
-export const ClaudeHarnessSchema = Schema.Struct({
-  name: Schema.String,
-  type: Schema.Literals(["claude"]),
-  apiKey: Schema.optional(SecretReferenceSchema),
-  model: Schema.optional(Schema.String),
-  tools: Schema.optional(Schema.Array(Schema.String)),
-  permissions: Schema.optional(Schema.String),
-  telemetry: AgentHarnessTelemetrySchema,
-  config: Schema.Record(Schema.String, Schema.Unknown),
-});
-
-const LlmProviderOptionValueSchema = Schema.Union([
-  Schema.String,
-  Schema.Number,
-  Schema.Boolean,
-  SecretReferenceSchema,
-  Schema.Undefined,
-]);
-
-export const LlmProviderSpecSchema = Schema.Struct({
-  name: Schema.String.check(Schema.isMinLength(1)),
-  npm: Schema.optional(Schema.String),
-  displayName: Schema.optional(Schema.String),
-  options: Schema.optional(Schema.Record(Schema.String, LlmProviderOptionValueSchema)),
-  models: Schema.optional(
-    Schema.Record(Schema.String, Schema.Struct({ name: Schema.optional(Schema.String) })),
-  ),
 });
 
 export const EndpointCredentialsSchema = Schema.Record(Schema.String, SecretReferenceSchema);
@@ -1175,9 +966,10 @@ export const RuntimeTargetSchema = Schema.Struct({
 });
 
 export const TaskSpecSchema = Schema.Struct({
-  harness: Schema.String.check(Schema.isMinLength(1)),
-  prompt: Schema.String.check(Schema.isMinLength(1)),
-  artifacts: Schema.optional(Schema.Array(Schema.String)),
+  command: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+  intent: Schema.String.check(Schema.isMinLength(1)),
+  input: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+  outputs: Schema.optional(Schema.Array(Schema.String)),
   timeout: Schema.optional(DurationSchema),
   cleanup: Schema.optional(CleanupSchema),
   requiredServices: Schema.optional(Schema.Array(Schema.String)),
@@ -1217,8 +1009,9 @@ export const TaskSpecSchema = Schema.Struct({
 
 export const TaskSchema = Schema.Struct({
   name: Schema.String,
-  harness: Schema.String,
-  prompt: Schema.String,
+  command: TaskSpecSchema.fields.command,
+  intent: TaskSpecSchema.fields.intent,
+  input: Schema.Record(Schema.String, Schema.Unknown),
   artifacts: Schema.Array(Schema.String),
   timeout: Schema.String,
   cleanup: CleanupSchema,
@@ -1341,23 +1134,6 @@ export const VolumeSchema = Schema.Struct({
   directMount: Schema.optional(Schema.Boolean),
 });
 
-export const LlmProviderSchema = Schema.Struct({
-  name: Schema.String,
-  npm: Schema.optional(Schema.String),
-  displayName: Schema.optional(Schema.String),
-  options: Schema.Record(
-    Schema.String,
-    Schema.Union([
-      Schema.String,
-      Schema.Number,
-      Schema.Boolean,
-      SecretValueSchema,
-      Schema.Undefined,
-    ]),
-  ),
-  models: Schema.Record(Schema.String, Schema.Struct({ name: Schema.optional(Schema.String) })),
-});
-
 export const AppRecipeMetadataSchema = Schema.Struct({
   id: Schema.String,
   version: Schema.optional(Schema.String),
@@ -1409,11 +1185,6 @@ export const RuntimePlanSchema = Schema.Struct({
   providers: Schema.Array(ProviderSchema),
   envVars: Schema.Array(EnvVarSchema),
   repos: Schema.Array(RepoSchema),
-  agentHarnesses: Schema.Array(AgentHarnessSchema),
-  piHarnesses: Schema.Array(PiHarnessSchema),
-  codexHarnesses: Schema.Array(CodexHarnessSchema),
-  claudeHarnesses: Schema.Array(ClaudeHarnessSchema),
-  llmProviders: Schema.Array(LlmProviderSchema),
   applications: Schema.Array(ApplicationSchema),
   contributions: Schema.Array(ContributionProvenanceSchema),
 });

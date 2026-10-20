@@ -154,22 +154,6 @@ describe("McpBuilder", () => {
     expect(processes[0].mergeEnv).toBe(false);
   });
 
-  it("rejects a harness that cannot send authorization headers to biodome MCP", () => {
-    const { builder, plan } = makeBuilder();
-    plan.runtime.agentHarnesses.push({
-      name: "legacy",
-      type: "pi",
-      port: 3003,
-      mcpServers: { biodome: { url: "http://localhost:3001" } },
-      telemetry: { enabled: true, path: "/workspace/events.jsonl" },
-      config: {},
-    });
-
-    expect(() => builder.configure(3001, { token: { env: "MCP_TOKEN" } })).toThrow(
-      'harness "legacy" (type "pi") cannot send authorization headers',
-    );
-  });
-
   it("propagates process failures after recording MCP and Node contributions", () => {
     const { builder, languages, plan } = makeBuilder({
       addProcess: () => {

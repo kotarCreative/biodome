@@ -23,7 +23,7 @@ describe("dockerComposeDriver capabilities", () => {
   it("does not advertise capabilities that dockerComposeDriver does not implement", () => {
     expect(hasCapability(caps, "snapshot.create")).toBe(false);
     expect(hasCapability(caps, "snapshot.restore")).toBe(false);
-    expect(hasCapability(caps, "exec.pty")).toBe(false);
+    expect(hasCapability(caps, "exec.pty")).toBe(true);
     expect(hasCapability(caps, "network.policy")).toBe(false);
   });
 });

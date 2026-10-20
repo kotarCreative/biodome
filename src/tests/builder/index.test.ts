@@ -121,7 +121,7 @@ describe("buildPlan", () => {
     expect(JSON.stringify(plan)).not.toContain('POSTGRES_PASSWORD":');
   });
 
-  it("lets an AWS secret ARN-backed env var satisfy harness and provider references", async () => {
+  it("preserves an AWS secret ARN-backed environment declaration", async () => {
     const dir = join("/tmp", "sandbox-test-" + Date.now());
     const secretArn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:key-AbCdEf";
     createProject(dir, {
@@ -129,18 +129,10 @@ describe("buildPlan", () => {
       ".biodome/features/agents.mjs": `
         export default function agents(ctx) {
           ctx.addEnv("ANTHROPIC_API_KEY", { from: { secretArn: "${secretArn}" } });
-          ctx.addClaudeHarness({ name: "assistant", apiKey: { env: "ANTHROPIC_API_KEY" } });
-          ctx.addLlmProvider({
-            name: "anthropic",
-            options: { apiKey: { env: "ANTHROPIC_API_KEY" } },
-            models: {},
-          });
         }
       `,
     });
 
-    // The harness and provider both desugar to env declarations for the same
-    // variable; the user's ARN-backed declaration must win without conflict.
     const plan = await buildPlan(dir);
     expect(plan.runtime.envVars).toEqual([
       { key: "ANTHROPIC_API_KEY", scope: "runtime", from: { secretArn } },
@@ -515,6 +507,25 @@ describe("validateFeatures", () => {
 });
 
 describe("buildTargetPlan", () => {
+  it("keeps different branch worktrees from sharing deployment identity", async () => {
+    const parent = join("/tmp", `biodome-worktree-identity-${Date.now()}`);
+    const files = {
+      ".biodome/config.json": JSON.stringify({ project: { name: "same-project" } }),
+      ".biodome/targets/local.mjs": 'export default ctx => ctx.useRuntime("docker-compose");',
+    };
+    try {
+      createProject(join(parent, "branch-a"), files);
+      createProject(join(parent, "branch-b"), files);
+      const a = await buildTargetPlan(join(parent, "branch-a"), "local");
+      const b = await buildTargetPlan(join(parent, "branch-b"), "local");
+      const repeated = await buildTargetPlan(join(parent, "branch-a"), "local");
+      expect(a.deployment?.deploymentId).not.toBe(b.deployment?.deploymentId);
+      expect(a.deployment?.deploymentId).toBe(repeated.deployment?.deploymentId);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
   it("builds a plan with a target", async () => {
     const dir = join("/tmp", "sandbox-test-target-" + Date.now());
     createProject(dir, {
@@ -535,21 +546,13 @@ describe("buildTargetPlan", () => {
     expect(plan.deployment!.deploymentId).toContain("target-app");
   });
 
-  it("rebases generated process and harness paths to the target layout", async () => {
+  it("rebases generated process paths to the target layout", async () => {
     const dir = join("/tmp", "sandbox-test-layout-" + Date.now());
     createProject(dir, {
       ".biodome/config.json": JSON.stringify({
         project: { name: "layout-app" },
         mcp: { enabled: true, token: { env: "MCP_TOKEN" } },
       }),
-      ".biodome/features/harnesses.mjs": `
-        export default function harnesses(ctx) {
-          ctx.addOpencodeHarness({ name: "open" });
-          ctx.addPiHarness({ name: "pi" });
-          ctx.addCodexHarness({ name: "codex" });
-          ctx.addClaudeHarness({ name: "claude" });
-        }
-      `,
       ".biodome/targets/local.mjs": `
         export default function local(ctx) {
           ctx.useRuntime("docker-compose");
@@ -560,17 +563,7 @@ describe("buildTargetPlan", () => {
     const plan = await buildTargetPlan(dir, "local");
     const root = "/workspace/.biodome-build/targets/local";
     expect(plan.runtime.processes.flatMap((process) => process.command)).toEqual(
-      expect.arrayContaining([`${root}/mcp/server.js`, `${root}/opencode-homes/open/start.sh`]),
-    );
-    expect(plan.runtime.agentHarnesses[0].telemetry.path).toBe(
-      `${root}/logs/opencode-events.jsonl`,
-    );
-    expect(plan.runtime.piHarnesses[0].telemetry.path).toBe(`${root}/logs/pi-pi-events.jsonl`);
-    expect(plan.runtime.codexHarnesses[0].telemetry.path).toBe(
-      `${root}/logs/codex-codex-events.jsonl`,
-    );
-    expect(plan.runtime.claudeHarnesses[0].telemetry.path).toBe(
-      `${root}/logs/claude-claude-events.jsonl`,
+      expect.arrayContaining([`${root}/mcp/server.js`]),
     );
   });
 
@@ -678,14 +671,13 @@ describe("buildTaskPlan", () => {
       ".biodome/targets/local.mjs": `
         export default function t(ctx) { ctx.useRuntime("docker-compose"); }
       `,
-      ".biodome/tasks/review.mjs": `
-        export default function r(ctx) { ctx.addTask({ harness: "reviewer", prompt: "Review" }); }
+      ".biodome/actions/review.mjs": `
+        export default function r(ctx) { ctx.addAction({ command: ["npm", "test"], intent: "Review" }); }
       `,
     });
 
-    await expect(buildTaskPlan(dir, "local", "review")).rejects.toThrow(
-      /harness.*reviewer.*not declared/,
-    );
+    const plan = await buildTaskPlan(dir, "local", "review");
+    expect(plan.deployment?.task?.command).toEqual(["npm", "test"]);
   });
 
   it("fails when task file does not exist", async () => {
@@ -702,7 +694,7 @@ describe("buildTaskPlan", () => {
   });
 
   it.each(["../../../../tmp/evil", "..\\..\\..\\escape", ".", "..", "sub/dir/evil", ""])(
-    "rejects task names that could traverse out of .biodome/tasks (%s)",
+    "rejects action names that could traverse out of .biodome/actions (%s)",
     async (taskName) => {
       const dir = join("/tmp", "sandbox-test-task-" + Date.now());
       createProject(dir, {
@@ -721,45 +713,35 @@ describe("buildTaskPlan", () => {
     const dir = join("/tmp", "sandbox-test-task-" + Date.now());
     createProject(dir, {
       ".biodome/config.json": JSON.stringify({ project: { name: "task-app" } }),
-      ".biodome/features/codex.mjs": `
-        export default function c(ctx) {
-          ctx.addCodexHarness({ name: "coder", apiKey: { env: "TEST_KEY" }, mcpServers: {} });
-        }
-      `,
       ".biodome/targets/local.mjs": `
         export default function t(ctx) { ctx.useRuntime("docker-compose"); }
       `,
-      ".biodome/tasks/review_step-1.2.mjs": `
-        export default function r(ctx) { ctx.addTask({ harness: "coder", prompt: "Review" }); }
+      ".biodome/actions/review_step-1.2.mjs": `
+        export default function r(ctx) { ctx.addAction({ command: ["npm", "test"], intent: "Review" }); }
       `,
     });
 
     const plan = await buildTaskPlan(dir, "local", "review_step-1.2");
-    expect(plan.deployment?.task?.harness).toBe("coder");
+    expect(plan.deployment?.task?.command).toEqual(["npm", "test"]);
   });
 
-  it("succeeds when harness exists", async () => {
+  it("runs plain commands without a harness", async () => {
     const dir = join("/tmp", "sandbox-test-task-" + Date.now());
     createProject(dir, {
       ".biodome/config.json": JSON.stringify({ project: { name: "task-app" } }),
-      ".biodome/features/codex.mjs": `
-        export default function c(ctx) {
-          ctx.addCodexHarness({ name: "coder", apiKey: { env: "TEST_KEY" }, mcpServers: {} });
-        }
-      `,
       ".biodome/targets/local.mjs": `
         export default function t(ctx) { ctx.useRuntime("docker-compose"); }
       `,
-      ".biodome/tasks/review.mjs": `
-        export default function r(ctx) { ctx.addTask({ harness: "coder", prompt: "Review the code", cleanup: "always" }); }
+      ".biodome/actions/review.mjs": `
+        export default function r(ctx) { ctx.addAction({ command: ["npm", "test"], intent: "Review the code", cleanup: "always" }); }
       `,
     });
 
     const plan = await buildTaskPlan(dir, "local", "review");
     expect(plan.deployment).toBeDefined();
     expect(plan.deployment!.task).toBeDefined();
-    expect(plan.deployment!.task!.harness).toBe("coder");
-    expect(plan.deployment!.task!.prompt).toBe("Review the code");
+    expect(plan.deployment!.task!.command).toEqual(["npm", "test"]);
+    expect(plan.deployment!.task!.intent).toBe("Review the code");
     expect(plan.deployment!.task!.cleanup).toBe("always");
   });
 });

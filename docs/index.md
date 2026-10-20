@@ -1,6 +1,6 @@
 # Biodome
 
-Biodome is an orchestration layer for repository-defined coding-agent tasks. Instead of writing YAML or JSON, you describe your environment with small JavaScript files inside a `.biodome/` directory. Each file contributes languages, services, packages, tools, processes, hooks, and agent harnesses to a shared plan. A named task then selects an agent and its execution requirements; a named target selects the provider that runs it.
+Biodome creates development environments from small JavaScript files inside `.biodome/`. Declare languages, services, packages, tools, processes, and hooks; Biodome derives the image and startup configuration. External agents can invoke ordinary command actions with explicit intent, JSON input, and output files. Biodome does not install agents or manage their workflows.
 
 ## Why code-based configuration?
 
@@ -25,7 +25,8 @@ npx @kotarcreative/biodome up local
 - **Plan:** The intermediate representation of your environment. Each feature contributes to it.
 - **Applications:** Implicit modules in `.biodome/apps/` that expand a local app or npm-distributed recipe into ordinary primitives.
 - **Features:** JavaScript modules in `.biodome/features/` that export a default function receiving the biodome context and extend the base plan after applications.
-- **Services:** Backing dependencies declared in `.biodome/services.mjs`. Built-in Postgres runs ephemerally inside the dev container; Redis and custom images remain containers.
+- **Services:** Backing dependencies declared in `.biodome/services.mjs`. Built-in Postgres and Redis run ephemerally as supervised processes inside the dev container.
+- **Actions:** On-demand command hooks in `.biodome/actions/`, with input, intent, outputs, timeout, and cleanup policy. See [Environment actions](actions.md).
 
 ## MCP (Model Context Protocol)
 
@@ -55,9 +56,10 @@ Queries return at most 100 events by default and accept up to 1,000 with `--limi
 - [File layout](file-layout.md)
 - [Applications and app recipes](apps.md)
 - [Computer-use recipe](recipes/computer-use.md)
+- [Deploying to AWS ECS](aws-ecs.md)
 - [Primitives](primitives.md)
 - [Processes and hooks](processes.md)
 - [API reference](api.md)
 - [Examples](examples.md)
-- [Agent task orchestration](orchestration.md)
+- [Environment actions and branch sessions](actions.md)
 - [Active design and implementation plans](design/README.md)

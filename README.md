@@ -1,10 +1,12 @@
 # Biodome
 
-Portable, repository-defined tasks for coding agents. Biodome compiles the
-environment, application services, task, agent harness, artifacts, and cleanup
-policy into a provider-neutral execution plan. A target selects where that plan
-runs: Docker Compose, Docker Sandboxes, AWS ECS, or a future provider. AWS ECS
-remains experimental until its credentialed live acceptance workflow passes.
+Development environments from small, composable files. Declare languages,
+services, applications, and hooks; Biodome generates the image and startup
+configuration. External agents can invoke commands with explicit intent, JSON
+input, and expected output files—without installing an agent in the container.
+
+Targets select Docker Compose, Docker Sandboxes, or AWS ECS. AWS ECS remains
+experimental until its credentialed live acceptance workflow passes.
 
 See the [docs](docs/index.md) for full documentation.
 
@@ -15,6 +17,7 @@ npx @kotarcreative/biodome init
 npx @kotarcreative/biodome build local
 npx @kotarcreative/biodome up local
 npx @kotarcreative/biodome info
+npx @kotarcreative/biodome shell local
 npx @kotarcreative/biodome down local
 ```
 
@@ -25,8 +28,9 @@ npx @kotarcreative/biodome down local
 - `biodome up <target>` — start a named target.
 - `biodome down <target>` — stop a named target.
 - `biodome exec <target> <command...>` — run a command inside a target.
-- `biodome plan <target> <task> [--json]` — compile the portable execution plan and preflight it against the selected provider without starting anything.
-- `biodome run <target> <task>` — execute a named task (e.g. `review-pr`) against a target.
+- `biodome shell <target>` — open an interactive shell in a running Compose environment.
+- `biodome plan <target> <action> [--json]` — inspect an action and preflight provider requirements without starting anything.
+- `biodome run <target> <action> [--input <json>] [--intent <text>] [--output <paths...>] [--json]` — run an ordinary command hook and collect its outputs.
 - `biodome info` — show services, ports, and connection strings.
 - `biodome app list` — list implicit applications declared in `.biodome/apps/`.
 - `biodome app inspect <name> [--json]` — show an app's expanded primitives and provenance.
@@ -50,11 +54,32 @@ Every lifecycle command captures a structured event stream by default. Target-sc
 - [File layout](docs/file-layout.md)
 - [Applications and recipes](docs/apps.md)
 - [Computer-use recipe](docs/recipes/computer-use.md)
+- [Deploying to AWS ECS](docs/aws-ecs.md)
 - [Primitives](docs/primitives.md)
 - [Processes and hooks](docs/processes.md)
 - [API reference](docs/api.md)
 - [Examples](docs/examples.md)
-- [Agent task orchestration](docs/orchestration.md)
+- [Actions, branch QA, performance tests, and interactive sessions](docs/actions.md)
+
+## An action, not an agent workflow
+
+```javascript
+// .biodome/actions/e2e.mjs
+export default function e2e(ctx) {
+  ctx.addAction({
+    command: ["node", "scripts/e2e.mjs"],
+    intent: "Verify the checkout journey on this branch",
+    input: { viewport: "desktop" },
+    outputs: ["results/e2e.json"],
+    cleanup: "always",
+  });
+}
+```
+
+The command reads `BIODOME_ACTION_INPUT` as JSON and writes the declared files.
+The calling agent owns its prompts, models, and decisions. See the
+[migration guide](docs/actions.md#migrating-from-embedded-agent-tasks) for the
+removed harness-based APIs.
 
 ## Development
 

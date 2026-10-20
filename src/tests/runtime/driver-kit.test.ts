@@ -21,6 +21,8 @@ describe("assertRelativeArtifactPath", () => {
   });
 
   it("rejects absolute paths and traversal segments", () => {
+    expect(() => assertRelativeArtifactPath("")).toThrow(RuntimeError);
+    expect(() => assertRelativeArtifactPath("bad\0path")).toThrow(RuntimeError);
     expect(() => assertRelativeArtifactPath("/etc/passwd")).toThrow(RuntimeError);
     expect(() => assertRelativeArtifactPath("../escape.txt")).toThrow(/traversal/);
     expect(() => assertRelativeArtifactPath("a/../../escape")).toThrow(/traversal/);

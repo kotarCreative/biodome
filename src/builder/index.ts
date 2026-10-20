@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, existsSync } from "node:fs";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { Effect, Schema } from "effect";
@@ -307,7 +307,7 @@ const executeFeatureModule = Effect.fnUntraced(function* (path: string, ctx: Fea
 // --- Target and task module loading ---
 
 const BIODOME_TARGETS_DIR = join(BIODOME_DIR, "targets");
-const BIODOME_TASKS_DIR = join(BIODOME_DIR, "tasks");
+const BIODOME_TASKS_DIR = join(BIODOME_DIR, "actions");
 
 const MODULE_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
@@ -347,9 +347,13 @@ function resolveModulePath(rootDir: string, baseDir: string, name: string): stri
   return null;
 }
 
-function computeDeploymentId(project: string, targetName: string): string {
+function computeDeploymentId(project: string, targetName: string, rootDir: string): string {
   const slug = `${project}-${targetName}`.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
-  const hash = createHash("sha256").update(slug).digest("hex").slice(0, 8);
+  // Separate checkouts/worktrees must not share containers or cleanup ownership.
+  const hash = createHash("sha256")
+    .update(`${slug}\0${resolve(rootDir)}`)
+    .digest("hex")
+    .slice(0, 8);
   return `${slug.slice(0, 48)}-${hash}`;
 }
 
@@ -423,7 +427,7 @@ export const buildTargetPlanEffect = Effect.fnUntraced(function* (
 
   const rt = targetCtx.getTarget();
   yield* getDriver(rt.driver);
-  const deploymentId = computeDeploymentId(plan.project, targetName);
+  const deploymentId = computeDeploymentId(plan.project, targetName, rootDir);
 
   plan.deployment = {
     target: rt,
@@ -455,14 +459,6 @@ function applyTargetRuntimeLayout(plan: Plan, targetName: string): void {
       Object.entries(process.environment).map(([key, value]) => [key, rebase(value)]),
     );
   }
-  for (const harness of plan.runtime.agentHarnesses)
-    harness.telemetry.path = rebase(harness.telemetry.path);
-  for (const harness of plan.runtime.piHarnesses)
-    harness.telemetry.path = rebase(harness.telemetry.path);
-  for (const harness of plan.runtime.codexHarnesses)
-    harness.telemetry.path = rebase(harness.telemetry.path);
-  for (const harness of plan.runtime.claudeHarnesses)
-    harness.telemetry.path = rebase(harness.telemetry.path);
 }
 
 export const buildTaskPlanEffect = Effect.fnUntraced(function* (
@@ -493,7 +489,7 @@ export const buildTaskPlanEffect = Effect.fnUntraced(function* (
       });
     }
     return yield* new FeatureError({
-      message: `Task "${taskName}" not found at .biodome/tasks/${taskName}.mjs or .js`,
+      message: `Action "${taskName}" not found at .biodome/actions/${taskName}.mjs or .js`,
     });
   }
 
@@ -551,19 +547,6 @@ export const buildTaskPlanEffect = Effect.fnUntraced(function* (
   if (missingProcesses.length > 0) {
     return yield* new ValidationError({
       message: `Task "${taskName}" requires unknown processes: ${missingProcesses.join(", ")}`,
-    });
-  }
-
-  const allHarnesses = [
-    ...plan.runtime.agentHarnesses.map((h) => h.name),
-    ...plan.runtime.piHarnesses.map((h) => h.name),
-    ...plan.runtime.codexHarnesses.map((h) => h.name),
-    ...plan.runtime.claudeHarnesses.map((h) => h.name),
-  ];
-
-  if (!allHarnesses.includes(taskDecl.harness)) {
-    return yield* new ValidationError({
-      message: `Task "${taskName}" references harness "${taskDecl.harness}" which is not declared in any feature. Available harnesses: ${allHarnesses.join(", ") || "(none)"}`,
     });
   }
 

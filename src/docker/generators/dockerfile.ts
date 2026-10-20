@@ -101,6 +101,13 @@ export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}):
     "",
   ];
 
+  // Build-scoped values must also reach dependency installation in the deps stage.
+  // JSON quoting preserves spaces, quotes and newlines without Docker expansion.
+  for (const [key, value] of sortEnv(plan.build.environment)) {
+    lines.push(`ENV ${key}=${JSON.stringify(value).replace(/\$/g, "\\$")}`);
+  }
+  if (Object.keys(plan.build.environment).length > 0) lines.push("");
+
   const aptPackages = [...plan.build.aptPackages];
   const hasDaemonProcesses = plan.runtime.processes.some((p) => p.mode === "daemon");
   const generatedFilesPath = options.generatedFilesPath ?? ".biodome-build";
@@ -208,18 +215,6 @@ export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}):
   if (options.generatedFilesPath) {
     lines.push("# Copy target-scoped runtime files required without a host workspace mount.");
     lines.push(`COPY ${generatedFilesPath}/ ${generatedRuntimeDir(plan)}/`);
-    lines.push("");
-  }
-
-  if (Object.keys(plan.build.environment).length > 0) {
-    const envVars = sortEnv(plan.build.environment);
-    lines.push("ENV ");
-    for (let i = 0; i < envVars.length; i++) {
-      const [k, v] = envVars[i];
-      const prefix = i > 0 ? "    " : "";
-      const suffix = i < envVars.length - 1 ? " \\" : "";
-      lines.push(`${prefix}${k}=${v}${suffix}`);
-    }
     lines.push("");
   }
 

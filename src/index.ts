@@ -29,10 +29,11 @@ export type {
   EnvSpec,
   VolumeSpec,
   RepoSpec,
-  AgentHarnessSpec,
-  PiHarnessSpec,
-  CodexHarnessSpec,
-  ClaudeHarnessSpec,
-  LlmProviderSpec,
 } from "./core/feature.js";
 export type { Plan, RuntimeTarget, TaskSpec } from "./core/plan.js";
+export type { TaskSpec as ActionSpec } from "./core/plan.js";
+export type { TaskContext as ActionContext } from "./core/feature.js";
+export {
+  buildTaskPlan as buildActionPlan,
+  buildTaskPlanEffect as buildActionPlanEffect,
+} from "./builder/index.js";

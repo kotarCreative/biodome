@@ -28,8 +28,9 @@ function legacyPlan(artifacts = ["review.md"]): Plan {
     deploymentId: "deployment-1",
     task: {
       name: "review",
-      harness: "codex",
-      prompt: "Review the change",
+      command: ["npm", "test"],
+      intent: "Review the change",
+      input: {},
       artifacts,
       timeout: "30m",
       cleanup: "always",
@@ -49,14 +50,14 @@ describe("compileExecutionPlan", () => {
     });
     expect(executionPlan.task).toMatchObject({
       name: "review",
-      agent: { harness: "codex" },
+      command: ["npm", "test"],
       workspace: { strategy: "clone" },
       requiredServices: ["postgres"],
       requiredProcesses: ["api"],
       artifacts: [{ path: "review.md", required: true }],
     });
     expect(executionPlan.task.capabilities).toEqual([
-      { capability: "exec.inplace", level: "required", reason: "agent tasks execute a command" },
+      { capability: "exec.inplace", level: "required", reason: "actions execute a command" },
       {
         capability: "artifact.collect",
         level: "required",
