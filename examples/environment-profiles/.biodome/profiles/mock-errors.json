@@ -1,0 +1,8 @@
+{
+  "description": "Same journey against an unavailable mock API",
+  "features": ["frontend", "error-api"],
+  "environment": {
+    "API_URL": { "value": "http://127.0.0.1:8081" },
+    "QA_EXPECT_STATE": { "value": "unavailable" }
+  }
+}

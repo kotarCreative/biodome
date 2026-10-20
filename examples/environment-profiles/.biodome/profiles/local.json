@@ -1,0 +1,8 @@
+{
+  "description": "Frontend facade against a healthy local API",
+  "features": ["frontend", "local-api"],
+  "environment": {
+    "API_URL": { "value": "http://127.0.0.1:8080" },
+    "QA_EXPECT_STATE": { "value": "ready" }
+  }
+}
