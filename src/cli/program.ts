@@ -167,6 +167,7 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
   const program = new Command()
     .name("biodome")
     .description("Self-contained development environment manager")
+    .enablePositionalOptions()
     .version(VERSION);
   program.option("--no-events", "disable structured event capture");
   program.option("--profile <name>", "Select a named environment profile", (name) => {
@@ -259,7 +260,14 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
     .option("--build", "Rebuild the image before starting")
     .option("--wait", "Block until Ctrl+C is pressed")
     .action((target, options) =>
-      execute("up", (workflows.up ?? upWorkflow)(rootDir(), target, options), target),
+      execute(
+        "up",
+        (workflows.up ?? upWorkflow)(rootDir(), target, {
+          build: options.build,
+          wait: options.wait,
+        }),
+        target,
+      ),
     );
   program
     .command("down <target>")
@@ -268,13 +276,19 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
       execute("down", (workflows.down ?? downWorkflow)(rootDir(), target), target, logMessage),
     );
   program
-    .command("exec <target> <command...")
+    .command("exec <target> <command...>")
     .description("Run a command in a target sandbox container")
+    .helpOption(false)
+    .passThroughOptions()
     .allowUnknownOption()
     .action((target, command) =>
       execute(
         "exec",
-        (workflows.exec ?? execWorkflow)(rootDir(), target, command),
+        (workflows.exec ?? execWorkflow)(
+          rootDir(),
+          target,
+          command[0] === "--" ? command.slice(1) : command,
+        ),
         target,
         logMessage,
       ),
@@ -309,12 +323,13 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
         "status",
         (workflows.status ?? statusWorkflow)(rootDir(), target),
         target,
-        ({ status, hasProcessStatus }) => {
+        ({ status, hasProcessStatus, processStatus }) => {
           console.log("Container status");
           console.log(
             `Target "${target}" status: ${status.state}${status.message ? ` - ${status.message}` : ""}`,
           );
           if (hasProcessStatus) console.log("\nProcess status");
+          if (processStatus) process.stdout.write(processStatus);
         },
       ),
     );
@@ -551,5 +566,22 @@ export function createProgram(dependencies: ProgramDependencies = {}): Command {
       "Generate AGENTS.md for AI context (languages, services, endpoints, environment, processes)",
     )
     .action(() => executePlain((workflows.agents ?? agentsWorkflow)(rootDir()), logMessage));
+  // Positional parsing protects guest flags (including --version/--profile)
+  // after exec's target. Keep global options usable on either side of ordinary
+  // subcommands by registering the same declarations on each child.
+  const globalOptions = program.options.filter((option) => option.long !== "--version");
+  const inheritOptions = (command: Command) => {
+    for (const option of globalOptions) {
+      command.addOption(option);
+      command.on(`option:${option.name()}`, () => {
+        program.setOptionValue(
+          option.attributeName(),
+          command.getOptionValue(option.attributeName()),
+        );
+      });
+    }
+    for (const child of command.commands) inheritOptions(child);
+  };
+  for (const child of program.commands) inheritOptions(child);
   return program;
 }

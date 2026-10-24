@@ -1,10 +1,11 @@
-import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createPlan } from "../../../core/plan.js";
 import { generateStartupScript } from "../../../docker/generators/startup.js";
+import { shellQuote } from "../../../docker/generators/shell.js";
 
 function generatedSection(script: string, startMarker: string, endMarker: string): string {
   const start = script.indexOf(startMarker);
@@ -30,7 +31,139 @@ function executeShell(script: string, env: NodeJS.ProcessEnv = process.env) {
   });
 }
 
+function localPlan(name: string) {
+  const plan = createPlan(name);
+  plan.deployment = {
+    target: { name: "local", driver: "docker-compose", options: {} },
+    deploymentId: `${name}-local`,
+  };
+  return plan;
+}
+
+async function shutdownFixture(signal?: NodeJS.Signals) {
+  const root = mkdtempSync(join(tmpdir(), "biodome-shutdown-"));
+  const ready = join(root, "ready");
+  const childReady = join(root, "child-ready");
+  const stopped = join(root, "stopped");
+  const finish = join(root, "finish");
+  const generated = generateStartupScript(localPlan("shutdown"))!;
+  const handlers = generatedSection(
+    generated,
+    "# Forward container shutdown",
+    "# Map the runtime identity",
+  ).replaceAll("/workspace/.biodome-build/targets/local/ready", ready);
+  const worker = join(root, "worker.mjs");
+  writeFileSync(
+    worker,
+    `
+import { writeFileSync } from "node:fs";
+process.on("SIGTERM", () => setTimeout(() => { writeFileSync(${JSON.stringify(stopped)}, "graceful"); process.exit(0); }, 100));
+setTimeout(() => process.exit(99), 5000);
+writeFileSync(${JSON.stringify(childReady)}, "ready");
+setInterval(() => {}, 1000);
+`,
+  );
+  writeFileSync(ready, "ready");
+  const script =
+    `set -e\n${handlers}\n${shellQuote(process.execPath)} ${shellQuote(worker)} &\nsupervisord_pid=$!\n` +
+    (signal
+      ? 'wait "$supervisord_pid"\nsupervisord_pid=\n'
+      : `while [ ! -f ${shellQuote(finish)} ]; do sleep 0.01; done\nexit 23\n`);
+  const child = spawn("/bin/sh", ["-c", script], { stdio: ["ignore", "pipe", "pipe"] });
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const exited = new Promise<number | null>((resolve, reject) => {
+    child.once("exit", resolve);
+    child.once("error", reject);
+  });
+  try {
+    const deadline = Date.now() + 3000;
+    while (!existsSync(childReady) && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(existsSync(childReady), stderr).toBe(true);
+    const start = performance.now();
+    if (signal) child.kill(signal);
+    else writeFileSync(finish, "finish");
+    const code = await Promise.race([
+      exited,
+      new Promise<never>((_, reject) => {
+        const timer = setTimeout(() => reject(new Error("Shutdown did not complete")), 2000);
+        timer.unref();
+      }),
+    ]);
+    expect(code, stderr).toBe(signal ? 0 : 23);
+    expect(existsSync(stopped)).toBe(true);
+    expect(existsSync(ready)).toBe(false);
+    expect(performance.now() - start).toBeLessThan(1500);
+  } finally {
+    child.kill("SIGKILL");
+    await exited;
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 describe("generateStartupScript", () => {
+  it.each(["SIGTERM", "SIGINT"] as const)(
+    "forwards %s, waits for graceful child shutdown, and clears readiness",
+    async (signal) => {
+      await shutdownFixture(signal);
+    },
+  );
+
+  it("cleans up children without hiding the original startup failure", async () => {
+    await shutdownFixture();
+  });
+  it("keeps named and numeric runtime identities consistent when a base account occupies the host IDs", () => {
+    const script = generateStartupScript(localPlan("collision"))!;
+    const mapping = generatedSection(script, "# Map the runtime identity", "# Narrow fixups");
+    const fakeAccounts = `
+current_uid=10001
+current_gid=10001
+id() {
+  case "$1:$2" in
+    -u:biodome) echo "$current_uid" ;;
+    -g:biodome) echo "$current_gid" ;;
+    -u:biodome-mcp|-g:biodome-mcp) echo 10002 ;;
+    -u:biodome-mount|-g:biodome-mount) echo 10003 ;;
+    *) return 1 ;;
+  esac
+}
+groupmod() { [ "$1:$2:$4" = "-o:-g:biodome" ] || return 1; current_gid="$3"; }
+usermod() { [ "$1:$2:$4" = "-o:-u:biodome" ] || return 1; current_uid="$3"; }
+`;
+    const result = executeShell(
+      `${fakeAccounts}\n${mapping}\necho "$BIODOME_RUNTIME_UID:$BIODOME_RUNTIME_GID:$BIODOME_RUNTIME_HOME"`,
+      {
+        ...process.env,
+        BIODOME_RUNTIME_UID: "1000",
+        BIODOME_RUNTIME_GID: "1000",
+      },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe("1000:1000:/home/biodome");
+    for (const [uid, gid] of [
+      ["10002", "1000"],
+      ["1000", "10003"],
+    ]) {
+      const rejected = executeShell(`${fakeAccounts}\n${mapping}`, {
+        ...process.env,
+        BIODOME_RUNTIME_UID: uid,
+        BIODOME_RUNTIME_GID: gid,
+      });
+      expect(rejected.status).toBe(1);
+      expect(rejected.stderr).toContain("conflicts with isolated identity");
+    }
+    const unavailable = executeShell(`${fakeAccounts}\nunset -f usermod groupmod\n${mapping}`, {
+      ...process.env,
+      PATH: "/nonexistent",
+      BIODOME_RUNTIME_UID: "1000",
+      BIODOME_RUNTIME_GID: "1000",
+    });
+    expect(unavailable.status).toBe(1);
+    expect(unavailable.stderr).toContain("cannot map runtime identity");
+  });
   it("starts supervisord before pre-start hooks and post-start hooks after all daemons", () => {
     const plan = createPlan("my-app");
     plan.runtime.processes.push(
@@ -104,7 +237,7 @@ describe("generateStartupScript", () => {
 
     const script = generateStartupScript(plan)!;
     const section = generatedSection(script, "[hook] migrate", "aborting startup");
-    expect(section).toContain('hook_home="$(getent passwd "$BIODOME_RUNTIME_UID" | cut -d: -f6)"');
+    expect(section).toContain('hook_home="$BIODOME_RUNTIME_HOME"');
     expect(section).toContain('"HOME=${hook_home:-/root}"');
   });
 
@@ -122,9 +255,10 @@ describe("generateStartupScript", () => {
     const script = generateStartupScript(plan)!;
     expect(script).toContain('BIODOME_RUNTIME_UID="${BIODOME_RUNTIME_UID:-10001}"');
     expect(script).toContain('BIODOME_RUNTIME_GID="${BIODOME_RUNTIME_GID:-10001}"');
-    expect(script).toContain('elif [ "$(id -g biodome)" != "$BIODOME_RUNTIME_GID" ]; then');
-    expect(script).toContain('groupmod -g "$BIODOME_RUNTIME_GID" biodome');
-    expect(script).toContain('usermod -u "$BIODOME_RUNTIME_UID" biodome');
+    expect(script).toContain('groupmod -o -g "$BIODOME_RUNTIME_GID" biodome');
+    expect(script).toContain('usermod -o -u "$BIODOME_RUNTIME_UID" biodome');
+    expect(script).toContain('BIODOME_RUNTIME_UID="$(id -u biodome)"');
+    expect(script).toContain('BIODOME_RUNTIME_GID="$(id -g biodome)"');
   });
 
   it("runs ECS job-mode commands as the runtime identity and shuts down services", () => {
@@ -142,7 +276,7 @@ describe("generateStartupScript", () => {
     expect(script).toContain("rm -f /workspace/.biodome-build/ready");
     expect(script).toContain('if [ "${1:-}" = "--job" ]; then');
     expect(script).toContain(
-      'setpriv --reuid="$BIODOME_RUNTIME_UID" --regid="$BIODOME_RUNTIME_GID" --clear-groups "$@" || job_status=$?',
+      'setpriv --reuid="$BIODOME_RUNTIME_UID" --regid="$BIODOME_RUNTIME_GID" --clear-groups env "HOME=$BIODOME_RUNTIME_HOME" "$@" || job_status=$?',
     );
     expect(script).toContain(
       "supervisorctl -c /workspace/.biodome-build/supervisord.conf shutdown",
@@ -153,7 +287,7 @@ describe("generateStartupScript", () => {
     );
   });
 
-  it("warns instead of failing when mapped ids collide with image accounts", () => {
+  it("aliases ordinary image accounts but refuses root and isolated identities", () => {
     const plan = createPlan("my-app");
     plan.runtime.processes.push({
       name: "api",
@@ -165,15 +299,34 @@ describe("generateStartupScript", () => {
     });
 
     const script = generateStartupScript(plan)!;
-    // Base images ship their own low-numbered accounts; remapping must stay
-    // best-effort so startup never aborts on a taken uid or gid.
-    expect(script).toContain(
-      "biodome: WARNING: gid $BIODOME_RUNTIME_GID is taken by $mapped_group; keeping built-in group id",
-    );
-    expect(script).toContain(
-      "biodome: WARNING: uid $BIODOME_RUNTIME_UID is taken by $mapped_user; keeping built-in user id",
-    );
-    expect(script).toContain('mapped_group=$(getent group "$BIODOME_RUNTIME_GID" | cut -d: -f1)');
+    expect(script).toContain('groupmod -o -g "$BIODOME_RUNTIME_GID" biodome');
+    expect(script).toContain('usermod -o -u "$BIODOME_RUNTIME_UID" biodome');
+    expect(script).not.toContain("keeping built-in");
+    expect(script).toContain("runtime mapping conflicts with isolated identity biodome-mcp");
+    const validation = generatedSection(script, "for mapped_id", "done") + "\ndone";
+    for (const invalid of ["0", "00", "-1", "1;echo unsafe", "abc", "999999999999999999999"]) {
+      expect(
+        executeShell(validation, {
+          ...process.env,
+          BIODOME_RUNTIME_UID: invalid,
+          BIODOME_RUNTIME_GID: "1000",
+        }).status,
+      ).toBe(1);
+      expect(
+        executeShell(validation, {
+          ...process.env,
+          BIODOME_RUNTIME_UID: "1000",
+          BIODOME_RUNTIME_GID: invalid,
+        }).status,
+      ).toBe(1);
+    }
+    expect(
+      executeShell(validation, {
+        ...process.env,
+        BIODOME_RUNTIME_UID: "1000",
+        BIODOME_RUNTIME_GID: "1000",
+      }).status,
+    ).toBe(0);
   });
 
   it("grants access with mode changes only, never recursive chown of the runtime tree", () => {
@@ -197,10 +350,24 @@ describe("generateStartupScript", () => {
       'install -d -o "$BIODOME_RUNTIME_UID" -g "$BIODOME_RUNTIME_GID" -m 0750 /home/biodome',
     );
     // Never a recursive ownership change of generated or host trees.
-    expect(script).not.toContain("chown -R");
+    expect(script).not.toContain("chown -Rh");
     expect(script).toContain(
       "biodome: WARNING: set BIODOME_RUNTIME_UID/BIODOME_RUNTIME_GID to this repository owner ids",
     );
+  });
+
+  it("repairs declared dependency caches without touching source trees", () => {
+    const plan = localPlan("cache-app");
+    plan.build.nodeModulesVolume = true;
+    const script = generateStartupScript(plan)!;
+    expect(script).toContain(
+      'chown -Rh "$BIODOME_RUNTIME_UID:$BIODOME_RUNTIME_GID" /workspace/node_modules',
+    );
+    expect(script).not.toMatch(/chown -R[^\n]* \/workspace(?:\s|$)/);
+    expect(script).not.toContain(
+      'chown -Rh "$BIODOME_RUNTIME_UID:$BIODOME_RUNTIME_GID" /workspace/.venv',
+    );
+    expect(script).toContain('wait "$idle_pid"');
   });
 
   it("prepares direct FUSE mount points for the mount identity", () => {
@@ -240,7 +407,7 @@ describe("generateStartupScript", () => {
     const script = generateStartupScript(plan)!;
     expect(script).toContain("touch /workspace/.biodome-build/ready");
     expect(script).toContain('if [ "${1:-}" = "--job" ]; then');
-    expect(script).toContain("exec sleep infinity");
+    expect(script).toContain('wait "$idle_pid"');
   });
 
   it("starts and health-checks bootstrap processes before pre-start hooks", () => {
@@ -354,7 +521,7 @@ describe("generateStartupScript", () => {
     });
 
     const script = generateStartupScript(plan)!;
-    const hook = generatedSection(script, 'echo "[hook] flaky"', "exec sleep infinity");
+    const hook = generatedSection(script, 'echo "[hook] flaky"', "# Wait for an idle child");
     const result = executeShell(hook, { ...process.env, PATH: "/nonexistent" });
 
     expect(result.status).toBe(1);
@@ -374,7 +541,7 @@ describe("generateStartupScript", () => {
     });
 
     const script = generateStartupScript(plan)!;
-    const hook = generatedSection(script, 'echo "[hook] setup"', "exec sleep infinity");
+    const hook = generatedSection(script, 'echo "[hook] setup"', "# Wait for an idle child");
     const result = executeShell(hook, { ...process.env, PATH: "/nonexistent" });
 
     expect(result.status).toBe(1);

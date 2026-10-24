@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as driverKit from "../../runtime/driver-kit.js";
 import {
   buildSbxCreateArgs,
   buildSbxExecArgs,
@@ -103,6 +104,60 @@ describe("parseSbxListOutput", () => {
 });
 
 describe("Docker Sandbox capabilities", () => {
+  it("executes as the guest workload user and enforces timeout inside that container", async () => {
+    const capture = vi
+      .spyOn(driverKit, "captureTimedExec")
+      .mockReturnValue(Effect.succeed({ exitCode: 0, stdout: "ok", stderr: "", durationMs: 1 }));
+    try {
+      await Effect.runPromise(
+        dockerSandboxDriver
+          .exec({
+            rootDir: "/project",
+            outputDir: "/project/.biodome-build/targets/local",
+            plan: createPlan("test"),
+            target: { name: "local", driver: "docker-sandbox", options: {} },
+            deploymentId: "test-deploy",
+            command: ["node", "check.mjs"],
+            timeoutMs: 1500,
+            state: {
+              schemaVersion: 1,
+              target: "local",
+              driver: "docker-sandbox",
+              deploymentId: "test-deploy",
+              resourceIds: { sandbox: "sbx-id" },
+              createdAt: new Date().toISOString(),
+            },
+          })
+          .pipe(Effect.provide(NoOpEventStoreLive("test"))),
+      );
+      expect(capture).toHaveBeenCalledWith({
+        command: "sbx",
+        cwd: "/project",
+        timeoutMs: 1500,
+        args: [
+          "exec",
+          "sbx-id",
+          "docker",
+          "exec",
+          "--user",
+          "biodome",
+          "--env",
+          "HOME=/home/biodome",
+          "--workdir",
+          "/workspace",
+          "test-deploy-dev",
+          "timeout",
+          "--signal=TERM",
+          "--kill-after=5s",
+          "2s",
+          "node",
+          "check.mjs",
+        ],
+      });
+    } finally {
+      capture.mockRestore();
+    }
+  });
   it("advertises process signaling but not unenforced network policy", () => {
     expect(dockerSandboxDriver.capabilities.has("process.signal")).toBe(true);
     expect(dockerSandboxDriver.capabilities.has("network.policy")).toBe(false);

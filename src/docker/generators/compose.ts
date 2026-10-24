@@ -2,6 +2,7 @@ import { stringify } from "yaml";
 import { identitiesOf, type Plan } from "../../core/plan.js";
 import { isSecretArnReference } from "../../core/secrets.js";
 import { formatDuration, generatedRuntimeDir, parseDuration } from "./shell.js";
+import { needsStartupScript } from "./startup.js";
 
 interface ComposeService {
   image?: string;
@@ -21,6 +22,7 @@ interface ComposeService {
   healthcheck?: {
     test: string[];
     interval?: string;
+    start_interval?: string;
     timeout?: string;
     retries?: number;
     start_period?: string;
@@ -110,6 +112,19 @@ function devService(plan: Plan, paths: ComposePaths): ComposeService {
     working_dir: "/workspace",
     volumes: [`${paths.workspace ?? ".."}:/workspace`],
     networks: ["biodome"],
+    // Even a command-only environment must finish identity/cache initialization.
+    healthcheck: needsStartupScript(plan)
+      ? {
+          test: ["CMD-SHELL", `sh ${generatedRuntimeDir(plan)}/healthchecks/all.sh`],
+          interval: "1s",
+          // Probe every second while starting so readiness is not delayed by
+          // a slower steady-state cadence.
+          start_interval: "1s",
+          timeout: "3s",
+          retries: 60,
+          start_period: "1s",
+        }
+      : undefined,
   };
 
   const hasMountedCloudVolume = plan.runtime.volumes.some((v) => v.type !== "local" && !v.proxy);
@@ -207,6 +222,8 @@ function devService(plan: Plan, paths: ComposePaths): ComposeService {
 
       service.healthcheck = {
         test: ["CMD-SHELL", `sh ${generatedRuntimeDir(plan)}/healthchecks/all.sh`],
+        // Probe quickly during startup, then keep the process-declared cadence.
+        start_interval: "1s",
         interval: formatDuration(Math.min(...intervals)),
         timeout: formatDuration(
           Math.max(
@@ -218,7 +235,7 @@ function devService(plan: Plan, paths: ComposePaths): ComposeService {
         start_period: formatDuration(Math.max(...startPeriods)),
       };
     }
-  } else {
+  } else if (!needsStartupScript(plan)) {
     service.command = ["sleep", "infinity"];
   }
 

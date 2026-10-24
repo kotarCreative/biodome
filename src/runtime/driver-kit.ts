@@ -5,7 +5,45 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import { NodeRuntime } from "../core/runtime-node.js";
 import { RuntimeError } from "../core/errors.js";
 import type { Artifact, CommandResult } from "./driver.js";
-import { TIMEOUT_EXIT_CODE, assertProcessName, captureProcess, toRuntimeError } from "./proc.js";
+import { identitiesOf, type Plan } from "../core/plan.js";
+import {
+  TIMEOUT_EXIT_CODE,
+  assertProcessName,
+  captureProcess,
+  execArgsWithTimeout,
+  toRuntimeError,
+} from "./proc.js";
+
+export function workloadUser(plan: Plan): string {
+  const identity = identitiesOf(plan).find((candidate) => candidate.role === "runtime");
+  if (!identity || identity.uid === 0 || identity.gid === 0 || identity.user === "root") {
+    throw new RuntimeError({ message: "Container execution requires a non-root runtime identity" });
+  }
+  return identity.user;
+}
+
+/** Used by both local drivers; privilege selection must precede the guest command. */
+export function workloadExecArgs(
+  deploymentId: string,
+  command: string[],
+  timeoutMs?: number,
+  user = "biodome",
+): string[] {
+  return execArgsWithTimeout(
+    [
+      "exec",
+      "--user",
+      user,
+      "--env",
+      `HOME=/home/${user}`,
+      "--workdir",
+      "/workspace",
+      `${deploymentId}-dev`,
+    ],
+    command,
+    timeoutMs,
+  );
+}
 
 /**
  * Composition helpers shared by runtime drivers that drive a container CLI

@@ -27,7 +27,7 @@ npx @kotarcreative/biodome down local
 - `biodome build <target>` — render and build a named target.
 - `biodome up <target>` — start a named target.
 - `biodome down <target>` — stop a named target.
-- `biodome exec <target> <command...>` — run a command inside a target.
+- `biodome exec <target> <command...>` — run a command as the non-root workload user, returning its output and failing on nonzero exit. Place Biodome options before the target; flags after it belong to the guest command (for example, `biodome --profile qa exec local node --version`). Use `biodome help exec` for command help.
 - `biodome shell <target>` — open an interactive shell in a running Compose environment.
 - `biodome plan <target> <action> [--json]` — inspect an action and preflight provider requirements without starting anything.
 - `biodome profiles [--json]` — list named setups; use `--profile <name>` on environment and action commands.

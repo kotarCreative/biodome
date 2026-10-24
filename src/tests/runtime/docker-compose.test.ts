@@ -18,6 +18,12 @@ describe("buildDockerExecArgs", () => {
   it("preserves normal docker exec arguments", () => {
     expect(buildDockerExecArgs("test-deploy", ["echo", "hello"])).toEqual([
       "exec",
+      "--user",
+      "biodome",
+      "--env",
+      "HOME=/home/biodome",
+      "--workdir",
+      "/workspace",
       "test-deploy-dev",
       "echo",
       "hello",
@@ -27,6 +33,12 @@ describe("buildDockerExecArgs", () => {
   it("enforces timed commands inside the container", () => {
     expect(buildDockerExecArgs("test-deploy", ["echo", "hello"], 1_500)).toEqual([
       "exec",
+      "--user",
+      "biodome",
+      "--env",
+      "HOME=/home/biodome",
+      "--workdir",
+      "/workspace",
       "test-deploy-dev",
       "timeout",
       "--signal=TERM",
@@ -58,6 +70,7 @@ describe("buildDockerExecArgs", () => {
           .pipe(Effect.provide(NoOpEventStoreLive())),
       );
       expect(capture).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 3000 }));
+      expect(capture.mock.calls[0][0].args).toContain("--user");
       expect(result.timedOut).toBe(true);
     } finally {
       capture.mockRestore();

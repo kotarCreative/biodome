@@ -5,6 +5,7 @@ import { createProgram } from "../../cli/program.js";
 import type { ProgramDependencies } from "../../cli/program.js";
 import type { SandboxError } from "../../core/errors.js";
 import { RuntimeError } from "../../core/errors.js";
+import { ProfileSelection } from "../../core/profiles.js";
 
 function exitOverrides(command: Command): Command {
   command.exitOverride();
@@ -21,6 +22,83 @@ function testProgram(workflows: NonNullable<ProgramDependencies["workflows"]>) {
 }
 
 describe("CLI program parsing", () => {
+  it("forwards complete executable names and argument arrays to exec", async () => {
+    const exec = vi.fn(() => Effect.succeed({ message: "completed" }));
+    const { program } = testProgram({ exec });
+    await program.parseAsync([
+      "node",
+      "biodome",
+      "--no-events",
+      "exec",
+      "local",
+      "node",
+      "-e",
+      "console.log('literal argument')",
+      "--help",
+    ]);
+    expect(exec).toHaveBeenCalledWith("/project", "local", [
+      "node",
+      "-e",
+      "console.log('literal argument')",
+      "--help",
+    ]);
+  });
+
+  it("does not interpret guest version and profile flags as Biodome options", async () => {
+    const exec = vi.fn(() => Effect.succeed({ message: "completed" }));
+    const { program } = testProgram({ exec });
+    await exitOverrides(program).parseAsync([
+      "node",
+      "biodome",
+      "--no-events",
+      "exec",
+      "local",
+      "tool",
+      "--version",
+      "--profile",
+      "browser-profile",
+    ]);
+    expect(exec).toHaveBeenCalledWith("/project", "local", [
+      "tool",
+      "--version",
+      "--profile",
+      "browser-profile",
+    ]);
+  });
+
+  it("supports global options after ordinary subcommands and an exec separator", async () => {
+    const selected: (string | undefined)[] = [];
+    const { program } = testProgram({
+      build: () =>
+        Effect.gen(function* () {
+          const selection = yield* Effect.serviceOption(ProfileSelection);
+          selected.push(selection._tag === "Some" ? selection.value.name : undefined);
+          return { message: "built" };
+        }),
+    });
+    await program.parseAsync([
+      "node",
+      "biodome",
+      "build",
+      "local",
+      "--profile",
+      "qa",
+      "--no-events",
+    ]);
+    expect(selected).toEqual(["qa"]);
+    const exec = vi.fn(() => Effect.succeed({ message: "completed" }));
+    await testProgram({ exec }).program.parseAsync([
+      "node",
+      "biodome",
+      "--no-events",
+      "exec",
+      "local",
+      "--",
+      "node",
+      "--version",
+    ]);
+    expect(exec).toHaveBeenCalledWith("/project", "local", ["node", "--version"]);
+  });
   it("passes build target arguments to the build workflow", async () => {
     const build = vi.fn(() => Effect.succeed({ message: "built" }));
     const { program, run } = testProgram({ build });

@@ -4,7 +4,6 @@ import { systemUserForService } from "../../core/services.js";
 import {
   assertIdentifier,
   generatedRuntimeDir,
-  parseDuration,
   shellQuote,
   SUPERVISOR_LOG_DIR_ENV,
   supervisorLogDir,
@@ -113,19 +112,28 @@ export function generateSupervisordConf(plan: Plan): string {
     lines.push(`user=${shellQuote(supervisorUser(plan, proc))}`);
     lines.push("autostart=false");
     lines.push("autorestart=true");
+    // npm, shells, and other launchers must not leave children holding their ports.
+    lines.push("stopasgroup=true");
+    lines.push("killasgroup=true");
     lines.push("startretries=10");
     lines.push(`stdout_logfile=${logDir}/${proc.name}.log`);
     lines.push(`stderr_logfile=${logDir}/${proc.name}.log`);
     // Expose the log dir to managed processes so the biodome-mcp server can
     // resolve the same paths for get_logs without importing generator code.
-    const envVars = sortEnv({ ...proc.environment, [SUPERVISOR_LOG_DIR_ENV]: logDir });
+    const identity = identitiesOf(plan).find(
+      (candidate) => candidate.user === supervisorUser(plan, proc),
+    );
+    const envVars = sortEnv({
+      ...(identity ? { HOME: `/home/${identity.user}` } : {}),
+      ...proc.environment,
+      [SUPERVISOR_LOG_DIR_ENV]: logDir,
+    });
     lines.push(
       `environment=${envVars.map(([k, v]) => `${k}=${supervisordEnvValue(v)}`).join(",")}`,
     );
     lines.push("");
 
     if (proc.healthCheck) {
-      const startPeriod = proc.healthCheck.startPeriod || "5s";
       const monitorScript = shellQuote(
         `${generatedRuntimeDir(plan)}/healthchecks/${proc.name}-monitor.sh`,
       );
@@ -134,7 +142,10 @@ export function generateSupervisordConf(plan: Plan): string {
       lines.push("user=root");
       lines.push("autostart=false");
       lines.push("autorestart=true");
-      lines.push(`startsecs=${Math.ceil(parseDuration(startPeriod, 5))}`);
+      // Monitor scripts sleep their own startPeriod before the first probe.
+      // Qualifying them again makes `supervisorctl start all` block for that
+      // period, delaying readiness without improving crash detection.
+      lines.push("startsecs=0");
       lines.push(`stdout_logfile=${logDir}/${proc.name}-healthcheck.log`);
       lines.push(`stderr_logfile=${logDir}/${proc.name}-healthcheck.log`);
       lines.push("");

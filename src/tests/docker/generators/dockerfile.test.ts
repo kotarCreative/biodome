@@ -37,10 +37,16 @@ describe("generateDockerfile", () => {
     expect(dockerfile).not.toContain('CMD ["bash"]');
   });
 
-  it("does not include bash CMD when no daemon processes exist", () => {
+  it("initializes the runtime identity even without daemon processes", () => {
     const plan = createPlan("my-app");
+    plan.deployment = {
+      target: { name: "local", driver: "docker-compose", options: {} },
+      deploymentId: "test-local",
+    };
     const dockerfile = generateDockerfile(plan);
-    expect(dockerfile).toContain('CMD ["bash"]');
+    expect(dockerfile).toContain(
+      'CMD ["sh", "/workspace/.biodome-build/targets/local/startup.sh"]',
+    );
   });
 
   it("creates non-root runtime identities with stable uid and gid defaults", () => {
@@ -66,10 +72,15 @@ describe("generateDockerfile", () => {
     expect(dockerfile).toContain("adduser biodome-mcp biodome");
   });
 
-  it("keeps interactive sessions non-root when no lifecycle startup is needed", () => {
-    const dockerfile = generateDockerfile(createPlan("my-app"));
-    expect(dockerfile).toContain("USER biodome");
-    expect(dockerfile.indexOf("USER biodome")).toBeLessThan(dockerfile.indexOf('CMD ["bash"]'));
+  it("uses startup initialization for command-only environments too", () => {
+    const plan = createPlan("my-app");
+    plan.deployment = {
+      target: { name: "local", driver: "docker-compose", options: {} },
+      deploymentId: "test-local",
+    };
+    const dockerfile = generateDockerfile(plan);
+    expect(dockerfile).not.toContain("USER biodome");
+    expect(dockerfile).toContain("startup.sh");
   });
 
   it("stays root only for lifecycle initialization when managed processes exist", () => {

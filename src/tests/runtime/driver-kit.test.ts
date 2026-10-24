@@ -9,10 +9,41 @@ import {
   collectArtifactsByCopying,
   supervisordLogFile,
   supervisorctlArgs,
+  workloadUser,
+  workloadExecArgs,
 } from "../../runtime/driver-kit.js";
+import { createPlan } from "../../core/plan.js";
 
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+
+describe("workload execution identity", () => {
+  it("uses the plan's runtime account rather than an image's default user", () => {
+    const plan = createPlan("custom");
+    const runtime = plan.runtime.identities.find((identity) => identity.role === "runtime");
+    if (!runtime) throw new Error("missing fixture runtime identity");
+    runtime.user = "developer";
+    expect(workloadUser(plan)).toBe("developer");
+    expect(workloadExecArgs("deploy", ["echo", "x"], 1000, workloadUser(plan))).toEqual([
+      "exec",
+      "--user",
+      "developer",
+      "--env",
+      "HOME=/home/developer",
+      "--workdir",
+      "/workspace",
+      "deploy-dev",
+      "timeout",
+      "--signal=TERM",
+      "--kill-after=5s",
+      "1s",
+      "echo",
+      "x",
+    ]);
+    runtime.uid = 0;
+    expect(() => workloadUser(plan)).toThrow(/non-root runtime identity/);
+  });
+});
 
 describe("assertRelativeArtifactPath", () => {
   it("accepts relative workspace paths, including dot-prefixed names", () => {

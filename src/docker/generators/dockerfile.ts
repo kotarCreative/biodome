@@ -171,6 +171,12 @@ export function generateDockerfile(plan: Plan, options: DockerfileOptions = {}):
     lines.push("");
   }
 
+  lines.push(
+    "# Identity mapping and bounded non-root commands also work on Alpine bases.",
+    "RUN if command -v apk >/dev/null 2>&1; then apk add --no-cache shadow util-linux coreutils; fi",
+    "",
+  );
+
   lines.push(...identityCreationLines(identitiesOf(plan)));
   lines.push("");
 

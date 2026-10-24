@@ -11,11 +11,25 @@ Status: complete (implemented 2026-08). Priority: P1. Dependencies: Plans 01 and
   Creation falls back to busybox `addgroup`/`adduser` on alpine-style bases.
 - The startup script maps the runtime identity onto the workspace bind-mount
   owner via `BIODOME_RUNTIME_UID` / `BIODOME_RUNTIME_GID`. Local Compose flows
-  default the mapping to the invoking host user; id collisions with image
-  accounts warn instead of aborting startup. Access for non-root identities is
+  default the mapping to the invoking non-root host user. Ordinary base-image
+  accounts (for example `node` at UID 1000) may alias that host identity;
+  mapping to root or to another isolated Biodome/service identity is rejected.
+  Mapping fails closed when the image cannot perform it, rather than leaving
+  supervisor, hooks, cache ownership, and exec on different numeric identities.
+  Access for non-root identities is
   granted with mode changes only (`a+rX` on the generated tree including its
   0700 ancestors, group-shared writable state for logs and harness homes) —
-  never a recursive chown of possibly host-owned files.
+  never a recursive chown of source files. Only declared managed dependency
+  caches receive recursive, symlink-safe ownership repair.
+- Local Compose and Docker Sandbox `exec`/actions select the plan's named
+  runtime user explicitly, including its HOME and workspace. Timeout enforcement
+  occurs inside the workload container. Root remains reserved for initialization
+  and infrastructure controls, not user commands.
+- Command-only environments also perform identity initialization. Aggregate
+  health checks require the startup readiness marker before a target is reusable.
+- Supervisor stops and kills the complete process group, so restarting launchers
+  such as npm cannot leave orphaned children holding application ports. Managed
+  Biodome identities receive their own HOME instead of inheriting `/root`.
 - Process environments are scoped by default; sharing with the global runtime
   environment requires `mergeEnv: true`.
 - Supervisor assigns explicit `user=` per program category: user workloads run
@@ -32,8 +46,8 @@ Status: complete (implemented 2026-08). Priority: P1. Dependencies: Plans 01 and
   deterministic residual-risk warning when enabled.
 - `--allow-other` was removed unconditionally; no tested workflow needed it, so
   no typed option exists.
-- Hooks run under `setpriv` as the mapped runtime identity (with a loud
-  fallback warning where setpriv is unavailable); lifecycle init stays
+- Hooks run under `setpriv` as the mapped runtime identity (failing closed
+  where setpriv is unavailable); lifecycle init stays
   root-only inside the generated startup script.
 - Language runtimes moved out of `/root` so non-root users can execute them:
   pyenv installs to `/opt/pyenv`; rustup uses `/usr/local/rustup` and

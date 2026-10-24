@@ -61,11 +61,14 @@ function aggregateHealthCheckScript(plan: Plan): string {
   const checks = daemonProcesses
     .filter((p) => p.healthCheck)
     .map((p) => `sh ${shellQuote(`${generatedRuntimeDir(plan)}/healthchecks/${p.name}.sh`)}`);
-  if (checks.length === 0) {
-    return ["#!/bin/sh", "# Auto-generated aggregate health check", "exit 0"].join("\n") + "\n";
-  }
   return (
-    ["#!/bin/sh", "# Auto-generated aggregate health check", "set -e", ...checks].join("\n") + "\n"
+    [
+      "#!/bin/sh",
+      "# Auto-generated aggregate health check",
+      "set -e",
+      `test -f ${shellQuote(`${generatedRuntimeDir(plan)}/ready`)}`,
+      ...checks,
+    ].join("\n") + "\n"
   );
 }
 

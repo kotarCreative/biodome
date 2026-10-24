@@ -1,5 +1,6 @@
 import { identitiesOf, type Plan, type Process, type RuntimeIdentity } from "../../core/plan.js";
 import { assertIdentifier, generatedRuntimeDir, shellQuote, supervisorLogDir } from "./shell.js";
+import { systemUserForService } from "../../core/services.js";
 
 function runtimeIdentityOf(plan: Plan): RuntimeIdentity {
   const identity = identitiesOf(plan).find((candidate) => candidate.role === "runtime");
@@ -17,7 +18,7 @@ function mountIdentityOf(plan: Plan): RuntimeIdentity | undefined {
  *  - map the runtime identity onto the workspace bind-mount owner via
  *    BIODOME_RUNTIME_UID/GID when shadow tools are available,
  *  - grant non-root identities read access to the generated tree with mode
- *    changes only (never recursive chown: the tree may be a host bind mount
+ *    changes only (never recursive chown of source: the tree may be a host bind mount
  *    whose ownership must stay with the host user),
  *  - make container-owned logs group-shared,
  *  - warn deterministically when the workspace remains unwritable.
@@ -32,37 +33,67 @@ function initializeIdentities(lines: string[], plan: Plan): void {
     "# Map the runtime identity onto the workspace owner without rebuilding.",
     `BIODOME_RUNTIME_UID="\${BIODOME_RUNTIME_UID:-${runtime.uid}}"`,
     `BIODOME_RUNTIME_GID="\${BIODOME_RUNTIME_GID:-${runtime.gid}}"`,
-    "if command -v groupmod >/dev/null 2>&1 && command -v usermod >/dev/null 2>&1; then",
-    '  mapped_group=$(getent group "$BIODOME_RUNTIME_GID" | cut -d: -f1)',
-    `  if [ -n "$mapped_group" ] && [ "$mapped_group" != "${runtime.group}" ]; then`,
-    `    echo "biodome: WARNING: gid $BIODOME_RUNTIME_GID is taken by $mapped_group; keeping built-in group id" >&2`,
-    `  elif [ "$(id -g ${q(runtime.user)})" != "$BIODOME_RUNTIME_GID" ]; then`,
-    `    groupmod -g "$BIODOME_RUNTIME_GID" ${q(runtime.group)}`,
+    'for mapped_id in "$BIODOME_RUNTIME_UID" "$BIODOME_RUNTIME_GID"; do',
+    '  case "$mapped_id" in ""|*[!0-9]*|0*) echo "biodome: runtime UID/GID must be positive non-root numeric IDs" >&2; exit 1 ;; esac',
+    '  if ! [ "$mapped_id" -le 2147483647 ] 2>/dev/null; then',
+    '    echo "biodome: runtime UID/GID is out of range" >&2; exit 1',
     "  fi",
-    '  mapped_user=$(getent passwd "$BIODOME_RUNTIME_UID" | cut -d: -f1)',
-    `  if [ -n "$mapped_user" ] && [ "$mapped_user" != "${runtime.user}" ]; then`,
-    `    echo "biodome: WARNING: uid $BIODOME_RUNTIME_UID is taken by $mapped_user; keeping built-in user id" >&2`,
-    `  elif [ "$(id -u ${q(runtime.user)})" != "$BIODOME_RUNTIME_UID" ]; then`,
-    `    usermod -u "$BIODOME_RUNTIME_UID" ${q(runtime.user)}`,
+    "done",
+  );
+
+  const protectedUsers = new Set([
+    ...identitiesOf(plan)
+      .filter((identity) => identity.role !== "runtime")
+      .map((identity) => identity.user),
+    ...plan.runtime.services
+      .map((service) => systemUserForService(service.type))
+      .filter((user) => user !== undefined),
+  ]);
+  for (const user of protectedUsers) {
+    lines.push(
+      `if [ "$BIODOME_RUNTIME_UID" = "$(id -u ${q(user)})" ] || [ "$BIODOME_RUNTIME_GID" = "$(id -g ${q(user)})" ]; then`,
+      `  echo ${q(`biodome: runtime mapping conflicts with isolated identity ${user}`)} >&2; exit 1`,
+      "fi",
+    );
+  }
+  lines.push(
+    `if [ "$(id -u ${q(runtime.user)})" != "$BIODOME_RUNTIME_UID" ] || [ "$(id -g ${q(runtime.user)})" != "$BIODOME_RUNTIME_GID" ]; then`,
+    "  if ! command -v groupmod >/dev/null 2>&1 || ! command -v usermod >/dev/null 2>&1; then",
+    "    echo 'biodome: cannot map runtime identity; image needs usermod and groupmod' >&2; exit 1",
     "  fi",
-    "else",
-    "  echo 'biodome: WARNING: usermod/groupmod unavailable; keeping built-in identity ids' >&2",
+    // Ordinary base-image accounts (e.g. node:slim's uid 1000) may alias the
+    // host owner. Never silently keep a different uid from the one used by
+    // hooks, caches and supervisors. Protected identities above cannot alias.
+    `  if [ "$(id -g ${q(runtime.user)})" != "$BIODOME_RUNTIME_GID" ]; then`,
+    `    groupmod -o -g "$BIODOME_RUNTIME_GID" ${q(runtime.group)}`,
+    "  fi",
+    `  if [ "$(id -u ${q(runtime.user)})" != "$BIODOME_RUNTIME_UID" ]; then`,
+    `    usermod -o -u "$BIODOME_RUNTIME_UID" ${q(runtime.user)}`,
+    "  fi",
     "fi",
+    `BIODOME_RUNTIME_UID="$(id -u ${q(runtime.user)})"`,
+    `BIODOME_RUNTIME_GID="$(id -g ${q(runtime.user)})"`,
+    `BIODOME_RUNTIME_HOME=${q(`/home/${runtime.user}`)}`,
+    "export BIODOME_RUNTIME_UID BIODOME_RUNTIME_GID BIODOME_RUNTIME_HOME",
     "",
     "# Narrow fixups: biodome-owned paths only, never an arbitrary host tree.",
     `install -d -o "$BIODOME_RUNTIME_UID" -g "$BIODOME_RUNTIME_GID" -m 0750 ${q(`/home/${runtime.user}`)}`,
   );
 
-  // Named cache volumes are docker-managed (not host bind mounts), so their
-  // top-level dirs can safely become runtime-owned; contents are created by
-  // the runtime identity itself.
-  lines.push(
-    "for cache_dir in node_modules .venv vendor; do",
-    '  if [ -d "/workspace/$cache_dir" ]; then',
-    `    chown "$BIODOME_RUNTIME_UID:$BIODOME_RUNTIME_GID" "/workspace/$cache_dir"`,
-    "  fi",
-    "done",
-  );
+  // Only declared Docker-managed cache volumes (or image-borne ECS caches).
+  // Do not follow dependency symlinks into the host workspace.
+  const caches = [
+    ...(plan.build.nodeModulesVolume ? ["node_modules"] : []),
+    ...(plan.build.venvVolume ? [".venv"] : []),
+    ...(plan.build.vendorVolume ? ["vendor"] : []),
+  ];
+  for (const cache of caches) {
+    lines.push(
+      `if [ -d /workspace/${cache} ]; then`,
+      `  chown -Rh "$BIODOME_RUNTIME_UID:$BIODOME_RUNTIME_GID" /workspace/${cache}`,
+      "fi",
+    );
+  }
 
   // Read access for every identity via modes alone: no ownership changes on
   // possibly host-owned files. Intermediate directories are rendered 0700, so
@@ -129,12 +160,14 @@ function hookCommand(hook: Process): string {
   // Hooks are user-controlled workloads: run them as the mapped runtime
   // identity instead of root. Root startup must fail closed when the image
   // cannot perform the identity transition. HOME is pointed at the runtime
-  // identity's passwd entry (startup still runs with HOME=/root), so
+  // named identity's home (numeric IDs can alias base-image accounts), so
   // HOME-sensitive tools such as git do not read or warn about /root/.config.
   return `(
+  # This hook's subshell must not run the container parent's EXIT handler.
+  trap - EXIT
   cd ${workingDir} || exit 1
   if command -v setpriv >/dev/null 2>&1; then
-    hook_home="$(getent passwd "$BIODOME_RUNTIME_UID" | cut -d: -f6)"
+    hook_home="$BIODOME_RUNTIME_HOME"
     setpriv --reuid="$BIODOME_RUNTIME_UID" --regid="$BIODOME_RUNTIME_GID" --clear-groups env \\
       "HOME=\${hook_home:-/root}" \\
       ${invocation}
@@ -166,6 +199,31 @@ function emitHooks(lines: string[], hooks: Process[]): void {
 const SUPERVISOR_READY_TIMEOUT_SECONDS = 60;
 const BOOTSTRAP_HEALTH_TIMEOUT_SECONDS = 300;
 const WAIT_POLL_INTERVAL = "0.1";
+
+/** PID 1 must catch Docker's stop signal, forward it, and reap its children. */
+function shutdownHandlers(lines: string[], plan: Plan): void {
+  lines.push(
+    "# Forward container shutdown to managed children before PID 1 exits.",
+    "supervisord_pid=",
+    "idle_pid=",
+    "shutdown_children() {",
+    "  trap '' TERM INT",
+    `  rm -f ${shellQuote(`${generatedRuntimeDir(plan)}/ready`)} || true`,
+    '  for child_pid in "$supervisord_pid" "$idle_pid"; do',
+    '    if [ -n "$child_pid" ]; then kill -TERM "$child_pid" 2>/dev/null || true; fi',
+    "  done",
+    '  for child_pid in "$supervisord_pid" "$idle_pid"; do',
+    '    if [ -n "$child_pid" ]; then wait "$child_pid" 2>/dev/null || true; fi',
+    "  done",
+    "  supervisord_pid=",
+    "  idle_pid=",
+    "}",
+    "trap 'exit 0' TERM INT",
+    // Also stop children on startup failure, retaining the original exit status.
+    "trap shutdown_children EXIT",
+    "",
+  );
+}
 
 /** Emits a wall-clock-bounded wait whose individual probes cannot hang past the deadline. */
 function boundedWait(
@@ -248,7 +306,7 @@ function emitJobMode(lines: string[], plan: Plan, shutdownSupervisor: boolean): 
     "  fi",
     "  job_status=0",
     "  if command -v setpriv >/dev/null 2>&1; then",
-    '    setpriv --reuid="$BIODOME_RUNTIME_UID" --regid="$BIODOME_RUNTIME_GID" --clear-groups "$@" || job_status=$?',
+    '    setpriv --reuid="$BIODOME_RUNTIME_UID" --regid="$BIODOME_RUNTIME_GID" --clear-groups env "HOME=$BIODOME_RUNTIME_HOME" "$@" || job_status=$?',
     "  else",
     "    echo 'biodome: setpriv unavailable; refusing to run a job as root' >&2",
     "    job_status=1",
@@ -258,6 +316,7 @@ function emitJobMode(lines: string[], plan: Plan, shutdownSupervisor: boolean): 
     lines.push(
       `  supervisorctl -c ${shellQuote(`${generatedRuntimeDir(plan)}/supervisord.conf`)} shutdown >/dev/null 2>&1 || true`,
       '  wait "$supervisord_pid" || true',
+      "  supervisord_pid=",
     );
   }
   lines.push('  exit "$job_status"', "fi", "");
@@ -265,11 +324,15 @@ function emitJobMode(lines: string[], plan: Plan, shutdownSupervisor: boolean): 
 
 /** Whether this plan needs the generated container startup entrypoint. */
 export function needsStartupScript(plan: Plan): boolean {
-  return plan.runtime.processes.some(
-    (process) =>
-      process.mode === "daemon" ||
-      (process.mode === "oneshot" &&
-        (process.startOn === "start.pre" || process.startOn === "start.post")),
+  return (
+    plan.deployment?.target.driver === "docker-compose" ||
+    plan.deployment?.target.driver === "docker-sandbox" ||
+    plan.runtime.processes.some(
+      (process) =>
+        process.mode === "daemon" ||
+        (process.mode === "oneshot" &&
+          (process.startOn === "start.pre" || process.startOn === "start.post")),
+    )
   );
 }
 
@@ -290,13 +353,21 @@ export function generateStartupScript(plan: Plan): string | undefined {
     `rm -f ${shellQuote(`${generatedRuntimeDir(plan)}/ready`)}`,
     "",
   ];
+  shutdownHandlers(lines, plan);
   if (!hasDaemons) {
     initializeIdentities(lines, plan);
     emitHooks(lines, preHooks);
     emitHooks(lines, postHooks);
     lines.push(`touch ${shellQuote(`${generatedRuntimeDir(plan)}/ready`)}`, "");
     emitJobMode(lines, plan, false);
-    lines.push("exec sleep infinity", "");
+    lines.push(
+      "# Wait for an idle child without hiding signals from PID 1.",
+      "sleep infinity &",
+      "idle_pid=$!",
+      'wait "$idle_pid"',
+      "idle_pid=",
+      "",
+    );
     return lines.join("\n");
   }
 
@@ -313,6 +384,13 @@ export function generateStartupScript(plan: Plan): string | undefined {
   emitHooks(lines, postHooks);
   lines.push(`touch ${shellQuote(`${generatedRuntimeDir(plan)}/ready`)}`, "");
   emitJobMode(lines, plan, true);
-  lines.push('wait "$supervisord_pid"', "");
+  lines.push(
+    "# Wait for Supervisor, preserving failures without killing a reaped PID.",
+    "supervisord_status=0",
+    'wait "$supervisord_pid" || supervisord_status=$?',
+    "supervisord_pid=",
+    'exit "$supervisord_status"',
+    "",
+  );
   return lines.join("\n");
 }

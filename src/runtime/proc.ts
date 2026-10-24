@@ -89,10 +89,18 @@ function mergedEnv(env: Record<string, string> | undefined) {
  */
 export function hostIdentityMappingEnv(): Record<string, string> {
   const env: Record<string, string> = {};
-  if (process.env.BIODOME_RUNTIME_UID === undefined && typeof process.getuid === "function") {
+  if (
+    process.env.BIODOME_RUNTIME_UID === undefined &&
+    typeof process.getuid === "function" &&
+    process.getuid() !== 0
+  ) {
     env.BIODOME_RUNTIME_UID = String(process.getuid());
   }
-  if (process.env.BIODOME_RUNTIME_GID === undefined && typeof process.getgid === "function") {
+  if (
+    process.env.BIODOME_RUNTIME_GID === undefined &&
+    typeof process.getgid === "function" &&
+    process.getgid() !== 0
+  ) {
     env.BIODOME_RUNTIME_GID = String(process.getgid());
   }
   return env;

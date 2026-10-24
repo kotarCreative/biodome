@@ -326,13 +326,26 @@ export function execWorkflow(
     const input = operationInputWithState(operation);
     yield* assertProfileState(operation.plan, input.state);
     yield* assertProfileManifest(operation.plan, input.buildManifest);
-    yield* instrumentOperation(
+    const result = yield* instrumentOperation(
       store,
       scope,
       "exec",
       commandMetadata(command),
       operation.driver.exec({ ...input, command }),
     );
+    yield* Effect.sync(() => {
+      process.stdout.write(result.stdout);
+      process.stderr.write(result.stderr);
+    });
+    if (result.exitCode !== 0 || result.timedOut) {
+      return yield* new RuntimeError({
+        message: result.timedOut
+          ? "Command timed out"
+          : `Command failed with exit code ${result.exitCode}`,
+        exitCode: result.exitCode,
+        timedOut: result.timedOut,
+      });
+    }
     return { message: `Command completed on target "${targetName}"` };
   }).pipe(Effect.scoped);
 }
@@ -449,11 +462,12 @@ export function statusWorkflow(
       {},
       operation.driver.status(input),
     );
+    let processStatus: string | undefined;
     if (
       operation.driver.capabilities.has("process.status") &&
       supportsInplaceExec(operation.driver)
     ) {
-      yield* instrumentOperation(
+      const result = yield* instrumentOperation(
         store,
         scope,
         "exec",
@@ -470,9 +484,11 @@ export function statusWorkflow(
           command: ["supervisorctl", "-c", operation.layout.container.supervisordConfig, "status"],
         }),
       );
+      processStatus = result.stdout || result.stderr;
     }
     return {
       status,
+      ...(processStatus ? { processStatus } : {}),
       hasProcessStatus:
         operation.driver.capabilities.has("process.status") &&
         supportsInplaceExec(operation.driver),

@@ -292,6 +292,30 @@ describe("target workflows", () => {
         ),
       );
       expect(exec).toHaveBeenCalledOnce();
+      const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      try {
+        exec.mockReturnValue(
+          Effect.succeed({
+            exitCode: 17,
+            stdout: "partial evidence\n",
+            stderr: "failed check\n",
+            durationMs: 1,
+          }),
+        );
+        await expect(
+          Effect.runPromise(
+            execWorkflow(rootDir, "local", ["false"], dependencies(inPlace)).pipe(
+              Effect.provide(NoOpEventStoreLive("test")),
+            ),
+          ),
+        ).rejects.toThrow(/exit code 17/);
+        expect(stdout).toHaveBeenCalledWith("partial evidence\n");
+        expect(stderr).toHaveBeenCalledWith("failed check\n");
+      } finally {
+        stdout.mockRestore();
+        stderr.mockRestore();
+      }
     } finally {
       rmSync(rootDir, { recursive: true, force: true });
     }

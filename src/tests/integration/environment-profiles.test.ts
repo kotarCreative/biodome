@@ -119,8 +119,8 @@ function run(
     expect(JSON.parse(stale.stdout).error).toContain("configuration changed");
     const staleExec = await run(root, [
       "exec",
-      "local",
       "--profile",
+      "local",
       "local",
       "--",
       "node",

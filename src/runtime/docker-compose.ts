@@ -12,6 +12,8 @@ import {
   collectArtifactsByCopying,
   supervisordLogFile,
   supervisorctlArgs,
+  workloadUser,
+  workloadExecArgs,
 } from "./driver-kit.js";
 import type {
   Artifact,
@@ -42,7 +44,6 @@ import { runtimeLayout } from "./layout.js";
 import { renderCommonArtifacts, writeArtifacts } from "./artifacts.js";
 import {
   captureCommandOutput,
-  execArgsWithTimeout,
   hostIdentityMappingEnv,
   imageRefFromLocalDigest,
   runProcess,
@@ -61,8 +62,9 @@ export function buildDockerExecArgs(
   deploymentId: string,
   command: string[],
   timeoutMs?: number,
+  user = "biodome",
 ): string[] {
-  return execArgsWithTimeout(["exec", `${deploymentId}-dev`], command, timeoutMs);
+  return workloadExecArgs(deploymentId, command, timeoutMs, user);
 }
 
 export function buildDockerShellArgs(deploymentId: string, user: string, tty: boolean): string[] {
@@ -267,7 +269,12 @@ export const dockerComposeDriver: RuntimeDriver &
   exec(
     input: RuntimeOperationInput & { command: string[]; timeoutMs?: number },
   ): Effect.Effect<CommandResult, RuntimeError, EventStore> {
-    const finalArgs = buildDockerExecArgs(input.deploymentId, input.command, input.timeoutMs);
+    const finalArgs = buildDockerExecArgs(
+      input.deploymentId,
+      input.command,
+      input.timeoutMs,
+      workloadUser(input.plan),
+    );
     return captureTimedExec({ command: "docker", args: finalArgs, timeoutMs: input.timeoutMs });
   },
 

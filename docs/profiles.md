@@ -54,7 +54,10 @@ biodome down local --profile staging
 ```
 
 `--profile` is an invocation-scoped global option: it works before or after the
-subcommand. It is not an action input and does not mutate `process.env`.
+subcommand. For `exec`, place Biodome options **before the target** (for example,
+`biodome exec --profile staging local node --version`); everything after the
+target is forwarded to the guest command without interpreting its flags.
+It is not an action input and does not mutate `process.env`.
 The same selection applies to build/up/run/exec/shell/logs/status/restart/down.
 `profiles` lists declarations without importing feature modules. Explicit plan
 JSON includes the selected feature set and environment override declarations;

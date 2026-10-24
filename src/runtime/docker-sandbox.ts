@@ -7,6 +7,8 @@ import {
   collectArtifactsByCopying,
   supervisordLogFile,
   supervisorctlArgs,
+  workloadUser,
+  workloadExecArgs,
 } from "./driver-kit.js";
 import { RuntimeError } from "../core/errors.js";
 import { capabilitiesOf } from "../core/capabilities.js";
@@ -378,7 +380,7 @@ export const dockerSandboxDriver: RuntimeDriver &
       );
       const [ownerUid, ownerGid] = owner.trim().split(":");
       const identityEnv =
-        /^\d+$/.test(ownerUid ?? "") && /^\d+$/.test(ownerGid ?? "")
+        /^[1-9]\d*$/.test(ownerUid ?? "") && /^[1-9]\d*$/.test(ownerGid ?? "")
           ? [`BIODOME_RUNTIME_UID=${ownerUid}`, `BIODOME_RUNTIME_GID=${ownerGid}`]
           : [];
       yield* runProcess({
@@ -447,8 +449,17 @@ export const dockerSandboxDriver: RuntimeDriver &
     input: RuntimeOperationInput & { command: string[]; timeoutMs?: number },
   ): Effect.Effect<CommandResult, RuntimeError, EventStore> {
     const id = sandboxId(input);
-    const command = ["docker", "exec", `${input.deploymentId}-dev`, ...input.command];
-    const args = buildSbxExecArgs(id, command, input.timeoutMs);
+    // Enforce timeout inside the workload container, not around the host docker client.
+    const command = [
+      "docker",
+      ...workloadExecArgs(
+        input.deploymentId,
+        input.command,
+        input.timeoutMs,
+        workloadUser(input.plan),
+      ),
+    ];
+    const args = buildSbxExecArgs(id, command);
     return captureTimedExec({
       command: "sbx",
       args,

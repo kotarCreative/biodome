@@ -83,7 +83,7 @@ describe("generateSupervisordConf", () => {
 
     const conf = generateSupervisordConf(plan);
     expect(conf).toContain(
-      'environment=A_KEY="value",BIODOME_LOG_DIR="/workspace/.biodome-build/logs"',
+      'environment=A_KEY="value",BIODOME_LOG_DIR="/workspace/.biodome-build/logs",HOME="/home/biodome"',
     );
   });
 
@@ -215,6 +215,8 @@ describe("generateSupervisordConf", () => {
     const conf = generateSupervisordConf(plan);
     expect(conf).toContain("[program:django]\ncommand=python manage.py runserver");
     expect(conf).toContain("user=biodome");
+    expect(conf).toContain("stopasgroup=true\nkillasgroup=true");
+    expect(conf).toContain('HOME="/home/biodome"');
     // Only supervisord itself and biodome-owned health monitors may be root.
     const programSections = conf.split("[program:").slice(1);
     for (const section of programSections) {
@@ -330,5 +332,34 @@ describe("generateSupervisordConf", () => {
     expect(dbSection).not.toContain("startsecs=0");
     const webSection = conf.slice(conf.indexOf("[program:web]"));
     expect(webSection).not.toContain("startsecs=0");
+  });
+
+  it("does not let background health monitors delay readiness", () => {
+    const plan = createPlan("my-app");
+    plan.runtime.processes.push({
+      name: "web",
+      command: ["node", "server.js"],
+      ports: [],
+      environment: {},
+      mode: "daemon",
+      startOn: "start.post",
+      healthCheck: {
+        type: "http",
+        url: "http://localhost:3000/",
+        startPeriod: "30s",
+      },
+    });
+
+    const conf = generateSupervisordConf(plan);
+    const monitor = conf.slice(conf.indexOf("[program:web-healthcheck]"));
+    // The generated monitor script already sleeps startPeriod before probing;
+    // qualifying the program again blocks `supervisorctl start all`.
+    expect(monitor).toContain("startsecs=0");
+    expect(monitor).not.toContain("startsecs=30");
+    const workload = conf.slice(
+      conf.indexOf("[program:web]"),
+      conf.indexOf("[program:web-healthcheck]"),
+    );
+    expect(workload).not.toContain("startsecs=0");
   });
 });

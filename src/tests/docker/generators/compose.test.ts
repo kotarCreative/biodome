@@ -41,6 +41,10 @@ describe("generateCompose", () => {
     expect(compose).not.toMatch(/^\s+- \d+:\d+$/m);
     expect(compose).toContain("healthcheck:");
     expect(compose).toContain("sh /workspace/.biodome-build/healthchecks/all.sh");
+    // Fast probes while starting; the wait must not add a full process
+    // health-check interval after the app is already serving.
+    expect(compose).toContain("start_interval: 1s");
+    expect(compose).toContain("interval: 5s");
     expect(compose).not.toContain("sleep infinity");
     expect(compose).toContain("..:/workspace");
   });

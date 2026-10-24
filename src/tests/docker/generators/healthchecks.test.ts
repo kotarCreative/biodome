@@ -3,6 +3,11 @@ import { generateHealthcheckScripts } from "../../../docker/generators/healthche
 import { createPlan } from "../../../core/plan.js";
 
 describe("generateHealthcheckScripts", () => {
+  it("requires completed startup even when there are no daemons", () => {
+    const script = generateHealthcheckScripts(createPlan("command-only"))["all.sh"];
+    expect(script).toContain("set -e\ntest -f /workspace/.biodome-build/ready");
+    expect(script).not.toContain("exit 0");
+  });
   it("generates per-process checks, monitors, and an aggregate check", () => {
     const plan = createPlan("my-app");
     plan.runtime.processes.push({

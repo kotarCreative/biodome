@@ -69,7 +69,7 @@ export default function dev(ctx) {
   });
   ctx.addProcess({
     name: "fixture-daemon",
-    command: ["node", "src/daemon.mjs"],
+    command: ["npm", "run", "daemon"],
     healthCheck: {
       type: "http",
       url: "http://localhost:4317/health",
@@ -117,6 +117,7 @@ export default function reviewPr(ctx) {
         version: "1.0.0",
         private: true,
         type: "module",
+        scripts: { daemon: "node src/daemon.mjs" },
         dependencies: { picocolors: "1.1.1" },
       },
       null,
@@ -153,7 +154,7 @@ import { createServer } from "node:http";
 createServer((request, response) => {
   if (request.url === "/health") {
     response.writeHead(200, { "content-type": "text/plain" });
-    response.end("daemon-ready");
+    response.end("daemon-ready:" + process.pid + ":" + process.getuid());
     return;
   }
   response.writeHead(404);
@@ -162,6 +163,14 @@ createServer((request, response) => {
 `,
     "src/worker.mjs": `
 import { createServer } from "node:http";
+import { writeFileSync } from "node:fs";
+
+process.on("SIGTERM", () => {
+  setTimeout(() => {
+    writeFileSync("/workspace/worker-shutdown", "graceful");
+    process.exit(0);
+  }, 200);
+});
 
 // Proves supervisord started this daemon inside its workingDir: with a
 // misquoted directory value the spawn fails and this endpoint never answers.
@@ -175,7 +184,15 @@ createServer((request, response) => {
 `,
     "bin/check.mjs": `#!/usr/bin/env node
 import { readFile, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { accessSync, constants, mkdtempSync, rmSync } from "node:fs";
 import pc from "picocolors";
+
+if (process.getuid() === 0) throw new Error("action unexpectedly runs as root");
+if (process.env.HOME !== "/home/biodome") throw new Error("action HOME is not runtime-owned");
+for (const path of ["/workspace", "/workspace/node_modules", process.env.HOME]) accessSync(path, constants.W_OK);
+const cache = mkdtempSync("/workspace/node_modules/.write-check-");
+rmSync(cache, { recursive: true });
 
 if (JSON.parse(process.env.BIODOME_ACTION_INPUT).assignment !== ${JSON.stringify(PRIVATE_PROMPT)}) {
   throw new Error("Action input was not delivered");
@@ -192,15 +209,30 @@ if ((await readFile("/workspace/hook-marker", "utf8")) !== "hook-ready") {
 }
 
 let daemonReady = false;
+let daemonIdentity = "";
 for (let attempt = 0; attempt < 30; attempt += 1) {
   try {
     const response = await fetch("http://127.0.0.1:4317/health");
-    daemonReady = response.ok && (await response.text()) === "daemon-ready";
+    daemonIdentity = await response.text();
+    daemonReady = response.ok && daemonIdentity.startsWith("daemon-ready:");
   } catch {}
   if (daemonReady) break;
   await new Promise((resolve) => setTimeout(resolve, 200));
 }
 if (!daemonReady) throw new Error("managed daemon unavailable");
+if (!daemonIdentity.endsWith(":" + process.getuid())) throw new Error("daemon/action identity mismatch");
+execFileSync("supervisorctl", ["-c", "/workspace/.biodome-build/targets/local/supervisord.conf", "restart", "fixture-daemon"], { timeout: 30000 });
+let restarted = false;
+for (let attempt = 0; attempt < 30; attempt += 1) {
+  try {
+    const response = await fetch("http://127.0.0.1:4317/health");
+    const identity = await response.text();
+    restarted = response.ok && identity.startsWith("daemon-ready:") && identity !== daemonIdentity;
+  } catch {}
+  if (restarted) break;
+  await new Promise((resolve) => setTimeout(resolve, 200));
+}
+if (!restarted) throw new Error("restart left an orphaned child holding the old port");
 
 let workerCwd = "";
 for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -303,6 +335,27 @@ function removeComposeProject(rootDir: string): void {
   );
 }
 
+function expectGracefulStop(rootDir: string): void {
+  const name = `${deploymentId(PROJECT_NAME, TARGET_NAME, rootDir)}-dev`;
+  const start = performance.now();
+  const stopped = spawnSync("docker", ["stop", name], { encoding: "utf8", timeout: 20_000 });
+  expect(stopped.status, stopped.stderr).toBe(0);
+  // Docker's default grace period stays at ten seconds. This distinguishes
+  // genuine signal handling from simply shortening that period and force killing.
+  expect(performance.now() - start).toBeLessThan(5_000);
+  const inspected = spawnSync("docker", ["inspect", "--format", "{{json .State}}", name], {
+    encoding: "utf8",
+    timeout: 5_000,
+  });
+  expect(inspected.status, inspected.stderr).toBe(0);
+  expect(JSON.parse(inspected.stdout)).toMatchObject({
+    Running: false,
+    ExitCode: 0,
+    OOMKilled: false,
+  });
+  expect(existsSync(join(rootDir, ".biodome-build/targets/local/ready"))).toBe(false);
+}
+
 const describeDocker = hasDocker() ? describe : describe.skip;
 
 describeDocker("built CLI local task execution", () => {
@@ -328,10 +381,85 @@ describeDocker("built CLI local task execution", () => {
   });
 
   it(
+    "initializes a command-only workspace before non-root execution",
+    async () => {
+      fixtureRoot = join(tmpdir(), `biodome-command-only-${process.pid}-${Date.now()}`);
+      createFixture(fixtureRoot);
+      writeFixtureFile(
+        fixtureRoot,
+        ".biodome/features/dev.mjs",
+        `export default function dev(ctx) { ctx.addLanguage("node", { version: "20" }); }\n`,
+      );
+      writeFixtureFile(
+        fixtureRoot,
+        "bin/check.mjs",
+        `
+import { writeFileSync, accessSync, constants, mkdtempSync, rmSync } from "node:fs";
+if (process.getuid() === 0) throw new Error("command-only action is root");
+if (process.env.HOME !== "/home/biodome") throw new Error("incorrect HOME");
+for (const path of ["/workspace", "/workspace/node_modules", process.env.HOME]) accessSync(path, constants.W_OK);
+const cache = mkdtempSync("/workspace/node_modules/.write-check-");
+rmSync(cache, { recursive: true });
+writeFileSync("/workspace/review.md", "command-only-ready");
+`,
+      );
+      const up = spawnSync(
+        process.execPath,
+        [CLI_PATH, "--no-events", "up", TARGET_NAME, "--build"],
+        { cwd: fixtureRoot, encoding: "utf8", timeout: CLI_TIMEOUT_MS, maxBuffer: 1024 * 1024 },
+      );
+      expect(up.status, `${up.stdout}\n${up.stderr}`).toBe(0);
+      expectGracefulStop(fixtureRoot);
+      const result = await runCli(fixtureRoot);
+      expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+      const actionResult = JSON.parse(result.stdout);
+      expect(readFileSync(actionResult.artifacts[0].localPath, "utf8")).toBe("command-only-ready");
+      expect(existsSync(join(fixtureRoot, ".biodome-build/targets/local/state.json"))).toBe(false);
+    },
+    CLI_TIMEOUT_MS + 30_000,
+  );
+
+  it(
     "runs an ordinary action in the complete environment and returns only its artifact",
     async () => {
       fixtureRoot = join(tmpdir(), `biodome-local-task-${process.pid}-${Date.now()}`);
       createFixture(fixtureRoot);
+
+      const invoke = (args: string[]) =>
+        spawnSync(process.execPath, [CLI_PATH, "--no-events", ...args], {
+          cwd: fixtureRoot,
+          encoding: "utf8",
+          timeout: CLI_TIMEOUT_MS,
+          maxBuffer: 1024 * 1024,
+        });
+      const up = invoke(["up", TARGET_NAME, "--build"]);
+      expect(up.status, `${up.stdout}\n${up.stderr}`).toBe(0);
+      const exec = invoke([
+        "exec",
+        TARGET_NAME,
+        "node",
+        "-e",
+        "if(process.getuid()===0)process.exit(9);console.log('exec-nonroot:'+process.env.HOME)",
+      ]);
+      expect(exec.status, `${exec.stdout}\n${exec.stderr}`).toBe(0);
+      expect(exec.stdout).toContain("exec-nonroot:/home/biodome");
+      const version = invoke(["exec", TARGET_NAME, "node", "--version"]);
+      expect(version.status, `${version.stdout}\n${version.stderr}`).toBe(0);
+      expect(version.stdout).toMatch(/^v20\./);
+      const failedExec = invoke([
+        "exec",
+        TARGET_NAME,
+        "node",
+        "-e",
+        "console.log('partial-output');process.stderr.write('failed-check');process.exit(17)",
+      ]);
+      expect(failedExec.status).not.toBe(0);
+      expect(failedExec.stdout).toContain("partial-output");
+      expect(failedExec.stderr).toContain("failed-check");
+      expect(failedExec.stderr).toContain("exit code 17");
+
+      expectGracefulStop(fixtureRoot);
+      expect(readFileSync(join(fixtureRoot, "worker-shutdown"), "utf8")).toBe("graceful");
 
       const result = await runCli(fixtureRoot);
       const diagnostics = `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`;
